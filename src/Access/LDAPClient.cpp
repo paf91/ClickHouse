@@ -64,7 +64,7 @@ void LDAPClient::Params::updateHash(SipHash & hash) const
     ::updateHash(hash, bind_dn);
     ::updateHash(hash, user);
     ::updateHash(hash, password);
-    ::updateHash(hash, static_cast<int>(follow_referrals)); // Include referral behavior in the cache key
+    ::updateHash(hash, static_cast<int>(follow_referrals)); // Include follow referral behavior
 
     if (user_dn_detection)
         user_dn_detection->updateHash(hash);
@@ -247,16 +247,12 @@ bool LDAPClient::openConnection()
         handleError(ldap_set_option(handle, LDAP_OPT_PROTOCOL_VERSION, &value));
     }
 
-ifdef LDAP_OPT_REFERRALS
-   {
-   ifdef LDAP_OPT_ON
-       int referrals_opt = params.follow_referrals ? LDAP_OPT_ON : LDAP_OPT_OFF;
-   else
-       int referrals_opt = params.follow_referrals ? 1 : 0;
-   endif
-       handleError(ldap_set_option(handle, LDAP_OPT_REFERRALS, &referrals_opt));
-   }
-endif
+#ifdef LDAP_OPT_REFERRALS
+    handleError(ldap_set_option(
+        handle,
+        LDAP_OPT_REFERRALS,
+        params.follow_referrals ? LDAP_OPT_ON : LDAP_OPT_OFF));
+#endif
 
     handleError(ldap_set_option(handle, LDAP_OPT_RESTART, LDAP_OPT_ON));
 
