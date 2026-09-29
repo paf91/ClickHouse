@@ -80,6 +80,8 @@ namespace ProfileEvents
     extern const Event DistributedPlanRemoteTasks;
     extern const Event DistributedPlanLocalExecution;
     extern const Event DistributedPlanHostsUsed;
+    extern const Event DistributedPlanExchangeSinkEarlyCloses;
+    extern const Event DistributedPlanExchangeSourceEarlyCloses;
 }
 
 
@@ -440,6 +442,7 @@ private:
             if (exchange->isReaderDetached())
             {
                 LOG_TRACE(exchange->getLog(), "Closing input of exchange stream {}, reader detached", exchange->getStreamName());
+                ProfileEvents::increment(ProfileEvents::DistributedPlanExchangeSinkEarlyCloses);
                 input.close();
                 return Status::Finished;
             }
@@ -487,6 +490,7 @@ private:
             {
                 detach_notified = true;
                 LOG_TRACE(exchange->getLog(), "NoMoreDataNeeded from exchange stream {}, detaching reader", exchange->getStreamName());
+                ProfileEvents::increment(ProfileEvents::DistributedPlanExchangeSourceEarlyCloses);
                 exchange->detachReader();
             }
             return status;
