@@ -281,12 +281,6 @@ public:
         return reader_detached;
     }
 
-    /// Identifies one stream of an exchange, not the whole exchange: it is
-    /// `ExchangeStreamId::toString()`, so the buckets of one exchange have distinct names.
-    const String & getStreamName() const { return name; }
-
-    LoggerPtr getLog() const { return log; }
-
     /// Waits up to `timeout` for a chunk. Returns std::nullopt if nothing arrived in time.
     /// An empty chunk is the producer's end-of-data marker. Chunks queued before a cancel are
     /// still handed out; once a cancelled queue is empty, throws the cancellation reason.
@@ -441,7 +435,6 @@ private:
             /// data that nobody reads.
             if (exchange->isReaderDetached())
             {
-                LOG_TRACE(exchange->getLog(), "Closing input of exchange stream {}, reader detached", exchange->getStreamName());
                 ProfileEvents::increment(ProfileEvents::DistributedPlanExchangeSinkEarlyCloses);
                 input.close();
                 return Status::Finished;
@@ -489,7 +482,6 @@ private:
             if (status == Status::Finished && !finished && !detach_notified)
             {
                 detach_notified = true;
-                LOG_TRACE(exchange->getLog(), "NoMoreDataNeeded from exchange stream {}, detaching reader", exchange->getStreamName());
                 ProfileEvents::increment(ProfileEvents::DistributedPlanExchangeSourceEarlyCloses);
                 exchange->detachReader();
             }
