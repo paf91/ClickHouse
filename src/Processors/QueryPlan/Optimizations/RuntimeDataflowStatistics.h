@@ -21,11 +21,6 @@
 namespace DB
 {
 
-namespace ErrorCodes
-{
-extern const int BAD_ARGUMENTS;
-}
-
 class Aggregator;
 struct AggregatedDataVariants;
 
@@ -94,41 +89,34 @@ using ColumnCodecByName = UnorderedMapWithMemoryTracking<String, ColumnCodecs>;
 /// a type-specific codec may be applied to.
 bool isSerializedAsSingleStreamOfColumnType(const ISerialization & serialization, const DataTypePtr & type);
 
+/// Accumulates one execution's statistics and writes its single cache entry. It lives in the `.cpp`:
+/// nothing outside needs its layout.
+class RuntimeDataflowStatisticsCacheUpdaterImpl;
+
+/// A handle a plan step holds on the accumulator of the execution it belongs to. Several steps share one
+/// accumulator - the coordinated read, the boundary node whose output is measured, and the read's lazy half
+/// all record into the same entry - and each handle carries the role its own input reads play in it. The
+/// entry is written once, when the last handle is gone.
 class RuntimeDataflowStatisticsCacheUpdater
 {
     using ColumnSizeByName = std::unordered_map<std::string, ColumnSize>;
 
-    struct Statistics
+public:
+    /// Which bucket this handle's input reads belong to. Parallel replicas split only the coordinated read;
+    /// every other read of the subtree is performed by each replica in full.
+    enum class InputRole
     {
-        std::atomic_size_t counter{0};
-
-        std::mutex mutex;
-        size_t bytes TSA_GUARDED_BY(mutex) = 0;
-        size_t sample_bytes TSA_GUARDED_BY(mutex) = 0;
-        size_t compressed_bytes TSA_GUARDED_BY(mutex) = 0;
-        size_t elapsed_microseconds TSA_GUARDED_BY(mutex) = 0;
+        Coordinated,
+        Replicated,
     };
 
-public:
-    /// An updater for a read parallel replicas would *not* coordinate. It records into `primary`'s
-    /// replicated-bytes bucket and writes no cache entry of its own, so one execution still produces one
-    /// entry. Holding `primary` by shared pointer also orders the two: the entry is written by `primary`'s
-    /// destructor, which cannot run while any satellite is still alive.
+    /// A handle on a fresh accumulator, for the read parallel replicas would coordinate.
+    static std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater> createCoordinated(size_t cache_key, size_t total_rows_to_read);
+
+    /// Another handle on the same accumulator, for the reads parallel replicas would not split. One handle
+    /// serves all of them: their bytes accumulate into a single bucket either way.
     static std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>
-    makeReplicatedBytesSatellite(const std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater> & primary);
-
-    RuntimeDataflowStatisticsCacheUpdater(size_t cache_key_, size_t total_rows_to_read_)
-        : cache_key(cache_key_)
-        , total_rows_to_read(total_rows_to_read_)
-    {
-        if (cache_key == 0)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cache key for RuntimeDataflowStatisticsCacheUpdater cannot be zero");
-
-        if (total_rows_to_read == 0)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Total rows from storage cannot be zero");
-    }
-
-    ~RuntimeDataflowStatisticsCacheUpdater();
+    createForReplicatedReads(const std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater> & coordinated);
 
     void recordOutputChunk(const Chunk & chunk, const Block & header);
 
@@ -163,41 +151,13 @@ public:
         size_t read_bytes,
         std::optional<bool> & should_continue_sampling);
 
-    void markUnsupportedCase() { unsupported_case.store(true, std::memory_order_relaxed); }
+    void markUnsupportedCase();
 
 private:
-    static bool shouldSampleBlock(Statistics & statistics, size_t block_rows);
+    RuntimeDataflowStatisticsCacheUpdater(std::shared_ptr<RuntimeDataflowStatisticsCacheUpdaterImpl> impl_, InputRole role_);
 
-    /// `full_bytes` overrides the byte count taken from the columns, for callers whose columns
-    /// are only a sample of the dataflow being accounted.
-    static void
-    recordColumns(Statistics & statistics, size_t num_rows, const ColumnsWithTypeAndName & cols, std::optional<size_t> full_bytes = {});
-
-    const size_t cache_key = 0;
-    const size_t total_rows_to_read = 0;
-
-    std::atomic_bool unsupported_case{false};
-
-    enum InputStatisticsType
-    {
-        WithByteHint = 0,
-        WithoutByteHint = 1,
-        MaxInputType = 2,
-    };
-    std::array<Statistics, 2> input_bytes_statistics;
-    /// Filled by this updater's satellites, never by the updater itself.
-    std::array<Statistics, 2> replicated_bytes_statistics;
-    /// Set only on a satellite, and then it records into this updater instead of into itself.
-    std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater> replicated_bytes_primary;
-
-    enum OutputStatisticsType
-    {
-        AggregationState = 0,
-        AggregationKeys = 1,
-        OutputChunk = 2,
-        MaxOutputType = 3,
-    };
-    std::array<Statistics, 3> output_bytes_statistics;
+    const std::shared_ptr<RuntimeDataflowStatisticsCacheUpdaterImpl> impl;
+    const InputRole role;
 };
 
 using RuntimeDataflowStatisticsCacheUpdaterPtr = std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>;

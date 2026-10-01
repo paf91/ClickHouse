@@ -1007,7 +1007,7 @@ void considerEnablingParallelReplicas(
         || optimization_settings.automatic_parallel_replicas_mode == 2 // automatic_parallel_replicas_mode == 2 enforces statistics recollection
     )
     {
-        auto updater = std::make_shared<RuntimeDataflowStatisticsCacheUpdater>(single_replica_plan_node_hash, rows_to_read);
+        auto updater = RuntimeDataflowStatisticsCacheUpdater::createCoordinated(single_replica_plan_node_hash, rows_to_read);
         source_reading_step->setRuntimeDataflowStatisticsCacheUpdater(updater);
         corresponding_node_in_single_replica_plan->step->setRuntimeDataflowStatisticsCacheUpdater(updater);
         /// Share the updater with the lazy half of the same read so its bytes land in the same
@@ -1025,17 +1025,19 @@ void considerEnablingParallelReplicas(
         /// the parallel-replicas plan built to price it is discarded and never reads anything. Walking it
         /// too would also attach a satellite to its *clone* of the coordinated read, whose bytes are not
         /// replicated work at all.
+        /// One handle serves every read of the subtree that parallel replicas would not split: their bytes
+        /// go to the same bucket of the same entry.
+        auto replicated_reads_updater = RuntimeDataflowStatisticsCacheUpdater::createForReplicatedReads(updater);
         for (auto * read_step : collectReadStepsOfConstPlan(*corresponding_node_in_single_replica_plan))
         {
-            /// The coordinated read and its own lazy half carry the primary updater, so their bytes are
+            /// The coordinated read and its own lazy half carry the coordinated handle, so their bytes are
             /// `input_bytes`; everything else here is read by every replica.
             if (read_step == corresponding_node_in_single_replica_plan->step.get() || read_step == source_reading_step
                 || read_step == lazy_reading_step)
                 continue;
             if (!read_step->supportsDataflowStatisticsCollection())
                 continue;
-            read_step->setRuntimeDataflowStatisticsCacheUpdater(
-                RuntimeDataflowStatisticsCacheUpdater::makeReplicatedBytesSatellite(updater));
+            read_step->setRuntimeDataflowStatisticsCacheUpdater(replicated_reads_updater);
         }
     }
 }

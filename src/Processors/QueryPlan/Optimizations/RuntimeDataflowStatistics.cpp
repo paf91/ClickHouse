@@ -25,6 +25,11 @@ extern const Event RuntimeDataflowStatisticsOutputBytes;
 namespace DB
 {
 
+namespace ErrorCodes
+{
+extern const int BAD_ARGUMENTS;
+}
+
 std::optional<RuntimeDataflowStatisticsCache::Entry> RuntimeDataflowStatisticsCache::getStats(size_t key) const
 {
     if (const auto entry = stats_cache->get(key))
@@ -39,23 +44,182 @@ void RuntimeDataflowStatisticsCache::update(size_t key, RuntimeDataflowStatistic
     stats_cache->set(key, std::make_shared<RuntimeDataflowStatistics>(stats));
 }
 
-std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>
-RuntimeDataflowStatisticsCacheUpdater::makeReplicatedBytesSatellite(
-    const std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater> & primary)
+/// One accumulator per execution. Every handle on it records here, and its destructor - the point where it
+/// is the last owner, which is why it may read the guarded counters below without locking - writes the
+/// single cache entry.
+class RuntimeDataflowStatisticsCacheUpdaterImpl
 {
-    chassert(primary);
-    chassert(!primary->replicated_bytes_primary); /// A satellite of a satellite would record nowhere.
-    auto satellite = std::make_shared<RuntimeDataflowStatisticsCacheUpdater>(primary->cache_key, primary->total_rows_to_read);
-    satellite->replicated_bytes_primary = primary;
-    return satellite;
+    using ColumnSizeByName = std::unordered_map<std::string, ColumnSize>;
+    using InputRole = RuntimeDataflowStatisticsCacheUpdater::InputRole;
+
+    struct Statistics
+    {
+        std::atomic_size_t counter{0};
+
+        std::mutex mutex;
+        size_t bytes TSA_GUARDED_BY(mutex) = 0;
+        size_t sample_bytes TSA_GUARDED_BY(mutex) = 0;
+        size_t compressed_bytes TSA_GUARDED_BY(mutex) = 0;
+        size_t elapsed_microseconds TSA_GUARDED_BY(mutex) = 0;
+    };
+
+public:
+    RuntimeDataflowStatisticsCacheUpdaterImpl(size_t cache_key_, size_t total_rows_to_read_)
+        : cache_key(cache_key_)
+        , total_rows_to_read(total_rows_to_read_)
+    {
+        if (cache_key == 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cache key for RuntimeDataflowStatisticsCacheUpdater cannot be zero");
+
+        if (total_rows_to_read == 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Total rows from storage cannot be zero");
+    }
+
+    ~RuntimeDataflowStatisticsCacheUpdaterImpl();
+
+    void recordOutputChunk(const Chunk & chunk, const Block & header);
+
+    void recordAggregationStateSizes(AggregatedDataVariants & variant, ssize_t bucket);
+
+    void recordAggregationKeySizes(const Chunk & chunk, const ColumnNumbers & keys_positions, const DataTypes & key_types);
+
+    void recordAggregationKeySizes(
+        const Chunk & chunk, const ColumnNumbers & keys_positions, const DataTypes & key_types, size_t full_key_bytes);
+
+    void recordAggregationStateColumnSizes(const Chunk & chunk, const ColumnNumbers & keys_positions, const Block & header);
+
+    void recordInputColumns(
+        InputRole role,
+        const ColumnsWithTypeAndName & input_columns,
+        const NameSet & partially_read_columns,
+        const NamesAndTypesList & part_columns,
+        const ColumnSizeByName & column_sizes,
+        const ColumnCodecByName & column_codecs,
+        const CompressionCodecPtr & default_codec,
+        size_t read_bytes,
+        std::optional<bool> & should_continue_sampling);
+
+    void markUnsupportedCase() { unsupported_case.store(true, std::memory_order_relaxed); }
+
+private:
+    static bool shouldSampleBlock(Statistics & statistics, size_t block_rows);
+
+    /// `full_bytes` overrides the byte count taken from the columns, for callers whose columns
+    /// are only a sample of the dataflow being accounted.
+    static void
+    recordColumns(Statistics & statistics, size_t num_rows, const ColumnsWithTypeAndName & cols, std::optional<size_t> full_bytes = {});
+
+    const size_t cache_key = 0;
+    const size_t total_rows_to_read = 0;
+
+    std::atomic_bool unsupported_case{false};
+
+    enum InputStatisticsType
+    {
+        WithByteHint = 0,
+        WithoutByteHint = 1,
+        MaxInputType = 2,
+    };
+    std::array<Statistics, 2> input_bytes_statistics;
+    /// Filled by the handles whose role is `Replicated`.
+    std::array<Statistics, 2> replicated_bytes_statistics;
+
+    enum OutputStatisticsType
+    {
+        AggregationState = 0,
+        AggregationKeys = 1,
+        OutputChunk = 2,
+        MaxOutputType = 3,
+    };
+    std::array<Statistics, 3> output_bytes_statistics;
+};
+
+RuntimeDataflowStatisticsCacheUpdater::RuntimeDataflowStatisticsCacheUpdater(
+    std::shared_ptr<RuntimeDataflowStatisticsCacheUpdaterImpl> impl_, InputRole role_)
+    : impl(std::move(impl_))
+    , role(role_)
+{
+    chassert(impl);
 }
 
-RuntimeDataflowStatisticsCacheUpdater::~RuntimeDataflowStatisticsCacheUpdater()
+std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>
+RuntimeDataflowStatisticsCacheUpdater::createCoordinated(size_t cache_key, size_t total_rows_to_read)
 {
-    /// A satellite has already recorded into its primary, which owns the cache entry.
-    if (replicated_bytes_primary)
-        return;
+    return std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>(new RuntimeDataflowStatisticsCacheUpdater(
+        std::make_shared<RuntimeDataflowStatisticsCacheUpdaterImpl>(cache_key, total_rows_to_read), InputRole::Coordinated));
+}
 
+std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>
+RuntimeDataflowStatisticsCacheUpdater::createForReplicatedReads(const std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater> & coordinated)
+{
+    chassert(coordinated);
+    chassert(coordinated->role == InputRole::Coordinated);
+    return std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>(
+        new RuntimeDataflowStatisticsCacheUpdater(coordinated->impl, InputRole::Replicated));
+}
+
+void RuntimeDataflowStatisticsCacheUpdater::recordOutputChunk(const Chunk & chunk, const Block & header)
+{
+    impl->recordOutputChunk(chunk, header);
+}
+
+void RuntimeDataflowStatisticsCacheUpdater::recordAggregationStateSizes(AggregatedDataVariants & variant, ssize_t bucket)
+{
+    impl->recordAggregationStateSizes(variant, bucket);
+}
+
+void RuntimeDataflowStatisticsCacheUpdater::recordAggregationKeySizes(
+    const Chunk & chunk, const ColumnNumbers & keys_positions, const DataTypes & key_types)
+{
+    impl->recordAggregationKeySizes(chunk, keys_positions, key_types);
+}
+
+void RuntimeDataflowStatisticsCacheUpdater::recordAggregationKeySizes(
+    const Chunk & chunk, const ColumnNumbers & keys_positions, const DataTypes & key_types, size_t full_key_bytes)
+{
+    impl->recordAggregationKeySizes(chunk, keys_positions, key_types, full_key_bytes);
+}
+
+void RuntimeDataflowStatisticsCacheUpdater::recordAggregationStateColumnSizes(
+    const Chunk & chunk, const ColumnNumbers & keys_positions, const Block & header)
+{
+    impl->recordAggregationStateColumnSizes(chunk, keys_positions, header);
+}
+
+void RuntimeDataflowStatisticsCacheUpdater::recordInputColumns(
+    const ColumnsWithTypeAndName & input_columns,
+    const NameSet & partially_read_columns,
+    const NamesAndTypesList & part_columns,
+    const ColumnSizeByName & column_sizes,
+    const ColumnCodecByName & column_codecs,
+    const CompressionCodecPtr & default_codec,
+    size_t read_bytes,
+    std::optional<bool> & should_continue_sampling)
+{
+    impl->recordInputColumns(
+        role,
+        input_columns,
+        partially_read_columns,
+        part_columns,
+        column_sizes,
+        column_codecs,
+        default_codec,
+        read_bytes,
+        should_continue_sampling);
+}
+
+void RuntimeDataflowStatisticsCacheUpdater::markUnsupportedCase()
+{
+    /// Only a coordinated handle can declare the execution unmeasurable. A replicated read that cannot be
+    /// measured leaves the entry alone, exactly as it did when these handles were separate updaters: it
+    /// under-counts `replicated_bytes` and nothing else. Letting it suppress the entry instead would stop
+    /// statistics being collected for shapes that have them today, so that is a separate decision.
+    if (role == InputRole::Coordinated)
+        impl->markUnsupportedCase();
+}
+
+RuntimeDataflowStatisticsCacheUpdaterImpl::~RuntimeDataflowStatisticsCacheUpdaterImpl()
+{
     if (unsupported_case)
     {
         LOG_DEBUG(getLogger("RuntimeDataflowStatisticsCacheUpdater"), "Unsupported case encountered, skipping statistics update.");
@@ -163,7 +327,7 @@ static std::pair<size_t, size_t> estimateCompressedColumnSize(const ColumnWithTy
     return std::make_pair(compressed_buf.count(), null_buf.count());
 }
 
-bool RuntimeDataflowStatisticsCacheUpdater::shouldSampleBlock(Statistics & statistics, size_t block_rows)
+bool RuntimeDataflowStatisticsCacheUpdaterImpl::shouldSampleBlock(Statistics & statistics, size_t block_rows)
 {
     // Empty blocks produced during planning, when we calculate output headers. Skip them.
     if (!block_rows)
@@ -172,7 +336,7 @@ bool RuntimeDataflowStatisticsCacheUpdater::shouldSampleBlock(Statistics & stati
     return counter % 5 == 0 && counter < 25;
 }
 
-void RuntimeDataflowStatisticsCacheUpdater::recordColumns(
+void RuntimeDataflowStatisticsCacheUpdaterImpl::recordColumns(
     Statistics & statistics, size_t num_rows, const ColumnsWithTypeAndName & cols, std::optional<size_t> full_bytes)
 {
     Stopwatch watch;
@@ -215,7 +379,7 @@ void RuntimeDataflowStatisticsCacheUpdater::recordColumns(
     statistics.elapsed_microseconds += watch.elapsedMicroseconds();
 }
 
-void RuntimeDataflowStatisticsCacheUpdater::recordOutputChunk(const Chunk & chunk, const Block & header)
+void RuntimeDataflowStatisticsCacheUpdaterImpl::recordOutputChunk(const Chunk & chunk, const Block & header)
 {
     chassert(chunk.getNumColumns() == header.columns());
     const auto & columns = chunk.getColumns();
@@ -226,7 +390,7 @@ void RuntimeDataflowStatisticsCacheUpdater::recordOutputChunk(const Chunk & chun
     recordColumns(output_bytes_statistics[OutputStatisticsType::OutputChunk], chunk.getNumRows(), cols);
 }
 
-void RuntimeDataflowStatisticsCacheUpdater::recordAggregationStateSizes(AggregatedDataVariants & variant, ssize_t bucket)
+void RuntimeDataflowStatisticsCacheUpdaterImpl::recordAggregationStateSizes(AggregatedDataVariants & variant, ssize_t bucket)
 {
     Stopwatch watch;
 
@@ -250,7 +414,7 @@ void RuntimeDataflowStatisticsCacheUpdater::recordAggregationStateSizes(Aggregat
     statistics.elapsed_microseconds += watch.elapsedMicroseconds();
 }
 
-void RuntimeDataflowStatisticsCacheUpdater::recordAggregationKeySizes(
+void RuntimeDataflowStatisticsCacheUpdaterImpl::recordAggregationKeySizes(
     const Chunk & chunk, const ColumnNumbers & keys_positions, const DataTypes & key_types)
 {
     const auto & columns = chunk.getColumns();
@@ -261,7 +425,7 @@ void RuntimeDataflowStatisticsCacheUpdater::recordAggregationKeySizes(
     recordColumns(output_bytes_statistics[OutputStatisticsType::AggregationKeys], chunk.getNumRows(), cols);
 }
 
-void RuntimeDataflowStatisticsCacheUpdater::recordAggregationKeySizes(
+void RuntimeDataflowStatisticsCacheUpdaterImpl::recordAggregationKeySizes(
     const Chunk & chunk, const ColumnNumbers & keys_positions, const DataTypes & key_types, size_t full_key_bytes)
 {
     const auto & columns = chunk.getColumns();
@@ -272,7 +436,7 @@ void RuntimeDataflowStatisticsCacheUpdater::recordAggregationKeySizes(
     recordColumns(output_bytes_statistics[OutputStatisticsType::AggregationKeys], chunk.getNumRows(), cols, full_key_bytes);
 }
 
-void RuntimeDataflowStatisticsCacheUpdater::recordAggregationStateColumnSizes(
+void RuntimeDataflowStatisticsCacheUpdaterImpl::recordAggregationStateColumnSizes(
     const Chunk & chunk, const ColumnNumbers & keys_positions, const Block & header)
 {
     const auto & columns = chunk.getColumns();
@@ -293,7 +457,8 @@ void RuntimeDataflowStatisticsCacheUpdater::recordAggregationStateColumnSizes(
     recordColumns(output_bytes_statistics[OutputStatisticsType::AggregationState], chunk.getNumRows(), cols);
 }
 
-void RuntimeDataflowStatisticsCacheUpdater::recordInputColumns(
+void RuntimeDataflowStatisticsCacheUpdaterImpl::recordInputColumns(
+    InputRole role,
     const ColumnsWithTypeAndName & input_columns,
     const NameSet & partially_read_columns,
     const NamesAndTypesList & part_columns,
@@ -314,10 +479,9 @@ void RuntimeDataflowStatisticsCacheUpdater::recordInputColumns(
 
     size_t sample_bytes = 0;
     size_t compressed_bytes = 0;
-    /// A satellite records a read parallel replicas would not coordinate, so its bytes belong to the
-    /// primary's replicated bucket rather than to anybody's `input_bytes`.
-    auto & statistics
-        = replicated_bytes_primary ? replicated_bytes_primary->replicated_bytes_statistics[type] : input_bytes_statistics[type];
+    /// The reads parallel replicas would not split accumulate apart from the coordinated one: they take
+    /// the same wall-clock time either way, but cost the cluster `num_replicas` times as much work.
+    auto & statistics = role == InputRole::Replicated ? replicated_bytes_statistics[type] : input_bytes_statistics[type];
     if (read_bytes && !input_columns.empty())
     {
         if (!column_sizes.empty())
