@@ -3357,20 +3357,47 @@ DataPartsVector StorageMergeTree::renameAndCommitEmptyParts(MutableDataPartsVect
         sleepForMilliseconds(200);
     } while (true);
 
-    transaction.renameParts();
-
-    /// The parts are already renamed on disk, so the rollback has to deal with them, as when committing their metadata fails.
-    fiu_do_on(FailPoints::mt_throw_after_renaming_empty_parts,
-    {
-        throw Exception(ErrorCodes::FAULT_INJECTED, "Injected failure after renaming empty parts");
-    });
-
     /// `covered_parts` above is only the precommit selection: `commit` reacquires the parts lock and
     /// recomputes the covered set, so it is the only authoritative answer to "what was removed".
     /// Everything below -- and the clone to `detached/` made by the callers -- must use that answer,
     /// otherwise a concurrently appearing covering part makes us report, undelay and detach a part
     /// that is still active.
-    DataPartsVector removed_parts = transaction.commit();
+    DataPartsVector removed_parts;
+    try
+    {
+        transaction.renameParts();
+
+        /// The parts are already renamed on disk, so the rollback has to deal with them, as when committing their metadata fails.
+        fiu_do_on(FailPoints::mt_throw_after_renaming_empty_parts,
+        {
+            throw Exception(ErrorCodes::FAULT_INJECTED, "Injected failure after renaming empty parts");
+        });
+
+        removed_parts = transaction.commit();
+    }
+    catch (...)
+    {
+        /// Without a transaction nothing on disk marks the empty parts as rolled back. If they stayed on disk until
+        /// the background cleanup, a restart would load them as covering parts and resurrect the failed operation,
+        /// and a merge of the parts inside their ranges would write a part intersecting them, so the table could not
+        /// be loaded. The cleanup cannot remove them earlier, because an empty part waits for the outdated parts in
+        /// its range, which it never covered. So remove them right away. With a transaction, the rolled back
+        /// creation CSN is stored on disk, and the transaction itself takes care of its parts.
+        if (!transaction.getMergeTreeTransaction())
+        {
+            try
+            {
+                transaction.rollback();
+                for (auto & part : new_parts)
+                    tryRemovePartImmediately(std::move(part));
+            }
+            catch (...)
+            {
+                tryLogCurrentException(log, "while removing the rolled back empty parts");
+            }
+        }
+        throw;
+    }
 
     LOG_INFO(log, "Removed {} parts out of the {} selected by covering them with empty {} parts. With txn {}.",
              removed_parts.size(), covered_parts.size(), new_parts.size(), transaction.getTID());
