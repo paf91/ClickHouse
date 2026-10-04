@@ -363,6 +363,34 @@ bool ReadFromFormatInfo::formatReadsHivePartitionColumns() const
     return false;
 }
 
+std::shared_ptr<const ActionsDAG> ReadFromFormatInfo::getFormatFilter(
+    const std::shared_ptr<const ActionsDAG> & filter_actions_dag, const ContextPtr & context, bool strip_virtual_columns) const
+{
+    if (!filter_actions_dag
+        || (hive_partition_columns_to_read_from_file_path.empty() && (!strip_virtual_columns || requested_virtual_columns.empty())))
+        return filter_actions_dag;
+
+    Block allowed_inputs;
+    bool has_added_input = false;
+    for (const auto * input : filter_actions_dag->getInputs())
+    {
+        if (hive_partition_columns_to_read_from_file_path.contains(input->result_name)
+            || (strip_virtual_columns && requested_virtual_columns.contains(input->result_name)))
+            has_added_input = true;
+        else if (!allowed_inputs.has(input->result_name))
+            allowed_inputs.insert({input->result_type, input->result_name});
+    }
+
+    if (!has_added_input)
+        return filter_actions_dag;
+
+    auto dag = VirtualColumnUtils::splitFilterDagForAllowedInputs(
+        filter_actions_dag->getOutputs().at(0), &allowed_inputs, context, /*allow_partial_result=*/ true);
+    if (!dag)
+        return nullptr;
+    return std::make_shared<const ActionsDAG>(std::move(*dag));
+}
+
 void ReadFromFormatInfo::serialize(IQueryPlanStep::Serialization & ctx) const
 {
     source_header.getNamesAndTypesList().writeTextWithNamesInStorage(ctx.out);

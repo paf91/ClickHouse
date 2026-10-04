@@ -1,0 +1,39 @@
+-- { echoOn }
+SELECT key, count() FROM file(currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64') GROUP BY key;
+9	1000
+SELECT count() FROM file(currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64') WHERE key = 9;
+1000
+SELECT count() FROM file(currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64') WHERE key = 10;
+0
+SELECT count() FROM file(currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64') WHERE key = 9 AND v < 10;
+10
+SELECT count() FROM file(currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64') WHERE key = 9 OR v < 10;
+1000
+SELECT count() FROM file(currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64') WHERE key IN (9);
+1000
+SELECT count(), sum(v) FROM file(currentDatabase() || '/05321/key=9/data.parquet', Parquet) WHERE key = 9;
+1000	499500
+SELECT count() FROM file(currentDatabase() || '/05321/nullable/key=9/data.parquet', Parquet, 'key Nullable(Int64), v Int64') WHERE key IS NOT NULL;
+1000
+SELECT count() FROM s3(s3_conn, filename = currentDatabase() || '/05321/key=9/data.parquet', format = Parquet, structure = 'key Int64, v Int64') WHERE key = 9 SETTINGS use_query_condition_cache = 1;
+1000
+SELECT count() FROM s3(s3_conn, filename = currentDatabase() || '/05321/key=9/data.parquet', format = Parquet, structure = 'key Int64, v Int64') WHERE key = 9 SETTINGS use_query_condition_cache = 1;
+1000
+SELECT count() FROM url('http://localhost:11111/test/' || currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64') WHERE key = 9;
+1000
+SELECT _file, count() FROM file(currentDatabase() || '/05321/virtual/data.parquet', Parquet, 'v Int64') GROUP BY _file;
+data.parquet	1000
+SELECT count() FROM file(currentDatabase() || '/05321/virtual/data.parquet', Parquet, 'v Int64') WHERE _file = 'data.parquet';
+1000
+CREATE TABLE t_05321_file AS file(currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64');
+CREATE ROW POLICY p_05321_file ON t_05321_file USING key = 9 TO ALL;
+SELECT count() FROM t_05321_file;
+1000
+DROP ROW POLICY p_05321_file ON t_05321_file;
+DROP TABLE t_05321_file;
+-- The format still prunes row groups on the columns of the data file.
+SELECT count() FROM file(currentDatabase() || '/05321/key=9/data.parquet', Parquet, 'key Int64, v Int64') WHERE key = 9 AND v < 10 SETTINGS log_comment = '05321_prune';
+10
+SYSTEM FLUSH LOGS query_log;
+SELECT ProfileEvents['ParquetPrunedRowGroups'] > 0 FROM system.query_log WHERE current_database = currentDatabase() AND log_comment = '05321_prune' AND type = 'QueryFinish';
+1
