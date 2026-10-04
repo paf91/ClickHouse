@@ -412,7 +412,7 @@ def test_partially_moved_removal_is_rolled_back():
         put_key(data_key, b"a file of a directory")
         data_keys.append(data_key)
     marker_key = TOMBSTONE_KEY_PREFIX + removed_name
-    put_key(marker_key, (PENDING_TOMBSTONE_PREFIX + original_path).encode())
+    put_key(marker_key, (PENDING_TOMBSTONE_PREFIX + original_path + "\n").encode())
 
     node.start_clickhouse()
     assert int(node.query("SELECT count() FROM t")) == 1
@@ -479,7 +479,7 @@ def test_pending_replacement_is_rolled_back(target_content):
     marker_key = TOMBSTONE_KEY_PREFIX + removed_name
     put_key(
         marker_key,
-        f"{PENDING_REPLACE_TOMBSTONE_PREFIX}{remote_name}\ntarget.txt\n{len(old_content)}".encode(),
+        f"{PENDING_REPLACE_TOMBSTONE_PREFIX}{remote_name}\ntarget.txt\n{len(old_content)}\n".encode(),
     )
 
     node.start_clickhouse()
@@ -520,7 +520,7 @@ def test_incomplete_backup_of_replacement_is_reclaimed():
     marker_key = TOMBSTONE_KEY_PREFIX + removed_name
     put_key(
         marker_key,
-        f"{PENDING_REPLACE_TOMBSTONE_PREFIX}{remote_name}\ntarget.txt\n{len(old_content)}".encode(),
+        f"{PENDING_REPLACE_TOMBSTONE_PREFIX}{remote_name}\ntarget.txt\n{len(old_content)}\n".encode(),
     )
 
     node.start_clickhouse()

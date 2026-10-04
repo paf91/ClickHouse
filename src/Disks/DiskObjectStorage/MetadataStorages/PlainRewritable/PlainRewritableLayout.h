@@ -70,11 +70,35 @@ public:
     /// The local path the directory with `local_path` under the removed name had before a pending removal moved it.
     static std::string restoreLocalPathOfPendingRemoval(const std::string & local_path, const std::string & original_local_path);
 
+    struct TombstoneMarker
+    {
+        enum class Kind
+        {
+            Committed,
+            PendingRemoval,
+            PendingReplace,
+            /// Not one of the contents that are written, see `parseTombstoneMarkerContent`.
+            Malformed,
+        };
+
+        Kind kind = Kind::Malformed;
+        /// The original path of the subtree, for `PendingRemoval`.
+        std::string pending_original_path;
+        /// For `PendingReplace`.
+        PendingReplace pending_replace;
+    };
+
+    /// The content of a committed marker is the removed name itself.
+    static std::string makeCommittedTombstoneContent(const std::string & removed_name);
     static std::string makePendingTombstoneContent(const std::string & original_local_path);
-    /// The original path of the subtree if the content is the one of a pending marker.
-    static std::optional<std::string> parsePendingTombstoneContent(std::string_view content);
     static std::string makePendingReplaceTombstoneContent(const PendingReplace & pending_replace);
-    static std::optional<PendingReplace> parsePendingReplaceTombstoneContent(std::string_view content);
+    /// A marker is rewritten in place, and on the local object storage a process that dies in the middle of it leaves
+    /// the content torn: empty, or a prefix of the one being written. A torn content must never be taken for another
+    /// valid one: a truncated original path of a pending removal would restore the subtree under a wrong path, and a
+    /// torn pending marker taken for a committed one would reclaim a subtree whose removal was never committed. So every
+    /// content is complete only with its last byte (the pending ones end with a line feed, and the committed one must
+    /// be exactly the removed name), and anything else is `Malformed`.
+    static TombstoneMarker parseTombstoneMarkerContent(std::string_view content, std::string_view removed_name);
 
     explicit PlainRewritableLayout(std::string object_storage_common_key_prefix_);
 

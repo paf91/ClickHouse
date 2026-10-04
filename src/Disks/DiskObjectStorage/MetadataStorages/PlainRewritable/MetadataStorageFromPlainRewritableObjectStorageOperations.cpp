@@ -88,7 +88,8 @@ void writeTombstoneMarker(
         object_storage,
         layout,
         removed_name,
-        pending_original_path ? PlainRewritableLayout::makePendingTombstoneContent(*pending_original_path) : removed_name);
+        pending_original_path ? PlainRewritableLayout::makePendingTombstoneContent(*pending_original_path)
+                              : PlainRewritableLayout::makeCommittedTombstoneContent(removed_name));
 }
 
 /// See `PlainRewritableLayout::PENDING_REPLACE_TOMBSTONE_PREFIX`.

@@ -51,6 +51,7 @@ namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
     extern const int FILE_DOESNT_EXIST;
+    extern const int INCORRECT_DATA;
     extern const int LOGICAL_ERROR;
 }
 
@@ -226,8 +227,14 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
     /// the backup of the target it marks may be the only copy of the target. The initial load copies a complete
     /// backup back over the target before any listing, and then reclaims the backup like a committed removal.
     ///
+    /// A marker whose content is torn (see `PlainRewritableLayout::parseTombstoneMarkerContent`) tells neither whether
+    /// its removal was committed nor where its subtree came from. If anything on the disk still has its name, the load
+    /// fails rather than guess: either guess may lose data. Otherwise the process died while writing the first marker
+    /// of an operation that had not touched anything yet, and the initial load just deletes the marker.
+    ///
     /// The value is the original path of the subtree for a pending removal, and empty for a committed one.
     std::unordered_map<std::string, std::optional<std::string>> tombstones;
+    std::unordered_set<std::string> malformed_markers;
     std::unordered_map<std::string, PlainRewritableLayout::PendingReplace> pending_replaces;
     /// The backups of pending replacements that can be neither restored nor reclaimed: they are not loaded and not deleted.
     std::unordered_set<std::string> kept_backups;
@@ -273,16 +280,36 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
             throw;
         }
 
-        /// The backup of a pending replacement is not loaded either, like one of a committed removal.
-        if (auto pending_replace = PlainRewritableLayout::parsePendingReplaceTombstoneContent(content))
+        auto parsed = PlainRewritableLayout::parseTombstoneMarkerContent(content, removed_name.value());
+        switch (parsed.kind)
         {
-            pending_replaces.emplace(removed_name.value(), std::move(pending_replace.value()));
-            tombstones.emplace(std::move(removed_name.value()), std::nullopt);
-            continue;
+            case PlainRewritableLayout::TombstoneMarker::Kind::Committed:
+                tombstones.emplace(std::move(removed_name.value()), std::nullopt);
+                break;
+            case PlainRewritableLayout::TombstoneMarker::Kind::PendingRemoval:
+                tombstones.emplace(std::move(removed_name.value()), std::move(parsed.pending_original_path));
+                break;
+            case PlainRewritableLayout::TombstoneMarker::Kind::PendingReplace:
+                /// The backup of a pending replacement is not loaded either, like one of a committed removal.
+                pending_replaces.emplace(removed_name.value(), std::move(parsed.pending_replace));
+                tombstones.emplace(std::move(removed_name.value()), std::nullopt);
+                break;
+            case PlainRewritableLayout::TombstoneMarker::Kind::Malformed:
+                LOG_WARNING(log, "The marker '{}' of an unfinished operation is malformed: '{}'", marker->getPath(), content);
+                malformed_markers.insert(std::move(removed_name.value()));
+                break;
         }
-
-        tombstones.emplace(std::move(removed_name.value()), PlainRewritableLayout::parsePendingTombstoneContent(content));
     }
+
+    auto throw_malformed_marker = [this](const std::string & name, const std::string & what)
+    {
+        throw Exception(
+            ErrorCodes::INCORRECT_DATA,
+            "The marker '{}' of an unfinished operation on {} is malformed, most likely because the process died while "
+            "writing it. It is unknown whether the operation has to be rolled back or finished, so it has to be resolved manually",
+            layout->constructTombstoneMarkerKey(name),
+            what);
+    };
 
     if (!tombstones.empty())
         LOG_DEBUG(log, "Found {} removals that were not finished", tombstones.size());
@@ -379,6 +406,9 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
         for (auto iterator = object_storage->iterate(layout->constructRootFilesDirectoryKey(), 0, /*with_tags=*/ false, std::nullopt); iterator->isValid(); iterator->next())
         {
             auto remote_file = iterator->current();
+            if (malformed_markers.contains(remote_file->getFileName()))
+                throw_malformed_marker(remote_file->getFileName(), fmt::format("the object '{}'", remote_file->getPath()));
+
             /// Only a committed removal leaves a file in the root directory, a pending one is of a directory.
             if (auto it = tombstones.find(remote_file->getFileName()); it != tombstones.end() && !it->second)
             {
@@ -522,7 +552,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
             /// result: Same, and no two tasks are given the same slot
             /// In any case we have a try {} catch (...) around runner usage, so exceptions will call runner.waitForAllToFinish() first
             /// Thus the order of destruction of the variables is not important
-            runner.enqueueAndKeepTrack([remote_path = std::move(directory.remote_path), object_path = std::move(directory.object_path), metadata = std::move(directory.metadata), read_snapshot, do_not_load_unchanged_directories, files_are_prelisted, is_initial_load, remove_orphaned_objects, &tombstones, &result = results[i], &log, &settings, this]
+            runner.enqueueAndKeepTrack([remote_path = std::move(directory.remote_path), object_path = std::move(directory.object_path), metadata = std::move(directory.metadata), read_snapshot, do_not_load_unchanged_directories, files_are_prelisted, is_initial_load, remove_orphaned_objects, &tombstones, &malformed_markers, &throw_malformed_marker, &result = results[i], &log, &settings, this]
             {
                 DB::setThreadName(ThreadName::PLAIN_REWRITABLE_META_LOAD);
 
@@ -544,6 +574,9 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
                     }
 
                     const auto removed_name = PlainRewritableLayout::getRemovedNameOfLocalPath(local_path);
+                    if (removed_name && malformed_markers.contains(removed_name.value()))
+                        throw_malformed_marker(removed_name.value(), fmt::format("the directory '{}' with the key '{}'", local_path, object_path));
+
                     const auto tombstone = removed_name ? tombstones.find(removed_name.value()) : tombstones.end();
                     if (tombstone != tombstones.end() && tombstone->second)
                     {
@@ -709,10 +742,13 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
     local_paths_by_remote_directory = std::move(new_local_paths);
     previous_refresh.restart();
 
-    if (remove_orphaned_objects && !tombstones.empty())
+    if (remove_orphaned_objects && (!tombstones.empty() || !malformed_markers.empty()))
     {
         StoredObjects marker_objects;
-        marker_objects.reserve(tombstones.size());
+        marker_objects.reserve(tombstones.size() + malformed_markers.size());
+        /// Nothing on the disk has these names, otherwise the load would have failed above.
+        for (const auto & removed_name : malformed_markers)
+            marker_objects.emplace_back(layout->constructTombstoneMarkerKey(removed_name));
         size_t pending_removals = 0;
         for (const auto & [removed_name, pending_original_path] : tombstones)
         {

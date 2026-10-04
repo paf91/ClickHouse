@@ -2525,3 +2525,46 @@ TEST_F(MetadataPlainRewritableDiskTest, UndoRestoresAReplacedFile)
     EXPECT_EQ(readObject(object_storage, metadata->getStorageObjects("/A/source").front().remote_path), "the source file");
     EXPECT_EQ(readObject(object_storage, metadata->getStorageObjects("/A/target").front().remote_path), "the target file");
 }
+
+/// A marker of an unfinished operation is rewritten in place, so on the local object storage a process that dies in the
+/// middle of it leaves the content torn. While anything has the name of such a marker, the load must neither roll the
+/// operation back nor reclaim it, and a torn marker that marks nothing is just deleted.
+TEST_F(MetadataPlainRewritableDiskTest, TornTombstoneMarker)
+{
+    thread_local_rng.seed(42);
+
+    auto metadata = getMetadataStorage("TornTombstoneMarker");
+    auto object_storage = getObjectStorage("TornTombstoneMarker");
+
+    {
+        auto tx = metadata->createTransaction();
+        tx->createDirectory("/A");
+        auto size = writeObject(object_storage, tx->generateObjectKeyForPath("/A/file").serialize(), "the file");
+        tx->createMetadataFile("/A/file", {StoredObject("/A/file", "file", size)});
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    /// As if a removal of `A` died after moving the directory under the removed name.
+    const std::string removed_name = "__removed.abcdefghijklmnop";
+    const std::string marker_key = fmt::format("./TornTombstoneMarker/__meta/__tombstone/{}", removed_name);
+    writeObject(object_storage, createMetadataObjectPath(metadata, "A/"), removed_name + "/");
+
+    /// Torn while being rewritten as committed, and while being written as pending.
+    for (const auto & torn_content : {std::string(), removed_name.substr(0, 12), std::string("pending\nA/"), std::string("pending\n")})
+    {
+        writeObject(object_storage, marker_key, torn_content);
+        EXPECT_THROW(restartMetadataStorage("TornTombstoneMarker"), DB::Exception) << "'" << torn_content << "'";
+        EXPECT_TRUE(object_storage->exists(StoredObject(marker_key)));
+    }
+
+    writeObject(object_storage, marker_key, "pending\nA/\n");
+    metadata = restartMetadataStorage("TornTombstoneMarker");
+    EXPECT_EQ(readObject(object_storage, metadata->getStorageObjects("/A/file").front().remote_path), "the file");
+    EXPECT_FALSE(object_storage->exists(StoredObject(marker_key)));
+
+    const std::string unused_marker_key = "./TornTombstoneMarker/__meta/__tombstone/__removed.qrstuvwxyzabcdef";
+    writeObject(object_storage, unused_marker_key, "pend");
+    metadata = restartMetadataStorage("TornTombstoneMarker");
+    EXPECT_FALSE(object_storage->exists(StoredObject(unused_marker_key)));
+    EXPECT_EQ(readObject(object_storage, metadata->getStorageObjects("/A/file").front().remote_path), "the file");
+}
