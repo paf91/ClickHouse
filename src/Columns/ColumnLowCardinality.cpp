@@ -277,7 +277,7 @@ void ColumnLowCardinality::doInsertRangeFrom(const IColumn & src, size_t start, 
             const IColumn & dst_keys = *dst_dictionary.getNestedNotNullableColumn();
             const size_t dst_default_index = dst_dictionary.getNestedTypeDefaultValueIndex();
 
-            std::array<UInt64, max_rows_to_translate_individually> positions;
+            std::array<UInt64, max_rows_to_translate_individually> positions; // NOLINT(cppcoreguidelines-pro-type-member-init,hicpp-member-init) - only the first `length` entries are written before read
             size_t previous_src_position = std::numeric_limits<size_t>::max();
             UInt64 previous_dst_position = 0;
             for (size_t i = 0; i < length; ++i)
