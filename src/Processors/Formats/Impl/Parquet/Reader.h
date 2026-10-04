@@ -620,6 +620,11 @@ struct Reader
     /// filter, including the ones that will be checked against their dictionary page in the next
     /// stage, are left out of the filter map and so treated as "may match"; a bloom filter has no
     /// false negatives, so a `false` here is final and the dictionary pages need not be read at all.
+    /// When the row group is not ruled out, also clears `use_dictionary_filter` on every column whose
+    /// own bloom filter reported a definite miss for each of its atoms (e.g. `a` in `a = 1 OR b = 2`
+    /// where only `b = 2` keeps the row group alive): the dictionary of such a column can only confirm
+    /// the miss, so its page is not read and `applyBloomAndDictionaryFilters` uses the bloom filter
+    /// for it instead.
     bool applyBloomFilters(RowGroup & row_group);
 
     /// Returns false if the row group was filtered out and should be skipped. Runs after
@@ -673,9 +678,18 @@ private:
         Prefetcher & prefetcher;
         ColumnChunk & column;
 
+        /// Whether `findAnyHash` was called at all, and whether any call reported a possible match.
+        /// `probed && !found` means every atom on this column that was evaluated is definitely false
+        /// (a bloom filter has no false negatives), so its exact dictionary filter could only agree.
+        bool probed = false;
+        bool found = false;
+
         BloomFilterLookup(Prefetcher & prefetcher_, ColumnChunk & column_) : prefetcher(prefetcher_), column(column_) {}
 
         bool findAnyHash(const std::vector<uint64_t> & hashes) override;
+
+    private:
+        bool probe(const std::vector<uint64_t> & hashes);
     };
 
     /// Like BloomFilterLookup, but backed by the (already decoded) dictionary page, which holds the

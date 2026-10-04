@@ -1801,6 +1801,14 @@ void Reader::decodeDictionaryPageImpl(const parq::PageHeader & header, std::span
 
 bool Reader::BloomFilterLookup::findAnyHash(const std::vector<uint64_t> & hashes)
 {
+    probed = true;
+    bool res = probe(hashes);
+    found |= res;
+    return res;
+}
+
+bool Reader::BloomFilterLookup::probe(const std::vector<uint64_t> & hashes)
+{
     size_t num_blocks = size_t(column.bloom_filter_header.numBytes) / 32;
     for (size_t h : hashes)
     {
@@ -2183,6 +2191,7 @@ bool Reader::DictionaryLookup::findAnyHash(const std::vector<uint64_t> & hashes)
 bool Reader::applyBloomFilters(RowGroup & row_group)
 {
     KeyCondition::ColumnIndexToBloomFilter filter_map;
+    std::vector<std::pair<ColumnChunk *, const BloomFilterLookup *>> lookups;
     for (size_t i = 0; i < row_group.columns.size(); ++i)
     {
         ColumnChunk & column = row_group.columns[i];
@@ -2190,12 +2199,27 @@ bool Reader::applyBloomFilters(RowGroup & row_group)
         /// the chunks whose blocks were not prefetched - `findAnyHash` reports those as possibly
         /// present, which is what a bloom filter with no blocks to probe has to say.
         if (column.use_bloom_filter)
-            filter_map.emplace(
-                primitive_columns[i].idx_in_output_block,
-                std::make_unique<BloomFilterLookup>(prefetcher, column));
+        {
+            auto lookup = std::make_unique<BloomFilterLookup>(prefetcher, column);
+            const BloomFilterLookup * lookup_ptr = lookup.get();
+            if (filter_map.emplace(primitive_columns[i].idx_in_output_block, std::move(lookup)).second)
+                lookups.emplace_back(&column, lookup_ptr);
+        }
     }
-    return bloom_filter_condition->checkInHyperrectangle(
-        row_group.hyperrectangle, extended_sample_block_data_types, filter_map).can_be_true;
+    if (!bloom_filter_condition->checkInHyperrectangle(
+            row_group.hyperrectangle, extended_sample_block_data_types, filter_map).can_be_true)
+        return false;
+
+    /// The row group survives, but some branch of the condition may already be dead: in `a = 1 OR b = 2`
+    /// the bloom filter of `a` can prove `a = 1` false while `b = 2` stays unresolved. The exact
+    /// dictionary filter of `a` would only confirm the miss for every atom its bloom filter ruled out,
+    /// so reading its dictionary page is wasted. Let the next pass use `a`'s bloom filter instead; the
+    /// result of the condition stays the same, because the bloom filter answers no worse than the
+    /// dictionary would for each atom it was asked about.
+    for (const auto & [column, lookup] : lookups)
+        if (column->use_dictionary_filter && lookup->probed && !lookup->found)
+            column->use_dictionary_filter = false;
+    return true;
 }
 
 bool Reader::applyBloomAndDictionaryFilters(RowGroup & row_group, PruningMemoryReservation reservation)

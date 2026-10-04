@@ -221,15 +221,16 @@ void ReadManager::finishRowGroupStage(size_t row_group_idx, ReadStage stage, Mem
         /// still reads them: the row group is then going to be read anyway (in which case the
         /// dictionary page has to be read to decode it, and the filter costs nothing extra), unless
         /// the dictionary rules it out exactly, which is the bloom filter's false positive.
-        bool any_dictionary_filter = std::any_of(
-            row_group.columns.begin(), row_group.columns.end(),
-            [](const ColumnChunk & c) { return c.use_dictionary_filter; });
-
-        if (!reader.applyBloomFilters(row_group))
-        {
+        /// `applyBloomFilters` also drops the dictionary filter of every column whose own bloom filter
+        /// already proved its atoms false, so the `Dictionary` stage reads only the pages that can
+        /// still change the outcome.
+        bool any_dictionary_filter = false;
+        if (reader.applyBloomFilters(row_group))
+            any_dictionary_filter = std::any_of(
+                row_group.columns.begin(), row_group.columns.end(),
+                [](const ColumnChunk & c) { return c.use_dictionary_filter; });
+        else
             stage = ReadStage::Deliver; // skip the row group
-            any_dictionary_filter = false;
-        }
 
         /// Keep the blocks alive for `applyBloomAndDictionaryFilters`, which uses them as the
         /// fallback for a column whose dictionary does not fit the pruning memory budget.
