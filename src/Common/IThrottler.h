@@ -39,6 +39,13 @@ public:
     {
         return throttleOSPageCacheRead(amount, unlimited_block_ns);
     }
+
+    /// Whether `throttleOSPageCacheRead` may differ from `throttle`, i.e. some throttler ignores
+    /// the reads served from the OS page cache. Otherwise, there is no point in detecting such reads.
+    virtual bool ignoresOSPageCacheReads() const
+    {
+        return false;
+    }
 };
 
 using ThrottlerPtr = std::shared_ptr<IThrottler>;

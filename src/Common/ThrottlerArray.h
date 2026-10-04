@@ -48,6 +48,16 @@ public:
         return result;
     }
 
+    bool ignoresOSPageCacheReads() const override
+    {
+        for (const auto & throttler : throttlers)
+        {
+            if (throttler->ignoresOSPageCacheReads())
+                return true;
+        }
+        return false;
+    }
+
     /// Check if any throttler is currently throttling
     bool isThrottling() const override
     {

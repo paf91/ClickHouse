@@ -146,9 +146,11 @@ void ReadBufferFromFileDescriptor::enableOSPageCacheReadsDetection(int flags)
     /// so such a read could reach the device while looking like it was served from the page cache.
     /// The `O_DIRECT` check comes before `preadNoWaitUnavailableReason` for the same reason as there.
     /// The detection costs an extra system call for the data that is not in the page cache,
-    /// which is why it is used only when there is a throttler to tell about it.
+    /// which is why it is used only when there is a throttler that ignores such reads
+    /// (e.g. not for merges, mutations or backups that are throttled only by their own bandwidth limits).
     detect_os_page_cache_reads = use_pread
         && throttler
+        && throttler->ignoresOSPageCacheReads()
         && (flags == -1 || !(flags & O_DIRECT))
         && preadNoWaitUnavailableReason().empty();
 }

@@ -29,7 +29,7 @@ protected:
     bool detect_os_page_cache_reads = false;
 
     /// To be called by the descendants that know the flags the file was opened with.
-    /// Has an effect only for `pread` and when there is a `throttler`,
+    /// Has an effect only for `pread` and when the `throttler` ignores the OS page cache reads,
     /// and is a no-op for `O_DIRECT`, where every read reaches the device.
     void enableOSPageCacheReadsDetection(int flags);
 
