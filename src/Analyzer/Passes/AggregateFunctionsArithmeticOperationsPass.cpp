@@ -117,9 +117,15 @@ public:
           * `a Decimal32(0)`, `sum(a / 2)` over `{1, 1}` is `0`, but `sum(a) / 2` is `1`, and `sum(a * 3)`
           * throws `DECIMAL_OVERFLOW` for a row `999999999`, but `sum(a) * 3` does not.
           */
+        /// Nor with a compound operand: `min` and `max` order an `Array`, a `Tuple` or a `Map` lexicographically, which an
+        /// element-wise operation does not preserve, and they do not accept a `Variant`.
         for (const auto & argument : arithmetic_function_arguments_nodes)
-            if (isDecimal(removeNullable(removeLowCardinality(argument->getResultType()))))
+        {
+            const auto argument_type = removeNullable(removeLowCardinality(argument->getResultType()));
+            if (isDecimal(argument_type) || isArray(argument_type) || isTuple(argument_type) || isMap(argument_type)
+                || isVariant(argument_type))
                 return;
+        }
 
         /** Need reverse max <-> min for:
           *
