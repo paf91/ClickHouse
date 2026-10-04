@@ -4,7 +4,7 @@
 -- ALTER TABLE ... MODIFY TTL accepts only a TTL that the table can be loaded with. A table is loaded with its TTL
 -- analyzed in the global context, so a subquery of the TTL cannot read anything that exists only for the query or
 -- the session of the ALTER: a table function, a view over one, a parameterized view or a temporary table.
--- CREATE TABLE rejects the same TTL.
+-- CREATE TABLE rejects the same TTL. Nor can it read the table itself, which cannot be read while it is loaded.
 
 SET ast_fuzzer_any_query = 0;
 SET materialize_ttl_after_modify = 0;
@@ -42,6 +42,8 @@ ALTER TABLE t MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM v_nu
 ALTER TABLE t MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM pv(p = 1)); -- { serverError THERE_IS_NO_QUERY }
 ALTER TABLE t MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM tmp_05317_ttl); -- { serverError UNKNOWN_TABLE }
 ALTER TABLE t MODIFY TTL d + INTERVAL 2 YEAR, d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM numbers(10)); -- { serverError THERE_IS_NO_QUERY }
+ALTER TABLE t MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM t); -- { serverError INFINITE_LOOP }
+ALTER TABLE t MODIFY TTL d + INTERVAL 1 YEAR WHERE x IN (SELECT x FROM t); -- { serverError INFINITE_LOOP }
 
 -- Tables of a database are found when the table is loaded.
 ALTER TABLE t MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM t_build);
@@ -57,6 +59,7 @@ FROM system.tables WHERE database = currentDatabase() AND name = 't';
 -- A replicated table: the TTL does not reach the table metadata in Keeper.
 CREATE TABLE t_rmt (d DateTime, x UInt64) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/t_rmt', 'r1') ORDER BY tuple();
 ALTER TABLE t_rmt MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM numbers(10)) SETTINGS alter_sync = 0; -- { serverError THERE_IS_NO_QUERY }
+ALTER TABLE t_rmt MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM t_rmt) SETTINGS alter_sync = 0; -- { serverError INFINITE_LOOP }
 SELECT countIf(value LIKE '%\nttl: %'), count()
 FROM system.zookeeper WHERE path = '/clickhouse/tables/' || currentDatabase() || '/t_rmt' AND name = 'metadata';
 
@@ -66,6 +69,7 @@ DROP DATABASE IF EXISTS {CLICKHOUSE_DATABASE_1:Identifier};
 CREATE DATABASE {CLICKHOUSE_DATABASE_1:Identifier} ENGINE = Replicated('/test/05317/{database}', 's1', 'r1');
 CREATE TABLE {CLICKHOUSE_DATABASE_1:Identifier}.t_rdb (d DateTime, x UInt64) ENGINE = ReplicatedMergeTree ORDER BY tuple();
 ALTER TABLE {CLICKHOUSE_DATABASE_1:Identifier}.t_rdb MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM numbers(10)); -- { serverError THERE_IS_NO_QUERY }
+ALTER TABLE {CLICKHOUSE_DATABASE_1:Identifier}.t_rdb MODIFY TTL d + INTERVAL 1 YEAR WHERE x < (SELECT count() FROM {CLICKHOUSE_DATABASE_1:Identifier}.t_rdb); -- { serverError INFINITE_LOOP }
 DETACH DATABASE {CLICKHOUSE_DATABASE_1:Identifier};
 ATTACH DATABASE {CLICKHOUSE_DATABASE_1:Identifier};
 SELECT count() FROM {CLICKHOUSE_DATABASE_1:Identifier}.t_rdb;

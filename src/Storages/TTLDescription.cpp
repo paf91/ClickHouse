@@ -51,10 +51,6 @@
 #include <optional>
 #include <unordered_set>
 
-#if CLICKHOUSE_CLOUD
-#include <Interpreters/SharedDatabaseCatalog.h>
-#endif
-
 
 namespace DB
 {
@@ -1670,18 +1666,6 @@ TTLTableDescription & TTLTableDescription::operator=(const TTLTableDescription &
     return *this;
 }
 
-static bool isSecondaryReplay(const ContextPtr & context)
-{
-    const auto txn = context->getZooKeeperMetadataTransaction();
-    if (txn && !txn->isInitialQuery())
-        return true;
-#if CLICKHOUSE_CLOUD
-    return context->getClientInfo().is_shared_catalog_internal && !SharedDatabaseCatalog::isInitialQuery(context);
-#else
-    return false;
-#endif
-}
-
 TTLTableDescription TTLTableDescription::getTTLForTableFromAST(
     const ASTPtr & definition_ast,
     const ColumnsDescription & columns,
@@ -1731,7 +1715,7 @@ TTLTableDescription TTLTableDescription::getTTLForTableFromAST(
     /// A table is loaded with its TTL analyzed in the global context, where nothing that exists only for a query or
     /// a session (a table function, a temporary table) resolves, so a TTL that is going to be stored must analyze there.
     /// A replica replaying a DDL that the initiator already committed does not judge it again, or its DDL queue would stall.
-    if (validation_mode != TTLValidationMode::Attach && !context->isGlobalContext() && !isSecondaryReplay(context))
+    if (validation_mode != TTLValidationMode::Attach && !context->isGlobalContext() && !isSecondaryDDLReplay(context))
         getTTLForTableFromAST(definition_ast, columns, context->getGlobalContext(), primary_key, TTLValidationMode::Attach);
 
     return result;
