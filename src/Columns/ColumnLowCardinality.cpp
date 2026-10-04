@@ -21,6 +21,7 @@ namespace ErrorCodes
     extern const int ILLEGAL_COLUMN;
     extern const int LOGICAL_ERROR;
     extern const int INCORRECT_DATA;
+    extern const int PARAMETER_OUT_OF_BOUND;
 }
 
 void throwUnexpectedLowCardinalityIndexType(size_t size)
@@ -30,6 +31,8 @@ void throwUnexpectedLowCardinalityIndexType(size_t size)
 
 namespace
 {
+    constexpr size_t max_rows_to_translate_individually = 32;
+
     void checkColumn(const IColumn & column)
     {
         if (!dynamic_cast<const IColumnUnique *>(&column))
@@ -257,6 +260,45 @@ void ColumnLowCardinality::doInsertRangeFrom(const IColumn & src, size_t start, 
     else
     {
         compactIfSharedDictionary();
+
+        /// Short ranges are translated row by row with the same NULL, default and NaN rules as `uniqueInsertRangeFrom`.
+        if (length <= max_rows_to_translate_individually)
+        {
+            const IColumn & src_indexes = low_cardinality_src->getIndexes();
+            if (start + length > src_indexes.size())
+                throw Exception(ErrorCodes::PARAMETER_OUT_OF_BOUND, "Parameters start = {}, length = {} are out of bound in "
+                    "ColumnLowCardinality::insertRangeFrom method (size() = {}).", start, length, src_indexes.size());
+
+            const IColumnUnique & src_dictionary = low_cardinality_src->getDictionary();
+            const IColumn & src_keys = *src_dictionary.getNestedNotNullableColumn();
+            const std::optional<size_t> src_null_index
+                = src_dictionary.nestedColumnIsNullable() ? std::optional<size_t>(src_dictionary.getNullValueIndex()) : std::nullopt;
+            IColumnUnique & dst_dictionary = getDictionary();
+            const IColumn & dst_keys = *dst_dictionary.getNestedNotNullableColumn();
+            const size_t dst_default_index = dst_dictionary.getNestedTypeDefaultValueIndex();
+
+            std::array<UInt64, max_rows_to_translate_individually> positions;
+            size_t previous_src_position = std::numeric_limits<size_t>::max();
+            UInt64 previous_dst_position = 0;
+            for (size_t i = 0; i < length; ++i)
+            {
+                const size_t src_position = src_indexes.getUInt(start + i);
+                if (src_position != previous_src_position)
+                {
+                    previous_src_position = src_position;
+                    if (src_null_index && src_position == *src_null_index)
+                        previous_dst_position = dst_dictionary.getNullValueIndex();
+                    else if (dst_keys.compareAt(dst_default_index, src_position, src_keys, 1) == 0)
+                        previous_dst_position = dst_default_index;
+                    else
+                        previous_dst_position = dst_dictionary.uniqueInsertFrom(src_keys, src_position);
+                }
+                positions[i] = previous_dst_position;
+            }
+            for (size_t i = 0; i < length; ++i)
+                idx.insertIndex(positions[i]);
+            return;
+        }
 
         /// TODO: Support native insertion from other unique column. It will help to avoid null map creation.
 
