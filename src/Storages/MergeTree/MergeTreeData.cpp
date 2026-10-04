@@ -7815,7 +7815,7 @@ MergeTreeData::PartsToRemoveFromZooKeeper MergeTreeData::removePartsInRangeFromW
             empty_info,
             partition,
             empty_part_name,
-            source_part->getMetadataSnapshot(),
+            getMetadataSnapshotForEmptyPart(*source_part),
             NO_TRANSACTION_PTR,
             source_part->info.isPatch() ? std::optional(source_part->getPatchPartIndex().cloneEmpty()) : std::nullopt);
 
@@ -14716,6 +14716,17 @@ void MergeTreeData::incrementMergedPartsProfileEvent(MergeTreeDataPartType type)
         default:
             break;
     }
+}
+
+StorageMetadataPtr MergeTreeData::getMetadataSnapshotForEmptyPart(const IMergeTreeDataPart & source_part)
+{
+    auto metadata_snapshot = source_part.getMetadataSnapshot();
+    if (!source_part.info.isPatch())
+        return metadata_snapshot;
+
+    auto metadata_with_version = std::make_shared<StorageInMemoryMetadata>(*metadata_snapshot);
+    metadata_with_version->setMetadataVersion(source_part.getMetadataVersion());
+    return metadata_with_version;
 }
 
 std::pair<MergeTreeData::MutableDataPartPtr, scope_guard> MergeTreeData::createEmptyPart(
