@@ -499,6 +499,9 @@ struct Reader
 
         std::atomic<ReadStage> stage {ReadStage::NotStarted};
         std::atomic<size_t> stage_tasks_remaining {0};
+
+        /// Admitted by ReadManager::admitTopKRowGroups and not fully read yet.
+        std::atomic<bool> holds_top_k_admission {false};
     };
 
     struct Step
@@ -583,6 +586,8 @@ struct Reader
     /// TopN dynamic filtering: position of the sort column in `sample_block`, when the best value of
     /// each row group is tracked (see RowGroup::top_k_best_value).
     std::optional<size_t> top_k_best_value_column_pos;
+    /// `row_groups` are ordered by the TopN sort column's statistics instead of file position.
+    bool row_groups_ordered_by_top_k = false;
 
     /// These methods are listed in the order in which they're used, matching ReadStage order.
 
