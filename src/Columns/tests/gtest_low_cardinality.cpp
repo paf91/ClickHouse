@@ -10,6 +10,7 @@
 
 #include <bit>
 #include <functional>
+#include <limits>
 #include <pcg_random.hpp>
 
 using namespace DB;
@@ -289,6 +290,7 @@ TEST(ColumnLowCardinality, ShortRangeFromDifferentDictionaryMatchesRangePath)
         const size_t size_before = destination->size();
         const size_t dictionary_size_before = assert_cast<const ColumnLowCardinality &>(*destination).getDictionary().size();
         EXPECT_THROW(destination->insertRangeFrom(*string_source, string_source->size() - 1, 2), Exception);
+        EXPECT_THROW(destination->insertRangeFrom(*string_source, std::numeric_limits<size_t>::max(), 1), Exception);
         EXPECT_EQ(destination->size(), size_before);
         EXPECT_EQ(assert_cast<const ColumnLowCardinality &>(*destination).getDictionary().size(), dictionary_size_before);
     }

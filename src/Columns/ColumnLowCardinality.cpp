@@ -265,7 +265,7 @@ void ColumnLowCardinality::doInsertRangeFrom(const IColumn & src, size_t start, 
         if (length <= max_rows_to_translate_individually)
         {
             const IColumn & src_indexes = low_cardinality_src->getIndexes();
-            if (start + length > src_indexes.size())
+            if (start > src_indexes.size() || length > src_indexes.size() - start)
                 throw Exception(ErrorCodes::PARAMETER_OUT_OF_BOUND, "Parameters start = {}, length = {} are out of bound in "
                     "ColumnLowCardinality::insertRangeFrom method (size() = {}).", start, length, src_indexes.size());
 
