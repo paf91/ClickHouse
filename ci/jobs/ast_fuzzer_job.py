@@ -63,8 +63,8 @@ def _log_tail(path: Path, max_lines: int = 50, max_bytes: int = 65536) -> str:
 SERVER_MLE_SIGNATURE = r"Received from.*(?:MEMORY_LIMIT_EXCEEDED|memory limit exceeded)"
 
 # The client returns its exception code and the OS keeps the low byte. BuzzHouse findings
-# throw `BUZZHOUSE_ORACLE` (1021 -> 253); `BUZZHOUSE` (739 -> 227) is a fuzzer or config error.
-BUZZHOUSE_ORACLE_ERROR_CODE = 1021
+# throw `BUZZHOUSE_ORACLE` (1022 -> 254); `BUZZHOUSE` (739 -> 227) is a fuzzer or config error.
+BUZZHOUSE_ORACLE_ERROR_CODE = 1022
 BUZZHOUSE_ORACLE_EXIT_CODE = BUZZHOUSE_ORACLE_ERROR_CODE & 0xFF
 BUZZHOUSE_EXCEPTION_EXIT_CODE = 739 & 0xFF
 
