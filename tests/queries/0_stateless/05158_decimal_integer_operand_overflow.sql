@@ -40,3 +40,7 @@ SELECT toTime64('-00:00:01', 0) - toTime('-00:00:02') SETTINGS enable_time_time6
 
 SELECT intDiv(9223372036854775807, nullIf(toDecimal32(2, 0), toDecimal32(2, 0)));
 SELECT 9223372036854775807 / nullIf(toDecimal32(2, 0), toDecimal32(2, 0));
+SELECT intDiv(9223372036854775807, materialize(CAST(NULL, 'Nullable(Decimal32(0))')));
+SELECT 9223372036854775807 / materialize(CAST(NULL, 'Nullable(Decimal32(0))'));
+SELECT intDiv(materialize(9223372036854775807), CAST(NULL, 'Nullable(Decimal32(0))'));
+SELECT intDiv(9223372036854775807, arrayJoin([NULL, toDecimal32(2, 0)])); -- { serverError DECIMAL_OVERFLOW }

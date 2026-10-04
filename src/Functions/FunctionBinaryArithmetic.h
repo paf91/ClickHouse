@@ -2287,6 +2287,15 @@ class FunctionBinaryArithmetic : public IFunction, WithContext
         auto & vec_res = col_res->getData();
         vec_res.resize(col_left_size);
 
+        /// Likewise, when every divisor row is `NULL`, the whole result is `NULL`, so the constant operand
+        /// is not narrowed (and cannot raise `DECIMAL_OVERFLOW`).
+        if (right_nullmap && (col_left_const || col_right_const)
+            && std::all_of(right_nullmap->begin(), right_nullmap->end(), [](UInt8 is_null) { return is_null != 0; }))
+        {
+            std::fill(vec_res.begin(), vec_res.end(), ResultType());
+            return col_res;
+        }
+
         if (col_left && col_right)
         {
             helperInvokeEither<OpCase::Vector, left_is_decimal, right_is_decimal, OpImpl, OpImplCheck>(
