@@ -378,6 +378,8 @@ std::shared_ptr<const ActionsDAG> ReadFromFormatInfo::getFormatFilter(
 {
     if (!filter_actions_dag || (hive_partition_columns_to_read_from_file_path.empty() && requested_virtual_columns.empty()))
         return filter_actions_dag;
+    if (formatReadsHivePartitionColumns())
+        return nullptr;
 
     auto is_added_after_format = [&](const String & name)
     {

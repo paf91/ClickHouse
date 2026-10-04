@@ -126,7 +126,7 @@ void ReadFromObjectStorageStep::initializePipeline(QueryPipelineBuilder & pipeli
 
     /// Iceberg reads the row lineage columns from the data file.
     auto format_filter_info = std::make_shared<FormatFilterInfo>(
-        info.getFormatFilter(filter_actions_dag, /*keep_row_lineage_columns=*/ configuration->isDataLakeConfiguration()),
+        info.getFormatFilter(filter_actions_dag, /*keep_row_lineage_columns=*/ configuration->isIcebergConfiguration()),
         context,
         configuration->getColumnMapperForCurrentSchema(storage_snapshot->metadata, context),
         query_info.row_level_filter,
