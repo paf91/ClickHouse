@@ -45,7 +45,7 @@ namespace DB
         /// The list of hive partition columns. It shall be read from the path regardless if it is present in the file
         NamesAndTypesList hive_partition_columns_to_read_from_file_path;
         /// True if `format_header` has a hive partition column. Its values in the file are not the values
-        /// of the column, so the top-K threshold must not be pushed into the format.
+        /// of the column, so filters and the top-K threshold must not be pushed into the format.
         bool formatReadsHivePartitionColumns() const;
         /// The filter without the conjuncts on hive partition and virtual columns (except row lineage ones if `keep_row_lineage_columns`):
         /// they are added after the format, and a column of the data file with the same name holds other values.
