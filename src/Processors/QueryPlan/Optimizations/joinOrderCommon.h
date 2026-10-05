@@ -19,8 +19,9 @@ struct SelectivityEstimate
 {
     double value = 1.0;
     /// Like `value`, but a key column without NDV statistics uses the row count of its relation
-    /// (an upper bound of its NDV) instead. Only reported by `EXPLAIN` as `estimated (NDV)`;
-    /// the cost model does not use it, because it says nothing about which side is the key.
+    /// (an upper bound of its NDV) instead. Reported by `EXPLAIN` as `estimated (NDV)` and used for the
+    /// match fraction of semi/anti joins; the inner join cost model does not use it, because it says
+    /// nothing about which side is the key.
     double reported_value = 1.0;
     bool reliable = false;
     bool has_equi = false;
@@ -176,10 +177,12 @@ inline std::optional<UInt64> estimateJoinCardinality(
         const bool preserve_left = !isRight(join_kind);
         const double preserved = preserve_left ? lhs : rhs;
         const double other = preserve_left ? rhs : lhs;
-        /// Expected fraction of preserved rows with at least one match. `selectivity.value` is ~1/ndv,
-        /// so `selectivity.value * other` approximates matches per preserved row; cap at 1. Without
-        /// reliable statistics the value is 1, i.e. every preserved row is assumed to have a match.
-        const double match_fraction = std::min(1.0, selectivity.value * other);
+        /// Expected fraction of preserved rows with at least one match. The selectivity is ~1/ndv,
+        /// so `ndv_selectivity * other` approximates matches per preserved row; cap at 1. Without
+        /// reliable statistics use the row-count upper bound of NDV (`reported_value`), which treats
+        /// the join as FK->PK: e.g. a semi join of 1000 rows against 10 keys keeps ~10 rows.
+        const double ndv_selectivity = selectivity.reliable ? selectivity.value : selectivity.reported_value;
+        const double match_fraction = std::min(1.0, ndv_selectivity * other);
         const double kept = (strictness == JoinStrictness::Semi)
             ? preserved * match_fraction
             : preserved * (1.0 - match_fraction);
