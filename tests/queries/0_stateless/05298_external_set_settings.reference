@@ -1,7 +1,7 @@
 metrics	10
 disabled	10
-threads	1000000	3914219105369203805
-threads	1000000	3914219105369203805
+threads	100000	10551038310762432828
+threads	100000	10551038310762432828
 ratio	10
 ratio	10
 rows limit	100
@@ -9,11 +9,11 @@ rows limit	100
 bytes limit	10
 rows break	100	2
 rows break	100	100
-bytes break	65409
-bytes break	65409
+bytes break	1000
+bytes break	17000
 preliminary distinct	1
-preliminary distinct	200000	17371400341328084350
-preliminary distinct	200000	17371400341328084350
+preliminary distinct	20000	10213713121493657055
+preliminary distinct	20000	10213713121493657055
 metrics	finished	['set']	1	1	1	1
 disabled	finished	[]	0	0	0	0
 threads in memory	finished	[]	0	0	0	0
