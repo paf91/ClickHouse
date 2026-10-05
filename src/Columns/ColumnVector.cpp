@@ -752,7 +752,7 @@ void ColumnVector<T>::doInsertRangeFrom(const IColumn & src, size_t start, size_
 {
     const ColumnVector & src_vec = assert_cast<const ColumnVector &>(src);
 
-    if (start + length > src_vec.data.size())
+    if (start > src_vec.data.size() || length > src_vec.data.size() - start)
         throwInsertRangeFromOutOfBound("ColumnVector<T>", start, length, src_vec.data.size());
 
     size_t old_size = data.size();

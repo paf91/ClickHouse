@@ -737,7 +737,7 @@ void ColumnArray::doInsertRangeFrom(const IColumn & src, size_t start, size_t le
 
     const ColumnArray & src_concrete = assert_cast<const ColumnArray &>(src);
 
-    if (start + length > src_concrete.getOffsets().size())
+    if (start > src_concrete.getOffsets().size() || length > src_concrete.getOffsets().size() - start)
         throwInsertRangeFromOutOfBound("ColumnArray", start, length, src_concrete.getOffsets().size());
 
     size_t nested_offset = src_concrete.offsetAt(start);

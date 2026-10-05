@@ -430,7 +430,7 @@ void ColumnDecimal<T>::doInsertRangeFrom(const IColumn & src, size_t start, size
 {
     const ColumnDecimal & src_vec = assert_cast<const ColumnDecimal &>(src);
 
-    if (start + length > src_vec.data.size())
+    if (start > src_vec.data.size() || length > src_vec.data.size() - start)
         throwInsertRangeFromOutOfBound("ColumnDecimal<T>", start, length, src_vec.data.size());
 
     size_t old_size = data.size();

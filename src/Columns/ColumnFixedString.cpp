@@ -295,7 +295,7 @@ void ColumnFixedString::doInsertRangeFrom(const IColumn & src, size_t start, siz
     const ColumnFixedString & src_concrete = assert_cast<const ColumnFixedString &>(src);
     chassert(this->n == src_concrete.n);
 
-    if (start + length > src_concrete.size())
+    if (start > src_concrete.size() || length > src_concrete.size() - start)
         throwInsertRangeFromOutOfBound("ColumnFixedString", start, length, src_concrete.size());
 
     size_t old_size = chars.size();

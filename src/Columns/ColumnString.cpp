@@ -168,7 +168,7 @@ void ColumnString::doInsertRangeFrom(const IColumn & src, size_t start, size_t l
 
     const ColumnString & src_concrete = assert_cast<const ColumnString &>(src);
 
-    if (start + length > src_concrete.offsets.size())
+    if (start > src_concrete.offsets.size() || length > src_concrete.offsets.size() - start)
         throwInsertRangeFromOutOfBound("ColumnString", start, length, src_concrete.offsets.size());
 
     size_t nested_offset = src_concrete.offsetAt(start);
