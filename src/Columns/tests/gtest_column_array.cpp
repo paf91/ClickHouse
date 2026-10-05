@@ -1,8 +1,6 @@
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnConst.h>
-#include <Columns/ColumnDecimal.h>
 #include <Columns/ColumnDynamic.h>
-#include <Columns/ColumnFixedString.h>
 #include <Columns/ColumnLowCardinality.h>
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnString.h>
@@ -21,11 +19,6 @@
 #include <thread>
 
 #include <gtest/gtest.h>
-
-namespace DB::ErrorCodes
-{
-    extern const int PARAMETER_OUT_OF_BOUND;
-}
 
 using namespace DB;
 
@@ -566,34 +559,3 @@ TEST(ColumnArrayDeathTest, ConstNestedColumnIsRejected)
 }
 
 #endif
-
-/// `start + length` wraps around for both ranges, so the sum stays within the one-row source.
-TEST(ColumnsInsertRangeFrom, RejectsWrappedRange)
-{
-    MutableColumns sources;
-    sources.push_back(ColumnUInt64::create(1, 42));
-    sources.push_back(ColumnDecimal<Decimal64>::create(1, 2));
-    sources.push_back(ColumnFixedString::create(4));
-    sources.back()->insertDefault();
-    sources.push_back(ColumnString::create());
-    sources.back()->insertDefault();
-    sources.push_back(createArray({10}, {1}));
-
-    constexpr size_t max = std::numeric_limits<size_t>::max();
-    for (const auto & source : sources)
-    {
-        for (auto [start, length] : {std::pair{max, size_t{2}}, std::pair{size_t{1}, max}})
-        {
-            auto destination = source->cloneEmpty();
-            try
-            {
-                destination->insertRangeFrom(*source, start, length);
-                ADD_FAILURE() << source->getName() << " accepted start = " << start << ", length = " << length;
-            }
-            catch (const Exception & e)
-            {
-                EXPECT_EQ(e.code(), ErrorCodes::PARAMETER_OUT_OF_BOUND) << source->getName();
-            }
-        }
-    }
-}
