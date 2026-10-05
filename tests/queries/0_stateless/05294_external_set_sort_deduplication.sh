@@ -56,7 +56,7 @@ build_set duplicate_only_merge_step_in_memory 65536 100 "= 1" \
      FROM numbers(203) SETTINGS max_block_size = 1"
 
 # With 1,000 copies, the sorter writes a run of more than 100 chunks, the steps belong to the merge that
-# writes it, and each step without rows writes an empty block.
+# writes it, and the steps without rows write no block.
 build_set duplicate_only_merge_step_in_run 65536 100 "> 1" \
     "SELECT arrayJoin(if(number = 0, range(1000000, 1002100), [multiIf(number < 100, number - 1, number = 100, 300, 200)]))
      FROM numbers(1101) SETTINGS max_block_size = 1"
