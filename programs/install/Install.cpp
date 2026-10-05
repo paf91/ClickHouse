@@ -204,9 +204,14 @@ static bool hasPassword(const Poco::Util::AbstractConfiguration & config, const 
 
 /// Whether the user at `user_path` in a users config can authenticate only with credentials, i.e. not with an empty password
 /// or `no_password`. Checks the same carriers as `UsersConfigParser`: the flat fields of the user and every entry of `auth_methods`.
-/// Any entry of `auth_methods` that needs no credentials makes the user accessible without them.
+/// Any entry of `auth_methods` that needs no credentials makes the user accessible without them, unless the user has
+/// `time_based_one_time_password`: it applies to every authentication method, even `no_password` or an empty password
+/// (see `checkBasicAuthentication`).
 static bool hasCredentials(const Poco::Util::AbstractConfiguration & config, const std::string & user_path)
 {
+    if (config.has(user_path + ".time_based_one_time_password"))
+        return true;
+
     auto has_credentials_at = [&](const std::string & path)
     {
         if (hasPasswordAt(config, path))
