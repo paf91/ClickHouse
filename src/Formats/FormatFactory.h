@@ -68,6 +68,16 @@ FormatSettings getFormatSettings(const ContextPtr & context, const Settings & se
 /// query carries type names in both directions, because a server-side `Connection` never takes format settings.
 FormatSettings getNativeWireFormatSettings(const ContextPtr & context, UInt64 peer_protocol_revision);
 
+/** A hash of the session settings `getFormatSettings` derives a `FormatSettings` from, for whatever
+  * keys a value by the settings that produced it: a function that captured a `FormatSettings` when it
+  * was built contributes this to `IFunctionBase::updateHash`. The struct itself has too many members
+  * to hash one by one without leaving one out, while this covers every setting of
+  * `FORMAT_FACTORY_SETTINGS` (and the few core settings `getFormatSettings` reads besides) as they
+  * are declared: two sessions get the same hash exactly when their format settings have the same
+  * effective values, whether a default was left alone or spelled explicitly.
+  */
+UInt64 getFormatSettingsHash(const Settings & settings);
+
 /// `output_format_arrow_unsupported_types` supersedes the older boolean
 /// `output_format_arrow_unsupported_types_as_binary` (`0` means `throw`, `1` means `binary`). The boolean is
 /// only consulted while the new setting is left at its default, so an explicit `throw`/`text`/`binary` wins
