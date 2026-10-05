@@ -177,6 +177,31 @@ static bool hasAuthentication(const Poco::Util::AbstractConfiguration & config, 
     return false;
 }
 
+/// Whether a flat authentication method at `path` in a users config is a non-empty password.
+static bool hasPasswordAt(const Poco::Util::AbstractConfiguration & config, const std::string & path)
+{
+    for (const auto * key : {"password", "password_sha256_hex", "password_scram_sha256_hex", "password_double_sha1_hex"})
+        if (!config.getString(path + "." + key, "").empty())
+            return true;
+    return false;
+}
+
+/// Whether the user at `user_path` in a users config has a non-empty password among its authentication methods,
+/// either as a flat field or as an entry of `auth_methods`, so that it can connect with `clickhouse-client --password`.
+static bool hasPassword(const Poco::Util::AbstractConfiguration & config, const std::string & user_path)
+{
+    const std::string auth_methods_path = user_path + ".auth_methods";
+    if (!config.has(auth_methods_path))
+        return hasPasswordAt(config, user_path);
+
+    Poco::Util::AbstractConfiguration::Keys auth_methods;
+    config.keys(auth_methods_path, auth_methods);
+    for (const auto & auth_method : auth_methods)
+        if (hasPasswordAt(config, auth_methods_path + "." + auth_method))
+            return true;
+    return false;
+}
+
 /// Whether the user at `user_path` in a users config can authenticate only with credentials, i.e. not with an empty password
 /// or `no_password`. Checks the same carriers as `UsersConfigParser`: the flat fields of the user and every entry of `auth_methods`.
 /// Any entry of `auth_methods` that needs no credentials makes the user accessible without them.
@@ -184,9 +209,8 @@ static bool hasCredentials(const Poco::Util::AbstractConfiguration & config, con
 {
     auto has_credentials_at = [&](const std::string & path)
     {
-        for (const auto * key : {"password", "password_sha256_hex", "password_scram_sha256_hex", "password_double_sha1_hex"})
-            if (!config.getString(path + "." + key, "").empty())
-                return true;
+        if (hasPasswordAt(config, path))
+            return true;
         for (const auto * key : {"ldap", "kerberos", "ssl_certificates", "ssh_keys", "http_authentication"})
             if (config.has(path + "." + key))
                 return true;
@@ -724,6 +748,8 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
         /// so the installer does not set up a password for it.
         bool has_authentication_for_default_user = false;
         /// True if the default user cannot log in without credentials, so it is reasonable to accept connections from the network.
+        bool has_credentials_for_default_user = false;
+        /// True if the default user has a password, so it can connect with `clickhouse-client --password`.
         bool has_password_for_default_user = false;
         bool is_default_user_removed = false;
         /// True if no XML users config preceding `shadowing_access_storage` defines the default user,
@@ -1059,7 +1085,8 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
 
                 is_default_user_removed = false;
                 has_authentication_for_default_user = hasAuthentication(*configuration, "users.default");
-                has_password_for_default_user = hasCredentials(*configuration, "users.default");
+                has_credentials_for_default_user = hasCredentials(*configuration, "users.default");
+                has_password_for_default_user = hasPassword(*configuration, "users.default");
                 if (i != 0)
                 {
                     default_user_config_file = users_config_path;
@@ -1182,9 +1209,14 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
             fmt::print("{}The default user is removed from {} and {}. Not setting up a password for it.{}\n",
                 start_hilite, users_config_file.string(), users_d.string(), end_hilite);
         }
-        else if (has_password_for_default_user)
+        else if (has_credentials_for_default_user && has_password_for_default_user)
         {
             fmt::print("{}Password for the default user is already specified. To remind or reset, see {} and {}.{}\n",
+                start_hilite, default_user_config_file.string(), default_user_users_d.string(), end_hilite);
+        }
+        else if (has_credentials_for_default_user)
+        {
+            fmt::print("{}The default user is configured to authenticate with credentials other than a password. See {} and {} to change it.{}\n",
                 start_hilite, default_user_config_file.string(), default_user_users_d.string(), end_hilite);
         }
         else if (has_authentication_for_default_user)
@@ -1247,6 +1279,7 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
                 out.finalize();
                 fmt::print("{}Password for the default user is saved in plaintext in file {}.{}\n", start_hilite, password_file, end_hilite);
 #endif
+                has_credentials_for_default_user = true;
                 has_password_for_default_user = true;
             }
             else
@@ -1279,8 +1312,8 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
         executeScript(command);
 #endif
 
-        /// If password was set, ask for open for connections.
-        if (is_interactive && has_password_for_default_user)
+        /// If the default user cannot log in without credentials, ask for open for connections.
+        if (is_interactive && has_credentials_for_default_user)
         {
             if (ask("Allow server to accept connections from the network (default is localhost only), [y/N]: "))
             {
@@ -1298,21 +1331,48 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
         /// Chmod and chown configs
         changeOwnership(config_dir, user, group);
 
-        /// The users config may live outside the config directory, the server needs to read it as well.
+        /// The server reads every XML users config together with its merge directories (`<name>.d` and `conf.d`, like `ConfigProcessor`),
+        /// and they may live outside the config directory, so it needs to read them as well.
+        std::vector<fs::path> users_config_files_to_fix;
+        std::vector<fs::path> users_config_dirs_to_fix;
         if (has_users_xml_config)
         {
+            auto add_unique = [](std::vector<fs::path> & paths, const fs::path & added_path)
+            {
+                fs::path normal_path = added_path.lexically_normal();
+                if (std::find(paths.begin(), paths.end(), normal_path) == paths.end())
+                    paths.push_back(std::move(normal_path));
+            };
+
+            auto add_users_config = [&](const fs::path & users_config_path)
+            {
+                /// A relative path is resolved against the working directory of the server, which is not known here.
+                if (users_config_path.is_relative())
+                    return;
+                if (fs::exists(users_config_path))
+                    add_unique(users_config_files_to_fix, users_config_path);
+                for (const auto & merge_dir : {fs::path(users_config_path).replace_extension("d"), fs::path(users_config_path).replace_filename("conf.d")})
+                    if (fs::is_directory(merge_dir))
+                        add_unique(users_config_dirs_to_fix, merge_dir);
+            };
+
+            add_users_config(users_config_file);
+            /// This also covers the `.d` directory of the users config that defines the default user, which may have been just created.
+            for (const auto & users_config_path : users_config_files)
+                add_users_config(users_config_path);
+
             auto is_outside_config_dir = [&](const fs::path & checked_path)
             {
                 auto relative = checked_path.lexically_normal().lexically_relative(config_dir.lexically_normal());
                 return relative.empty() || *relative.begin() == "..";
             };
 
-            if (fs::exists(users_config_file) && is_outside_config_dir(users_config_file))
-                changeOwnership(users_config_file, user, group, /* recursive= */ false);
-            if (fs::exists(users_d) && is_outside_config_dir(users_d))
-                changeOwnership(users_d, user, group);
-            if (default_user_users_d != users_d && fs::exists(default_user_users_d) && is_outside_config_dir(default_user_users_d))
-                changeOwnership(default_user_users_d, user, group);
+            for (const auto & users_config_path : users_config_files_to_fix)
+                if (is_outside_config_dir(users_config_path))
+                    changeOwnership(users_config_path, user, group, /* recursive= */ false);
+            for (const auto & merge_dir : users_config_dirs_to_fix)
+                if (is_outside_config_dir(merge_dir))
+                    changeOwnership(merge_dir, user, group);
         }
 
         /// Symlink "preprocessed_configs" is created by the server, so "write" is needed.
@@ -1321,20 +1381,18 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
         /// Subdirectories, so "execute" is needed.
         if (fs::exists(config_d))
             fs::permissions(config_d, fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
-        if (has_users_xml_config && fs::exists(users_d))
-            fs::permissions(users_d, fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
-        if (has_users_xml_config && default_user_users_d != users_d && fs::exists(default_user_users_d))
-            fs::permissions(default_user_users_d, fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
+        for (const auto & merge_dir : users_config_dirs_to_fix)
+            fs::permissions(merge_dir, fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
 
         /// Readonly.
         if (fs::exists(main_config_file))
             fs::permissions(main_config_file, fs::perms::owner_read, fs::perm_options::replace);
-        if (has_users_xml_config && fs::exists(users_config_file))
-            fs::permissions(users_config_file, fs::perms::owner_read, fs::perm_options::replace);
+        for (const auto & users_config_path : users_config_files_to_fix)
+            fs::permissions(users_config_path, fs::perms::owner_read, fs::perm_options::replace);
 
 
         std::string maybe_password;
-        if (has_password_for_default_user)
+        if (has_credentials_for_default_user && has_password_for_default_user)
             maybe_password = " --password";
 
         /// If user specified --prefix, --pid-path, --config-path, --binary-path, --user, --group
