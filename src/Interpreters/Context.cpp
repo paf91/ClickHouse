@@ -3982,6 +3982,7 @@ void Context::resetSettingsToDefaultValue(const std::vector<String> & names)
         settings->set(COMPATIBILITY_SETTING_NAME, (*settings)[Setting::compatibility].value);
         restrictSettingsChangedByCompatibilityWithLock(lock);
     }
+    applySettingsQuirks(*settings);
     adjustSettingsForMakeDistributedPlan(*settings);
 }
 
