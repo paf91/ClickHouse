@@ -40,6 +40,8 @@ SELECT count() FROM t3 LEFT SEMI JOIN (SELECT t1.a AS a FROM t1, t2) AS s ON t3.
 SELECT t1.b + t2.b AS k, count() FROM t1, t2 GROUP BY k;
 SELECT DISTINCT t1.b, t1.b + t2.b FROM t1, t2;
 SELECT t1.b, t2.b FROM t1, t2 INTERSECT DISTINCT SELECT a, a FROM t3;
+-- The same overflow in the join order optimizer, without Cascades.
+SELECT count() FROM (SELECT number % 3 AS k, count() AS c FROM (SELECT number FROM numbers(10) LIMIT 18446744073709551615) GROUP BY k) AS agg INNER JOIN t3 ON agg.k = t3.a SETTINGS make_distributed_plan = 0, enable_cascades_optimizer = 0;
 
 DROP TABLE t1;
 DROP TABLE t2;
