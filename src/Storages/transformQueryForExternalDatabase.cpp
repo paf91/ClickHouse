@@ -66,7 +66,12 @@ public:
 
     static void visit(ASTPtr & node, Block & block_with_constants)
     {
-        if (!node->as<ASTFunction>())
+        const auto * function = node->as<ASTFunction>();
+        if (!function)
+            return;
+
+        /// A constant row value or `IN` list keeps its structure, its elements are folded one by one.
+        if (function->name == "tuple")
             return;
 
         std::string name = node->getColumnName();
@@ -79,6 +84,11 @@ public:
             if (result.column->isNullAt(0))
             {
                 node = make_intrusive<ASTLiteral>(Field());
+            }
+            else if (holdsEnumValue(assert_cast<const ColumnConst &>(*result.column).getDataColumnPtr(), result.type))
+            {
+                /// Left as is, so the condition is not pushed down: an `Enum` compares by name or by value depending on the other operand.
+                return;
             }
             else if (isNumber(result.type))
             {
