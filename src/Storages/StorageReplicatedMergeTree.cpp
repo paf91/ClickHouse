@@ -12023,12 +12023,12 @@ void StorageReplicatedMergeTree::applyMetadataChangesToCreateQueryForBackup(cons
         auto columns_from_entry = ColumnsDescription::parse(zookeeper->get(fs::path(zookeeper_path) / "columns"));
         auto current_metadata = getInMemoryMetadataPtr(getContext(), false);
 
-        /// Comment ALTERs are not replicated through ZooKeeper, so the backup keeps the comments this replica
-        /// has applied, and the snapshot decides only for the columns it does not have yet.
+        /// Comment ALTERs are not replicated through ZooKeeper, so the backup keeps the comments this replica has
+        /// applied, except for columns it does not have yet or has with another type than the snapshot.
         for (const auto & column : current_metadata->columns)
         {
             const auto * entry_column = columns_from_entry.tryGet(column.name);
-            if (entry_column && entry_column->comment != column.comment)
+            if (entry_column && entry_column->comment != column.comment && entry_column->type->equals(*column.type))
                 columns_from_entry.modify(column.name, [&](ColumnDescription & c) { c.comment = column.comment; });
         }
 
