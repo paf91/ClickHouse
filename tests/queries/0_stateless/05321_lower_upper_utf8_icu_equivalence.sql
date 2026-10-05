@@ -85,3 +85,14 @@ FROM
         t.1 AS i,
         t.2 AS s
 );
+
+-- Rows after a row whose ICU output reallocates the result: the first row for upperUTF8, the seventh for lowerUTF8.
+SELECT i, length(lowerUTF8(s)), cityHash64(lowerUTF8(s)), length(upperUTF8(s)), cityHash64(upperUTF8(s))
+FROM
+(
+    SELECT arrayJoin(arrayZip(range(1, 11), [repeat('ΐ', 20000), 'Ab', 'abcdefghijklmnopqrstuvwxyzABCDEF', 'É', 'Жж', '€',
+        repeat('İ', 40000), 'ÉÉ Ab', 'abcdefghijklmnopqrstuvwxyzABCDEF', 'xé'])) AS t,
+        t.1 AS i,
+        t.2 AS s
+)
+FORMAT TSV;
