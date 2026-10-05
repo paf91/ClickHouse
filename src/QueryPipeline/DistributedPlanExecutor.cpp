@@ -452,8 +452,7 @@ private:
             /// forwarding them would only grow the queue and wake the consumer for nothing.
             if (!chunk.hasRows() && chunk.getChunkInfos().empty())
                 return;
-            /// The serialized exchanges materialize constants (`NativeWriter`) and the consumer's header is deserialized
-            /// without them, so a constant column must not cross this exchange either.
+            /// The consumer's header is deserialized without constants, so a constant column must not cross this exchange.
             convertToFullIfConst(chunk);
             exchange->appendChunk(std::move(chunk));
         }
