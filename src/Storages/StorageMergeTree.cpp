@@ -263,6 +263,12 @@ void StorageMergeTree::startup()
 {
     auto component_guard = Coordination::setCurrentComponent("StorageMergeTree::startup");
 
+    /// A late async startup of a table that was already shut down (e.g. by a concurrent `DETACH`) must not
+    /// arm anything: the cleanup thread and the part-loading tasks run their first iteration right away,
+    /// before the re-check of `shutdown_called` below could unwind them.
+    if (shutdown_called.load())
+        return;
+
     const bool readonly = isTableReadonly();
     if (!readonly)
     {
