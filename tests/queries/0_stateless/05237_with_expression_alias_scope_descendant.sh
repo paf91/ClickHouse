@@ -102,5 +102,18 @@ SELECT 'live subquery', (WITH (SELECT ([7] AS sub)[1]) AS s SELECT (SELECT toUIn
 ALTER TABLE t UPDATE v = (WITH (SELECT ([7] AS sub)[1]) AS s SELECT (SELECT toUInt8(7 IN sub) * 100 + toUInt8(5 IN sub) * 10)) WHERE id = 5 SETTINGS mutations_sync = 2;
 SELECT 'mutation subquery', v FROM t WHERE id = 5;
 
+-- An alias declared inside a lambda is not visible in the rest of its own select either, so the
+-- stored mutation command and \`MODIFY QUERY\` definition qualify the name outside the lambda.
+ALTER TABLE t UPDATE v = (SELECT toUInt8(7 IN lam) * 100 + toUInt8(5 IN lam) * 10 + arrayMap(y -> y * length([7] AS lam), [0])[1]) WHERE id = 1 SETTINGS mutations_sync = 2;
+SELECT 'mutation own lambda', v FROM t WHERE id = 1;
+SELECT 'mutation own lambda qualified', position(command, currentDatabase() || '.lam') > 0
+FROM system.mutations WHERE database = currentDatabase() AND table = 't' AND position(command, 'arrayMap') > 0;
+CREATE MATERIALIZED VIEW mv_own_lambda ENGINE = MergeTree ORDER BY tuple() AS SELECT x, toUInt8(7 IN [1]) AS r FROM src;
+ALTER TABLE mv_own_lambda MODIFY QUERY SELECT x, toUInt8(7 IN lam) * 100 + toUInt8(5 IN lam) * 10 + arrayMap(y -> y * length([7] AS lam), [0])[1] AS r FROM src;
+SELECT 'modify query own lambda qualified', position(create_table_query, currentDatabase() || '.lam') > 0
+FROM system.tables WHERE database = currentDatabase() AND name = 'mv_own_lambda';
+INSERT INTO src VALUES (2);
+SELECT 'modify query own lambda', r FROM mv_own_lambda;
+
 DROP FUNCTION ${F_ALIAS};
 EOF
