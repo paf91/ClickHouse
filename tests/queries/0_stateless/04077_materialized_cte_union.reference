@@ -14,6 +14,7 @@ MaterializingCTEs (Materialize CTEs before main query execution)
 │  │        │  Limit 1
 │  │        └──ReadFromMemoryStorage
 │  │              Output: repo_name, count()
+│  │              TopN filter column: c
 │  ├──MaterializingCTEs (Materialize CTEs before main query execution)
 │  │  └──Filter ((WHERE + Change column names to column identifiers))
 │  │     │  Filter column: count() = 0
