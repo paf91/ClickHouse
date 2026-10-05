@@ -16,8 +16,9 @@ query_log:
     engine: "ENGINE = Memory"
 YAML
 
-# Every form of `IN` whose set is filled while the query runs: a subquery or a table, in each clause and kind of
-# query, under both analyzers, and the set of the conversion of `JOIN` to `IN`. Each has its own `log_comment`.
+# Every form of `IN` whose set is filled while the query runs: a subquery or a table, in each clause and kind
+# of query, under both analyzers, and the set of the conversion of `JOIN` to `IN`. Each has its own
+# `log_comment`.
 QUERIES=$(cat <<'SQL'
 CREATE TABLE keys (k UInt64) ENGINE = MergeTree ORDER BY k;
 INSERT INTO keys SELECT number * 3 FROM numbers(10000);
@@ -105,8 +106,9 @@ grep -v '^report' "${LOCAL_DIR}/1.out"
 grep '^report' "${LOCAL_DIR}/1.out"
 grep '^report' "${LOCAL_DIR}/0.out" | awk -F'\t' '{ built += $3; spilled += $4 } END { print "without a threshold", built, spilled }'
 
-# A lightweight `DELETE` and an `UPDATE` mutate three partitions, which share the sets of each mutation through
-# the prepared sets cache: each mutation builds two sets, as it does with one part. The log does not attribute
+# A lightweight `DELETE` and an `UPDATE` mutate three partitions. The tasks of the parts share the sets of a
+# mutation through the prepared sets cache while they overlap, so the number of sets built depends on their
+# timing, but every set spills with a threshold of 1 byte and none without it. The log does not attribute
 # mutations to their queries, so the events of the process count the sets.
 for threshold in 0 1; do
     ${CLICKHOUSE_LOCAL} --path "${LOCAL_DIR}/mutations-${threshold}" --max_bytes_before_external_set "${threshold}" \
@@ -116,9 +118,10 @@ INSERT INTO d SELECT number, 0 FROM numbers(30000);
 DELETE FROM d WHERE k IN (SELECT number * 3 FROM numbers(10000));
 ALTER TABLE d UPDATE v = 1 WHERE k IN (SELECT number * 5 FROM numbers(10000)) SETTINGS mutations_sync = 2;
 SELECT 'mutations', count(), sum(v) FROM d;
+WITH (SELECT sum(value) FROM system.events WHERE event = 'SetsBuiltFromSubquery') AS built,
+    (SELECT sum(value) FROM system.events WHERE event = 'SetsSpilledToDisk') AS spilled
 SELECT 'mutations', (SELECT count() FROM system.parts WHERE database = currentDatabase() AND table = 'd' AND active),
-    (SELECT sum(value) FROM system.events WHERE event = 'SetsBuiltFromSubquery'),
-    (SELECT sum(value) FROM system.events WHERE event = 'SetsSpilledToDisk');
+    built > 0, multiIf(spilled = 0, 'none spilled', spilled = built, 'all spilled', 'some spilled');
 SQL
 done
 diff -u <(head -n 1 "${LOCAL_DIR}/mutations-0.out") <(head -n 1 "${LOCAL_DIR}/mutations-1.out")
