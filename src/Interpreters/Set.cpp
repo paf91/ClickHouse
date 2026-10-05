@@ -152,19 +152,23 @@ bool Set::isSpillNeededBeforeInsert(const ColumnRawPtrs & key_columns, size_t ro
     if (spill_memory > available_memory)
         return true;
 
-    size_t growth_memory = data->estimateGrowthMemory(key_columns, /*start_row=*/0, rows);
+    /// The insertion grows the table and its arena, and the state of a method with fixed keys packs the keys of
+    /// the whole chunk before inserting them.
+    size_t insert_memory = data->estimateGrowthMemory(key_columns, /*start_row=*/0, rows);
+    if (common::addOverflow(insert_memory, data->estimatePreparedKeysMemory(rows, key_sizes), insert_memory))
+        return true;
 
     if (fill_set_elements)
     {
         /// Explicit elements copy the new keys.
         for (const auto * column : key_columns)
         {
-            if (common::addOverflow(growth_memory, column->byteSize(), growth_memory))
+            if (common::addOverflow(insert_memory, column->byteSize(), insert_memory))
                 return true;
         }
     }
 
-    return growth_memory > available_memory - spill_memory;
+    return insert_memory > available_memory - spill_memory;
 }
 
 void Set::spill(std::string_view reason)
