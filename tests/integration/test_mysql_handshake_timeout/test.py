@@ -124,6 +124,16 @@ def tls_server_handshake_counters():
     ]
 
 
+def assert_one_tls_handshake_cut_at_budget(counters_before):
+    """The client sees the close only after the exception is logged, which can take seconds, so the
+    server's counters measure the handshake."""
+    errors_before, microseconds_before = counters_before
+    errors, microseconds = tls_server_handshake_counters()
+    assert errors - errors_before == 1, f"{errors - errors_before} TLS handshakes failed, expected one"
+    held = (microseconds - microseconds_before) / 1e6
+    assert HANDSHAKE_TIMEOUT - 2 <= held < 1.5 * HANDSHAKE_TIMEOUT, f"TLS handshake held for {held} seconds"
+
+
 def test_trickled_handshake_is_disconnected(started_cluster):
     """A trickling client must be cut off by the wall-clock deadline.
 
@@ -221,6 +231,7 @@ def test_trickled_tls_handshake_is_disconnected(started_cluster):
     per read, and a byte before each timeout kept the negotiation alive indefinitely.
     """
     seen = int(node.count_in_log(SOCKET_TIMEOUT_LINE))
+    counters_before = tls_server_handshake_counters()
     sock = connect_and_read_greeting()
     started = time.monotonic()
     try:
@@ -245,6 +256,7 @@ def test_trickled_tls_handshake_is_disconnected(started_cluster):
     finally:
         sock.close()
 
+    assert_one_tls_handshake_cut_at_budget(counters_before)
     node.wait_for_log_line(SOCKET_TIMEOUT_LINE, repetitions=seen + 1)
 
 
@@ -259,12 +271,10 @@ def test_trickled_tls_handshake_is_disconnected(started_cluster):
 def test_timed_out_tls_handshake_on_native_port_gets_no_reply(started_cluster, payload):
     """A stalled TLS handshake on the secure native port must be closed at the budget, not twice it.
 
-    Writing the exception to such a socket runs the handshake again, for another full window. The
-    server's counters measure the handshake: the client sees the close only after the exception is
-    logged, which can take seconds.
+    Writing the exception to such a socket runs the handshake again, for another full window.
     """
     seen = int(node.count_in_log(SOCKET_TIMEOUT_LINE))
-    errors_before, microseconds_before = tls_server_handshake_counters()
+    counters_before = tls_server_handshake_counters()
     sock = socket.create_connection((node.ip_address, SECURE_NATIVE_PORT), timeout=DISCONNECT_DEADLINE)
     try:
         sock.sendall(payload)
@@ -272,11 +282,7 @@ def test_timed_out_tls_handshake_on_native_port_gets_no_reply(started_cluster, p
     finally:
         sock.close()
 
-    errors, microseconds = tls_server_handshake_counters()
-    assert errors - errors_before == 1, f"{errors - errors_before} TLS handshakes failed, expected one"
-    held = (microseconds - microseconds_before) / 1e6
-    assert HANDSHAKE_TIMEOUT - 2 <= held < 1.5 * HANDSHAKE_TIMEOUT, f"TLS handshake held for {held} seconds"
-
+    assert_one_tls_handshake_cut_at_budget(counters_before)
     node.wait_for_log_line(SOCKET_TIMEOUT_LINE, repetitions=seen + 1)
 
 
