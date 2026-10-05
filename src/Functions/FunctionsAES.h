@@ -386,7 +386,9 @@ private:
     /// padding and, for CBC, the chaining XOR. For longer CBC rows the per-block
     /// EVP_EncryptUpdate calls lose to OpenSSL's stitched AES-NI CBC implementation,
     /// so those rows go through a CBC context that is re-initialized with only the IV
-    /// (keeping the expanded key schedule) between rows.
+    /// (keeping the expanded key schedule) between rows. A row shorter than a block is a
+    /// single block with no chaining, so runs of such rows are encrypted in place with one
+    /// EVP_EncryptUpdate.
     /// See https://github.com/ClickHouse/ClickHouse/issues/65116
     template <CipherMode mode>
     static ColumnPtr doEncryptBlockCipher(
@@ -407,6 +409,8 @@ private:
         /// stitched CBC implementation re-initialized per row (the measured crossover
         /// is between 64 and 96 bytes).
         constexpr size_t stitched_cbc_threshold = 64;
+        /// Upper bound on the bytes of deferred single-block rows encrypted by one call.
+        constexpr size_t max_pending_size = 4096;
 
         const bool is_cbc = EVP_CIPHER_mode(evp_cipher) == EVP_CIPH_CBC_MODE;
         const auto key_size = static_cast<size_t>(EVP_CIPHER_key_length(evp_cipher));
@@ -442,6 +446,20 @@ private:
         CachedKeyState cbc_key_state;
         static constexpr unsigned char zero_iv[EVP_MAX_IV_LENGTH]{};
 
+        /// [pending, encrypted) holds padded blocks of deferred rows, not yet encrypted with the key in ecb_ctx.
+        auto * pending = encrypted;
+        auto encrypt_pending = [&]
+        {
+            if (pending == encrypted)
+                return;
+            auto * blocks = reinterpret_cast<unsigned char *>(pending);
+            int len = 0;
+            if (EVP_EncryptUpdate(ecb_ctx, blocks, &len, blocks, static_cast<int>(encrypted - pending)) != 1)
+                onError("EVP_EncryptUpdate");
+            __msan_unpoison(pending, encrypted - pending);
+            pending = encrypted;
+        };
+
         for (size_t row_idx = 0; row_idx < input_rows_count; ++row_idx)
         {
             const auto key_value = key_holder.setKey(key_size, key_reader[row_idx]);
@@ -458,6 +476,10 @@ private:
             const auto * input = reinterpret_cast<const unsigned char *>(input_value.data());
             const size_t input_size = input_value.size();
             [[maybe_unused]] const auto * row_begin = encrypted;
+
+            const bool deferred = input_size < block_size;
+            if (!deferred)
+                encrypt_pending();
 
             int output_len = 0;
             if (is_cbc && input_size >= stitched_cbc_threshold)
@@ -488,6 +510,7 @@ private:
             {
                 if (!ecb_key_state.matches(key_value))
                 {
+                    encrypt_pending();
                     const bool first_init = !ecb_key_state.hasContext();
                     if (EVP_EncryptInit_ex(ecb_ctx, first_init ? ecb_cipher : nullptr, nullptr,
                             reinterpret_cast<const unsigned char *>(key_value.data()), nullptr) != 1)
@@ -526,9 +549,11 @@ private:
                     encrypted += output_len;
                 }
 
-                /// The last block: remaining input bytes plus PKCS#7 padding.
+                /// The last block: remaining input bytes plus PKCS#7 padding. A deferred row's
+                /// only block is built in place and encrypted with the pending run.
                 const size_t remaining = input_size - full_blocks * block_size;
-                unsigned char last[block_size];
+                unsigned char last_buf[block_size];
+                auto * last = deferred ? reinterpret_cast<unsigned char *>(encrypted) : last_buf;
                 if (remaining > 0)
                     memcpy(last, input + full_blocks * block_size, remaining);
                 memset(last + remaining, static_cast<int>(block_size - remaining), block_size - remaining);
@@ -537,14 +562,20 @@ private:
                     for (size_t i = 0; i < block_size; ++i)
                         last[i] ^= chain[i];
                 }
-                if (EVP_EncryptUpdate(ecb_ctx, reinterpret_cast<unsigned char *>(encrypted), &output_len, last, block_size) != 1)
+                if (!deferred && EVP_EncryptUpdate(ecb_ctx, reinterpret_cast<unsigned char *>(encrypted), &output_len, last, block_size) != 1)
                     onError("EVP_EncryptUpdate");
                 encrypted += block_size;
+                if (deferred && static_cast<size_t>(encrypted - pending) >= max_pending_size)
+                    encrypt_pending();
             }
+
+            if (!deferred)
+                pending = encrypted;
 
             __msan_unpoison(row_begin, encrypted - row_begin); /// OpenSSL uses assembly which evades msan's analysis
             encrypted_result_column_offsets.push_back(encrypted - encrypted_result_column_data.data());
         }
+        encrypt_pending();
 
         encrypted_result_column->validate();
         return encrypted_result_column;
