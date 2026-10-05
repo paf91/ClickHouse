@@ -74,8 +74,8 @@ CREATE TABLE t_read_in_order_nan_ranges (x Float64) ENGINE = MergeTree ORDER BY 
 INSERT INTO t_read_in_order_nan_ranges SELECT number + 1 FROM numbers(8);
 
 SELECT 'finite ranges';
-SELECT 'x / inf', trim(explain) FROM (EXPLAIN indexes = 1 SELECT count() FROM t_read_in_order_nan_ranges WHERE x / inf = 1) WHERE explain LIKE '%Granules: %/%';
-SELECT 'x * 0.', trim(explain) FROM (EXPLAIN indexes = 1 SELECT count() FROM t_read_in_order_nan_ranges WHERE x * 0. = 1) WHERE explain LIKE '%Granules: %/%';
+SELECT 'x / inf', extract(explain, 'Granules: \\d+/\\d+') FROM (EXPLAIN indexes = 1 SELECT count() FROM t_read_in_order_nan_ranges WHERE x / inf = 1) WHERE explain LIKE '%Granules: %/%';
+SELECT 'x * 0.', extract(explain, 'Granules: \\d+/\\d+') FROM (EXPLAIN indexes = 1 SELECT count() FROM t_read_in_order_nan_ranges WHERE x * 0. = 1) WHERE explain LIKE '%Granules: %/%';
 
 INSERT INTO t_read_in_order_nan_ranges VALUES (-inf), (0);
 
@@ -85,3 +85,19 @@ SELECT count() FROM t_read_in_order_nan_ranges WHERE isNaN(x * 0.);
 SELECT count() FROM t_read_in_order_nan_ranges WHERE isNaN(x * inf);
 
 DROP TABLE t_read_in_order_nan_ranges;
+
+-- The same for a `BFloat16` key, whose mark range endpoints are `Float64`.
+DROP TABLE IF EXISTS t_read_in_order_nan_ranges_bf16;
+CREATE TABLE t_read_in_order_nan_ranges_bf16 (x BFloat16) ENGINE = MergeTree ORDER BY x SETTINGS index_granularity = 2, index_granularity_bytes = '10Mi';
+INSERT INTO t_read_in_order_nan_ranges_bf16 SELECT number + 1 FROM numbers(8);
+
+SELECT 'finite ranges BFloat16';
+SELECT 'x / inf', extract(explain, 'Granules: \\d+/\\d+') FROM (EXPLAIN indexes = 1 SELECT count() FROM t_read_in_order_nan_ranges_bf16 WHERE x / inf = 1) WHERE explain LIKE '%Granules: %/%';
+SELECT 'x * 0.', extract(explain, 'Granules: \\d+/\\d+') FROM (EXPLAIN indexes = 1 SELECT count() FROM t_read_in_order_nan_ranges_bf16 WHERE x * 0. = 1) WHERE explain LIKE '%Granules: %/%';
+
+INSERT INTO t_read_in_order_nan_ranges_bf16 VALUES (-inf), (0);
+
+SELECT count() FROM t_read_in_order_nan_ranges_bf16 WHERE isNaN(x / inf);
+SELECT count() FROM t_read_in_order_nan_ranges_bf16 WHERE isNaN(x * 0.);
+
+DROP TABLE t_read_in_order_nan_ranges_bf16;

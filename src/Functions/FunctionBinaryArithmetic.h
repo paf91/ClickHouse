@@ -3852,9 +3852,10 @@ public:
                 bool varying_can_be_inf = isFloat(varying_type);
                 bool varying_can_be_zero = true;
 
-                /// The endpoints are compared with a numeric `0` only for a native numeric domain: the points of an
-                /// `IPv4` or `Decimal` key do not compare with it, so such a range is assumed to hold zero.
-                if (!left_point.isNull() && !right_point.isNull() && isNativeNumber(varying_type))
+                /// The endpoints are compared with a numeric `0` only for a native numeric or a `Float` domain (the points
+                /// of a `BFloat16` key are `Float64`): the points of an `IPv4` or `Decimal` key do not compare with it,
+                /// so such a range is assumed to hold zero.
+                if (!left_point.isNull() && !right_point.isNull() && (isNativeNumber(varying_type) || isFloat(varying_type)))
                 {
                     const bool ordered = accurateLessOrEqual(left_point, right_point);
                     const Field & range_min = ordered ? left_point : right_point;
