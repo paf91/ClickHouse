@@ -227,6 +227,11 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
     /// the backup of the target it marks may be the only copy of the target. The initial load copies a complete
     /// backup back over the target before any listing, and then reclaims the backup like a committed removal.
     ///
+    /// A read-only disk changes nothing on the object storage, but it shows the last committed state just the same:
+    /// a pending removal is loaded under its original paths, and the target of a pending replacement is read from its
+    /// complete backup. It does so on every load, not only on the initial one, because it never runs an operation
+    /// itself, so every unfinished operation it sees belongs to another process.
+    ///
     /// A marker whose content is torn (see `PlainRewritableLayout::parseTombstoneMarkerContent`) tells neither whether
     /// its removal was committed nor where its subtree came from. If anything on the disk still has its name, the load
     /// fails rather than guess: either guess may lose data. Otherwise the process died while writing the first marker
@@ -315,9 +320,15 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
         LOG_DEBUG(log, "Found {} removals that were not finished", tombstones.size());
 
     const bool remove_orphaned_objects = is_initial_load && !object_storage->isReadOnly();
+    const bool roll_back_pending_operations = is_initial_load || object_storage->isReadOnly();
 
-    /// A subsequent load leaves a pending replacement alone, because the move may be running in this very process.
-    if (remove_orphaned_objects)
+    /// The targets of pending replacements that a read-only disk reads from their backups.
+    std::vector<std::pair<PlainRewritableLayout::PendingReplace, ObjectMetadata>> targets_read_from_backups;
+    auto backups_of_targets = std::make_unique<std::unordered_map<std::string, std::string>>();
+
+    /// A subsequent load of a writable disk leaves a pending replacement alone, because the move may be running in
+    /// this very process.
+    if (roll_back_pending_operations)
     {
         for (const auto & [removed_name, pending_replace] : pending_replaces)
         {
@@ -341,6 +352,12 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
                         backup_key, target_key, backup_metadata->size_bytes, pending_replace.size);
                     kept_backups.insert(removed_name);
                 }
+            }
+            else if (backup_metadata && !remove_orphaned_objects)
+            {
+                LOG_DEBUG(log, "Reading '{}' from its backup '{}' left by a replacement that was not committed", target_key, backup_key);
+                backups_of_targets->emplace(target_key, backup_key);
+                targets_read_from_backups.emplace_back(pending_replace, std::move(*backup_metadata));
             }
             else if (backup_metadata)
             {
@@ -552,7 +569,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
             /// result: Same, and no two tasks are given the same slot
             /// In any case we have a try {} catch (...) around runner usage, so exceptions will call runner.waitForAllToFinish() first
             /// Thus the order of destruction of the variables is not important
-            runner.enqueueAndKeepTrack([remote_path = std::move(directory.remote_path), object_path = std::move(directory.object_path), metadata = std::move(directory.metadata), read_snapshot, do_not_load_unchanged_directories, files_are_prelisted, is_initial_load, remove_orphaned_objects, &tombstones, &malformed_markers, &throw_malformed_marker, &result = results[i], &log, &settings, this]
+            runner.enqueueAndKeepTrack([remote_path = std::move(directory.remote_path), object_path = std::move(directory.object_path), metadata = std::move(directory.metadata), read_snapshot, do_not_load_unchanged_directories, files_are_prelisted, roll_back_pending_operations, remove_orphaned_objects, &tombstones, &malformed_markers, &throw_malformed_marker, &result = results[i], &log, &settings, this]
             {
                 DB::setThreadName(ThreadName::PLAIN_REWRITABLE_META_LOAD);
 
@@ -580,7 +597,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
                     const auto tombstone = removed_name ? tombstones.find(removed_name.value()) : tombstones.end();
                     if (tombstone != tombstones.end() && tombstone->second)
                     {
-                        if (!is_initial_load)
+                        if (!roll_back_pending_operations)
                         {
                             LOG_TRACE(log, "The directory '{}' with the key '{}' is being removed, skipping", local_path, object_path);
                             return;
@@ -738,6 +755,20 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
     for (const auto & [local_path, info] : remote_layout)
         new_local_paths.emplace(info.remote_path, local_path);
 
+    /// The target may have been removed or overwritten with the source by now, but its committed content is the backup.
+    for (const auto & [pending_replace, backup_metadata] : targets_read_from_backups)
+    {
+        const auto local_directory = new_local_paths.find(pending_replace.directory_remote_path);
+        if (local_directory == new_local_paths.end())
+            continue;
+
+        remote_layout[local_directory->second].files.insert_or_assign(pending_replace.file_name, FileRemoteInfo{
+            .bytes_size = backup_metadata.size_bytes,
+            .last_modified = backup_metadata.last_modified.epochTime(),
+        });
+    }
+
+    backups_of_pending_replace_targets.set(std::move(backups_of_targets));
     fs.applyLayout(std::move(remote_layout));
     local_paths_by_remote_directory = std::move(new_local_paths);
     previous_refresh.restart();
@@ -895,6 +926,13 @@ std::optional<StoredObjects> MetadataStorageFromPlainRewritableObjectStorage::ge
         return std::nullopt;
 
     auto object_key = layout->constructFileObjectKey(directory_remote_info->remote_path, normalized_path.filename());
+    if (object_storage->isReadOnly())
+    {
+        const auto backups = backups_of_pending_replace_targets.get();
+        if (auto it = backups->find(object_key); it != backups->end())
+            object_key = it->second;
+    }
+
     return StoredObjects{StoredObject(object_key, path, file_remote_info->bytes_size)};
 }
 

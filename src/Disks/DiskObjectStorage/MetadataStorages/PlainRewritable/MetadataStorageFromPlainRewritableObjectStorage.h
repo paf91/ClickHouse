@@ -9,6 +9,7 @@
 #include <Disks/DiskObjectStorage/MetadataStorages/MetadataOperationsHolder.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/IMetadataStorage.h>
 #include <Disks/DiskObjectStorage/ObjectStorages/StoredObject.h>
+#include <Common/MultiVersion.h>
 
 #include <memory>
 #include <unordered_map>
@@ -98,6 +99,9 @@ private:
     std::mutex load_mutex;
     /// Paths from the last completed load. Validate them against the current snapshot before reuse.
     std::unordered_map<std::string, std::string> local_paths_by_remote_directory;
+    /// On a read-only disk: the keys of the backups of the targets of pending replacements, by the keys of the targets.
+    MultiVersion<std::unordered_map<std::string, std::string>> backups_of_pending_replace_targets{
+        std::make_unique<const std::unordered_map<std::string, std::string>>()};
     AtomicStopwatch previous_refresh;
 };
 
