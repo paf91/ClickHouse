@@ -48,6 +48,7 @@
 #include <DataTypes/DataTypeDynamic.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <DataTypes/DataTypesNumber.h>
+#include <DataTypes/TypeTree.h>
 #include <DataTypes/DataTypesBinaryEncoding.h>
 #include <DataTypes/Serializations/SerializationDecimal.h>
 #include <DataTypes/Serializations/SerializationQBit.h>
@@ -3439,8 +3440,7 @@ inline bool renderingCollapsesDistinctValues(const DataTypePtr & type, const For
             collapses = collapses || format_settings.bool_true_representation == format_settings.bool_false_representation;
     };
 
-    check(*type);
-    type->forEachChild(check);
+    forEachInTypeTree(*type, check);
     return collapses;
 }
 
