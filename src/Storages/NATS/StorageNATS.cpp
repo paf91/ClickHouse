@@ -395,6 +395,11 @@ void StorageNATS::initializeConsumersFunc()
     size_t num_views = DatabaseCatalog::instance().getDependentViews(getStorageID()).size();
     if (num_views == 0)
     {
+        /// A direct `SELECT` can hand a consumer back still subscribed after the last view is gone.
+        /// A stopped or paused table must hold no subscription, see `threadFunc`.
+        if (stream_control.isBlocked())
+            unsubscribeHandedBackConsumers();
+
         stream_control.claimCycle(last_seen_refresh_epoch);
         initialize_consumers_task->scheduleAfter(RESCHEDULE_MS);
         return;
@@ -537,6 +542,19 @@ void StorageNATS::resubscribeStaleConsumers()
             consumers_ready.store(false);
             break;
         }
+    }
+}
+
+void StorageNATS::unsubscribeHandedBackConsumers()
+{
+    std::lock_guard lock(consumers_mutex);
+    for (auto & consumer : consumers)
+    {
+        if (!consumer->isSubscribed())
+            continue;
+
+        consumer->finishAndReturnUnprocessed(INATSConsumer::SkippedMessages::Acknowledge);
+        consumer->unsubscribe();
     }
 }
 

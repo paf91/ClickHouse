@@ -2238,17 +2238,10 @@ def test_nats_jet_stream_streams_to_a_fan_out_with_a_null_target(nats_cluster):
     _wait_for_ack_floor(total_expected)
 
 
-def test_nats_jet_stream_hands_back_the_backlog_of_a_consumer_a_direct_select_left_subscribed(nats_cluster):
-    # Once the last materialized view is gone the streaming task unsubscribes the consumers, but it
-    # only reaches the ones in the pool at that moment. A direct `SELECT` issued right after the
-    # `DROP VIEW` takes the consumer out of the pool still subscribed and hands it back that way,
-    # and nothing unsubscribes it afterwards: everything published while no view is attached lands
-    # in its local queue. Attaching a view again must part with that backlog the way dropping a
-    # view does - by handing it back to the broker while the subscription it arrived on is still
-    # alive - rather than by clearing the queue under a live subscription, which the client can
-    # keep appending to and which the broker counts as delivered until the ACK deadline. The
-    # deadline here is far beyond every wait below, so the final count holds only if the backlog
-    # was returned.
+def _leave_a_subscribed_consumer_without_views(detached):
+    # Leaves the table with no view attached and a consumer that a direct `SELECT` handed back still
+    # subscribed, holding `detached` messages in its local queue. Returns the query that attaches
+    # the view again.
     asyncio.run(add_durable_consumer(cluster, "test_stream", "test_consumer", ack_wait_sec = 600))
 
     # A short flush interval keeps the streaming cycles short, so the `SELECT` below gets the
@@ -2308,10 +2301,26 @@ def test_nats_jet_stream_hands_back_the_backlog_of_a_consumer_a_direct_select_le
     # is delivered into the local queue of a table that is not streaming. The broker counting all
     # of it as awaiting an acknowledgement is what proves it got there.
     _wait_for_parked_pull_request()
-    detached = 100
     messages = [json.dumps({"key": key, "value": key}) for key in range(100, 100 + detached)]
     asyncio.run(publish_messages(cluster, "test_stream", "test_subject", messages))
     _wait_for_ack_pending(detached)
+
+    return create_view
+
+
+def test_nats_jet_stream_hands_back_the_backlog_of_a_consumer_a_direct_select_left_subscribed(nats_cluster):
+    # Once the last materialized view is gone the streaming task unsubscribes the consumers, but it
+    # only reaches the ones in the pool at that moment. A direct `SELECT` issued right after the
+    # `DROP VIEW` takes the consumer out of the pool still subscribed and hands it back that way,
+    # and nothing unsubscribes it afterwards: everything published while no view is attached lands
+    # in its local queue. Attaching a view again must part with that backlog the way dropping a
+    # view does - by handing it back to the broker while the subscription it arrived on is still
+    # alive - rather than by clearing the queue under a live subscription, which the client can
+    # keep appending to and which the broker counts as delivered until the ACK deadline. The
+    # deadline here is far beyond every wait below, so the final count holds only if the backlog
+    # was returned.
+    detached = 100
+    create_view = _leave_a_subscribed_consumer_without_views(detached)
 
     # Another direct `SELECT` takes the same subscribed consumer and returns a row from that backlog
     # without committing it. The query leaves the consumer subscribed, so the row it read has to go
@@ -2324,6 +2333,29 @@ def test_nats_jet_stream_hands_back_the_backlog_of_a_consumer_a_direct_select_le
 
     # Both what was buffered while detached and what arrives afterwards have to reach the view: a
     # backlog cleared locally instead of returned stays unreachable for the whole ACK deadline.
+    _publish_and_expect("test_subject", range(20, 40), 20 + detached + 20)
+
+
+def test_nats_jet_stream_stop_unsubscribes_a_consumer_a_direct_select_left_subscribed(nats_cluster):
+    # A stopped table must hold no subscription, even with no view attached: `SYSTEM STOP` has to
+    # unsubscribe the consumer a direct `SELECT` handed back still subscribed, returning its backlog
+    # to the broker. Without that nothing unsubscribes it while no view is attached. A returned
+    # message still counts as awaiting an acknowledgement until a pull request takes it again, so
+    # the broker cannot show the return before a view is attached; the ACK deadline is far beyond
+    # every wait below, so the final count holds only if the backlog was returned.
+    detached = 100
+    create_view = _leave_a_subscribed_consumer_without_views(detached)
+
+    anchor = nats_helpers.log_line_count(instance)
+    instance.query("SYSTEM STOP test.consume")
+    deadline = time.monotonic() + 60
+    while nats_helpers.count_in_log_after(instance, UNSUBSCRIBED_LOG_LINE, anchor) == 0:
+        assert time.monotonic() < deadline, "SYSTEM STOP did not unsubscribe the consumer of a table with no view"
+        time.sleep(0.2)
+
+    instance.query("SYSTEM START test.consume")
+    instance.query(create_view)
+    nats_helpers.wait_for_mv_attached_to_table(instance, "test.consume")
     _publish_and_expect("test_subject", range(20, 40), 20 + detached + 20)
 
 

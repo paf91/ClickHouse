@@ -149,6 +149,8 @@ private:
     /// Replaces the subscription of every consumer that stopped consuming and has an empty queue.
     void resubscribeStaleConsumers();
     void unsubscribeConsumers();
+    /// Unsubscribes the consumers in the pool which are still subscribed, without touching `consumers_ready`.
+    void unsubscribeHandedBackConsumers();
 
     void stopEventLoop();
 
