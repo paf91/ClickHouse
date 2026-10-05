@@ -1,4 +1,5 @@
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Metadata/FsSnapshot.h>
+#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Metadata/BlobLinkCounts.h>
 
 #include <Common/Exception.h>
 #include <Common/UniqueLock.h>
@@ -20,6 +21,7 @@ namespace ErrorCodes
     extern const int DIRECTORY_DOESNT_EXIST;
     extern const int FILE_ALREADY_EXISTS;
     extern const int FILE_DOESNT_EXIST;
+    extern const int LOGICAL_ERROR;
 }
 
 namespace
@@ -162,14 +164,30 @@ FsNodePtr unlinkTree(const FsNodePtr & root, const NormalizedPath & path)
 
 }
 
-FsSnapshot::FsSnapshot()
-    : root(std::make_shared<FsNode>())
+std::string getDefaultBlobKey(const std::string & directory_remote_path, const std::string & file_name)
 {
+    return directory_remote_path + "/" + file_name;
 }
 
-FsSnapshot::FsSnapshot(std::shared_ptr<FsNode> root_)
-    : root(std::move(root_))
+std::string getBlobKey(const DirectoryRemoteInfo & directory, const std::string & file_name, const FileRemoteInfo & file)
 {
+    if (!file.blob_key.empty())
+        return file.blob_key;
+    return getDefaultBlobKey(directory.remote_path, file_name);
+}
+
+FsSnapshot::FsSnapshot(std::shared_ptr<BlobLinkCounts> blob_link_counts_)
+    : root(std::make_shared<FsNode>())
+    , blob_link_counts(std::move(blob_link_counts_))
+{
+    chassert(blob_link_counts);
+}
+
+FsSnapshot::FsSnapshot(std::shared_ptr<FsNode> root_, std::shared_ptr<BlobLinkCounts> blob_link_counts_)
+    : root(std::move(root_))
+    , blob_link_counts(std::move(blob_link_counts_))
+{
+    chassert(blob_link_counts);
 }
 
 void FsSnapshot::recordDirectoryPath(const std::string & path, DirectoryRemoteInfo info)
@@ -240,6 +258,29 @@ void FsSnapshot::removeDirectory(const std::string & path)
     record(FsEdits::RemoveDirectory{normalized_path.string()});
 }
 
+void FsSnapshot::markDirectoryExplicit(const std::string & path)
+{
+    UniqueLock lock(mutex);
+    const auto normalized_path = normalizePath(path);
+    const auto node = walk(root, normalized_path);
+
+    if (!node)
+        throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Directory '{}' does not exist", normalized_path.string());
+
+    if (isVirtual(node))
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' is virtual, it cannot have an explicit file list", normalized_path.string());
+
+    /// Recorded even if the directory is already explicit, so that the replay does not depend on the state it is replayed on.
+    record(FsEdits::MarkDirectoryExplicit{normalized_path.string()});
+
+    if (node->info->has_explicit_file_list)
+        return;
+
+    auto new_directory_info = node->info.value();
+    new_directory_info.has_explicit_file_list = true;
+    root = updateInfo(root, normalized_path, new_directory_info);
+}
+
 void FsSnapshot::recordFile(const std::string & path, FileRemoteInfo info)
 {
     UniqueLock lock(mutex);
@@ -257,6 +298,10 @@ void FsSnapshot::recordFile(const std::string & path, FileRemoteInfo info)
 
     if (node->info->files.contains(normalized_path.filename()))
         throw Exception(ErrorCodes::FILE_ALREADY_EXISTS, "File '{}' already exists", normalized_path.string());
+
+    /// The default location is represented by an empty key.
+    if (info.blob_key == getDefaultBlobKey(node->info->remote_path, normalized_path.filename()))
+        info.blob_key.clear();
 
     auto new_directory_info = node->info.value();
     new_directory_info.files.emplace(normalized_path.filename(), info);
@@ -285,6 +330,33 @@ void FsSnapshot::removeFile(const std::string & path)
     root = updateInfo(root, normalized_path.parent_path(), new_directory_info);
     remote_layout_files_delta -= 1;
     record(FsEdits::RemoveFile{normalized_path.string()});
+}
+
+uint32_t FsSnapshot::getBlobLinkCount(const std::string & blob_key) const
+{
+    UniqueLock lock(mutex);
+    int64_t count = blob_link_counts->get(blob_key);
+    if (const auto it = blob_link_deltas.find(blob_key); it != blob_link_deltas.end())
+        count += it->second;
+
+    if (count < 1)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Blob '{}' is not referenced by any file", blob_key);
+
+    return static_cast<uint32_t>(count);
+}
+
+void FsSnapshot::addBlobLink(const std::string & blob_key)
+{
+    UniqueLock lock(mutex);
+    ++blob_link_deltas[blob_key];
+    record(FsEdits::AddBlobLink{blob_key});
+}
+
+void FsSnapshot::removeBlobLink(const std::string & blob_key)
+{
+    UniqueLock lock(mutex);
+    --blob_link_deltas[blob_key];
+    record(FsEdits::RemoveBlobLink{blob_key});
 }
 
 std::vector<std::string> FsSnapshot::listDirectory(const std::string & path) const
@@ -380,6 +452,7 @@ void FsSnapshot::resetToRoot(std::shared_ptr<FsNode> new_root)
 {
     UniqueLock lock(mutex);
     root = std::move(new_root);
+    blob_link_deltas.clear();
     remote_layout_directories_delta = 0;
     remote_layout_files_delta = 0;
     journal.emplace();
@@ -389,6 +462,20 @@ std::pair<int64_t, int64_t> FsSnapshot::getRemoteLayoutDeltas() const
 {
     UniqueLock lock(mutex);
     return {remote_layout_directories_delta, remote_layout_files_delta};
+}
+
+std::unordered_map<std::string, int64_t> FsSnapshot::getBlobLinkDeltas() const
+{
+    UniqueLock lock(mutex);
+    return blob_link_deltas;
+}
+
+void FsSnapshot::resetDeltas()
+{
+    UniqueLock lock(mutex);
+    blob_link_deltas.clear();
+    remote_layout_directories_delta = 0;
+    remote_layout_files_delta = 0;
 }
 
 FsJournal FsSnapshot::getJournal() const
@@ -415,6 +502,12 @@ void FsSnapshot::replay(const FsJournal & edits)
                 recordFile(concrete_edit.path, concrete_edit.info);
             else if constexpr (std::is_same_v<Edit, FsEdits::RemoveFile>)
                 removeFile(concrete_edit.path);
+            else if constexpr (std::is_same_v<Edit, FsEdits::MarkDirectoryExplicit>)
+                markDirectoryExplicit(concrete_edit.path);
+            else if constexpr (std::is_same_v<Edit, FsEdits::AddBlobLink>)
+                addBlobLink(concrete_edit.blob_key);
+            else if constexpr (std::is_same_v<Edit, FsEdits::RemoveBlobLink>)
+                removeBlobLink(concrete_edit.blob_key);
             else
                 static_assert(false, "Unhandled edit type");
         }, edit);
