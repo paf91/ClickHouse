@@ -44,6 +44,9 @@ SET use_uncompressed_cache=0;
 -- becomes much smaller than the amount of data actually read from disk.
 SET apply_string_filters_during_scan=0;
 SET use_query_condition_cache=0;
+-- The columns cache serves repeated reads from memory, which lowers `ReadCompressedBytes` below the
+-- estimate for every query after the first one.
+SET use_columns_cache=0;
 
 DROP TABLE IF EXISTS ij_big;
 DROP TABLE IF EXISTS ij_small;

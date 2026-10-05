@@ -1,4 +1,4 @@
--- Tags: stateful
+-- Tags: stateful, long
 
 SET use_uncompressed_cache=0;
 
@@ -7,6 +7,7 @@ SET use_uncompressed_cache=0;
 -- becomes much smaller than the amount of data actually read from disk.
 SET apply_string_filters_during_scan=0;
 SET use_query_condition_cache=0;
+SET use_columns_cache=0;
 
 SET enable_parallel_replicas=1, automatic_parallel_replicas_mode=2, parallel_replicas_local_plan=1, parallel_replicas_index_analysis_only_on_coordinator=1,
     parallel_replicas_for_non_replicated_merge_tree=1, max_parallel_replicas=3, cluster_for_parallel_replicas='parallel_replicas';
