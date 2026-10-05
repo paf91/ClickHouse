@@ -3392,18 +3392,40 @@ DataPartsVector StorageMergeTree::renameAndCommitEmptyParts(MutableDataPartsVect
         /// be loaded. The cleanup cannot remove them earlier, because an empty part waits for the outdated parts in
         /// its range, which it never covered. So remove them right away. With a transaction, the rolled back
         /// creation CSN is stored on disk, and the transaction itself takes care of its parts.
+        /// The removal renames the part directory to `delete_tmp_` first, and such directories are not loaded, so only
+        /// a failure of that rename leaves a part to be loaded. No marker could be written to the disk in that case
+        /// either, so report the parts that stay on disk loudly instead of pretending the restart is safe.
         if (!transaction.getMergeTreeTransaction())
         {
+            Strings not_removed_parts;
             try
             {
                 transaction.rollback();
-                for (auto & part : new_parts)
-                    tryRemovePartImmediately(std::move(part));
             }
             catch (...)
             {
-                tryLogCurrentException(log, "while removing the rolled back empty parts");
+                tryLogCurrentException(log, "while rolling back the empty parts");
             }
+            for (auto & part : new_parts)
+            {
+                if (!part)
+                    continue;
+                String part_name = part->name;
+                try
+                {
+                    if (!tryRemovePartImmediately(std::move(part)))
+                        not_removed_parts.push_back(part_name);
+                }
+                catch (...)
+                {
+                    tryLogCurrentException(log, fmt::format("while removing the rolled back empty part {}", part_name));
+                    not_removed_parts.push_back(part_name);
+                }
+            }
+            if (!not_removed_parts.empty())
+                LOG_ERROR(log, "Cannot remove the rolled back empty parts {}. They stay on disk and will be loaded as covering"
+                    " parts after a restart, which can make the table fail to load. Detach them manually.",
+                    fmt::join(not_removed_parts, ", "));
         }
         throw;
     }
