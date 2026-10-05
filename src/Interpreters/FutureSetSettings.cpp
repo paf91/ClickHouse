@@ -24,20 +24,18 @@ namespace Setting
 FutureSetSettings::FutureSetSettings(const Settings & settings)
     : size_limits(settings[Setting::max_rows_in_set], settings[Setting::max_bytes_in_set], settings[Setting::set_overflow_mode])
     , transform_null_in(settings[Setting::transform_null_in])
+    , max_bytes_before_external_set(settings[Setting::max_bytes_before_external_set])
+    , max_bytes_ratio_before_external_set(settings[Setting::max_bytes_ratio_before_external_set])
     , max_block_size(settings[Setting::max_block_size])
     , min_free_disk_space(settings[Setting::min_free_disk_space_for_temporary_data])
     , temporary_files_codec(settings[Setting::temporary_files_codec])
     , temporary_files_buffer_size(settings[Setting::temporary_files_buffer_size])
 {
-    /// The sets of a distributed plan do not spill to disk yet. The plan ships the values of each set to
-    /// its worker tasks, and a set on disk does not keep its values. For the same reason,
-    /// `use_index_for_in_with_subqueries_max_values` does not limit the values that these sets keep.
-    if (settings[Setting::make_distributed_plan])
-        return;
-
-    max_size_for_index = settings[Setting::use_index_for_in_with_subqueries_max_values];
-    max_bytes_before_external_set = settings[Setting::max_bytes_before_external_set];
-    max_bytes_ratio_before_external_set = settings[Setting::max_bytes_ratio_before_external_set];
+    /// A distributed plan ships the set's values to worker tasks, so
+    /// `use_index_for_in_with_subqueries_max_values` must not drop them; the transfer limits bound them at
+    /// task serialization.
+    if (!settings[Setting::make_distributed_plan])
+        max_size_for_index = settings[Setting::use_index_for_in_with_subqueries_max_values];
 }
 
 }
