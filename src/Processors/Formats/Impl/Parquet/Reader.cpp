@@ -1244,8 +1244,6 @@ void Reader::initializePrefetches()
                 /// We assume that the dictionary page is immediately followed by the first data page.
                 size_t start = size_t(column.meta->meta_data.dictionary_page_offset);
                 dict_page_length = size_t(column.meta->meta_data.data_page_offset) - start;
-                column.dictionary_page_prefetch = prefetcher.registerRange(
-                    start, dict_page_length, /*likely_to_be_used=*/ true);
 
                 /// Dictionary filter. We only enable it if prepareBloomFilterCondition produced query
                 /// hashes for this column (use_bloom_filter), i.e. the condition has an equality/IN on
@@ -1254,6 +1252,17 @@ void Reader::initializePrefetches()
                 /// is non-null whenever any column has use_dictionary_filter set.
                 if (primitive_columns[column_idx].use_bloom_filter)
                     column.use_dictionary_filter = columnChunkCanUseDictionaryFilter(*column.meta);
+
+                /// For a column with the dictionary filter, the bloom filter is checked first and may
+                /// rule the row group out (or make the dictionary filter of this column unnecessary)
+                /// before the dictionary page is requested. So don't let the prefetcher piggy-back the
+                /// dictionary page onto a nearby read, e.g. of this column's bloom filter: that would
+                /// read the page we are trying to avoid. The `Dictionary` and `ColumnData` stages
+                /// request it explicitly when it is actually needed (`Prefetcher::startPrefetch` then
+                /// allows coalescing it with the other requested ranges again). A page shorter than
+                /// `min_bytes_for_seek` can still be read incidentally, which costs less than a seek.
+                column.dictionary_page_prefetch = prefetcher.registerRange(
+                    start, dict_page_length, /*likely_to_be_used=*/ !column.use_dictionary_filter);
             }
 
             /// Bloom filter.
@@ -1272,7 +1281,9 @@ void Reader::initializePrefetches()
             /// one, and check it first: it is the cheaper of the two - a 32-byte block per queried value
             /// against a dictionary page of up to `dictionary_filter_limit_bytes` - and it has no false
             /// negatives, so a row group it rules out needs no dictionary page read at all
-            /// (`ReadStage::BloomFilterBlocks`, `applyBloomFilters`). It is also the fallback for a row
+            /// (`ReadStage::BloomFilterBlocks`, `applyBloomFilters`; the dictionary page of such a
+            /// column is registered above as not likely to be used, so it is not read incidentally
+            /// together with the bloom filter unless it is shorter than a seek). It is also the fallback for a row
             /// group it does not rule out: the exact dictionary path can still decline at runtime when
             /// its decoded page or value set does not fit the pruning memory budget (see
             /// `decodeDictionaryPage` and `hashDictionaryValues`), and without this the row group would
