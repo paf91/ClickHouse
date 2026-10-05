@@ -383,8 +383,21 @@ public:
             /// once, so a repeated key means the state is malformed.
             auto [it, inserted] = merged_maps.try_emplace(key, nullptr);
             if (!inserted)
-                throw Exception(ErrorCodes::INCORRECT_DATA,
-                    "Duplicate key in the serialized state of aggregate function {}", getName());
+            {
+                /// Older versions compared floating point keys with `std::equal_to`, so their states
+                /// may contain several `NaN` keys, or both `-0` and `+0`, which are the same key now.
+                /// Merge such entries into one instead of rejecting the state.
+                if constexpr (is_floating_point<KeyType> || std::is_same_v<KeyType, BFloat16>)
+                {
+                    mergeSerializedDuplicate(it->second, buf, arena);
+                    continue;
+                }
+                else
+                {
+                    throw Exception(ErrorCodes::INCORRECT_DATA,
+                        "Duplicate key in the serialized state of aggregate function {}", getName());
+                }
+            }
 
             try
             {
@@ -401,6 +414,26 @@ public:
 
             nested_func->deserialize(it->second, buf, std::nullopt, arena);
         }
+    }
+
+    /// Deserializes one nested state into a temporary place and merges it into `place`.
+    void mergeSerializedDuplicate(AggregateDataPtr place, ReadBuffer & buf, Arena * arena) const
+    {
+        AggregateDataPtr tmp_place = arena->alignedAlloc(nested_func->sizeOfData(), nested_func->alignOfData());
+        nested_func->create(tmp_place);
+        try
+        {
+            nested_func->deserialize(tmp_place, buf, std::nullopt, arena);
+            /// A zero-sized nested state aliases `place`, see `mergeImpl`.
+            if (nested_func->sizeOfData() != 0)
+                nested_func->merge(place, tmp_place, arena);
+        }
+        catch (...)
+        {
+            nested_func->destroy(tmp_place);
+            throw;
+        }
+        nested_func->destroy(tmp_place);
     }
 
     /// `transferred` counts the values whose transfer returned, so a caller that catches can undo those.
