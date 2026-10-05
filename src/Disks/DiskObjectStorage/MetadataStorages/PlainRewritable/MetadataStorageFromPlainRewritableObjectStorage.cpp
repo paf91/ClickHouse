@@ -337,6 +337,15 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
     const bool remove_orphaned_objects = is_initial_load && !object_storage->isReadOnly();
     const bool roll_back_pending_operations = is_initial_load || object_storage->isReadOnly();
 
+    /// A pending replacement appears and disappears without a change to the `prefix.path` of the directory of its target,
+    /// and the info of such a directory in the previous snapshot may describe the target as read from its backup. So a
+    /// directory that has a pending replacement now, or had one at the previous load, is always loaded anew.
+    std::unordered_set<std::string> current_remote_directories_of_pending_replaces;
+    for (const auto & [_, pending_replace] : pending_replaces)
+        current_remote_directories_of_pending_replaces.insert(pending_replace.directory_remote_path);
+    std::unordered_set<std::string> directories_with_pending_replaces = current_remote_directories_of_pending_replaces;
+    directories_with_pending_replaces.insert(remote_directories_of_pending_replaces.begin(), remote_directories_of_pending_replaces.end());
+
     /// The targets of pending replacements that a read-only disk reads from their backups.
     std::vector<std::pair<PlainRewritableLayout::PendingReplace, ObjectMetadata>> targets_read_from_backups;
     auto backups_of_targets = std::make_unique<std::unordered_map<std::string, std::string>>();
@@ -546,7 +555,8 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
 
             /// Reuse the version observed by LIST. A rename/delete after this listing is
             /// observed by the next refresh; loading is not an atomic snapshot of remote metadata.
-            if (do_not_load_unchanged_directories && directory.metadata->isEtagUsableAsCacheKey())
+            if (do_not_load_unchanged_directories && directory.metadata->isEtagUsableAsCacheKey()
+                && !directories_with_pending_replaces.contains(directory.remote_path))
             {
                 if (const auto known_path = local_paths_by_remote_directory.find(directory.remote_path);
                     known_path != local_paths_by_remote_directory.end())
@@ -566,7 +576,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
             /// result: Same, and no two tasks are given the same slot
             /// In any case we have a try {} catch (...) around runner usage, so exceptions will call runner.waitForAllToFinish() first
             /// Thus the order of destruction of the variables is not important
-            runner.enqueueAndKeepTrack([remote_path = std::move(directory.remote_path), object_path = std::move(directory.object_path), metadata = std::move(directory.metadata), read_snapshot, do_not_load_unchanged_directories, files_are_prelisted, roll_back_pending_operations, remove_orphaned_objects, &tombstones, &malformed_markers, &throw_malformed_marker, &result = results[i], &log, &settings, this]
+            runner.enqueueAndKeepTrack([remote_path = std::move(directory.remote_path), object_path = std::move(directory.object_path), metadata = std::move(directory.metadata), read_snapshot, do_not_load_unchanged_directories, files_are_prelisted, roll_back_pending_operations, remove_orphaned_objects, &tombstones, &malformed_markers, &throw_malformed_marker, &directories_with_pending_replaces, &result = results[i], &log, &settings, this]
             {
                 DB::setThreadName(ThreadName::PLAIN_REWRITABLE_META_LOAD);
 
@@ -657,7 +667,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
                         return;
                     }
 
-                    if (do_not_load_unchanged_directories && !is_orphaned)
+                    if (do_not_load_unchanged_directories && !is_orphaned && !directories_with_pending_replaces.contains(remote_path))
                     {
                         if (const auto known_info = read_snapshot->getDirectoryRemoteInfo(local_path);
                             known_info && known_info->remote_path == remote_path && known_info->etag == metadata->etag)
@@ -857,6 +867,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
     }
 
     backups_of_pending_replace_targets.set(std::move(backups_of_targets));
+    remote_directories_of_pending_replaces = std::move(current_remote_directories_of_pending_replaces);
     fs.applyLayout(std::move(remote_layout));
     local_paths_by_remote_directory = std::move(new_local_paths);
     previous_refresh.restart();

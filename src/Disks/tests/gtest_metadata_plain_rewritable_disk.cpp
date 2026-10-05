@@ -3617,5 +3617,18 @@ TEST_F(MetadataPlainRewritableDiskTest, ReadOnlyLoadOfPendingReplace)
         EXPECT_EQ(readObject(object_storage, restored_metadata->getStorageObjects("/A/source").front().remote_path), "the source file");
     }
 
+    /// The replacement is redone and finished this time. The `prefix.path` of the directory does not change, but a refresh
+    /// of the read-only disk must not reuse the info of the directory that described the target as read from its backup.
+    {
+        auto tx = getMetadataStorage("ReadOnlyPendingReplace")->createTransaction();
+        tx->replaceFile("/A/source", "/A/target");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    read_only_metadata->refresh(0);
+    EXPECT_EQ(sorted(read_only_metadata->listDirectory("/A")), (std::vector<std::string>{"target"}));
+    EXPECT_EQ(read_only_metadata->getFileSize("/A/target"), std::string_view("the source file").size());
+    EXPECT_EQ(readObject(object_storage, read_only_metadata->getStorageObjects("/A/target").front().remote_path), "the source file");
+
     read_only_metadata->shutdown();
 }

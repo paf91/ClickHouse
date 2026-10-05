@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace DB
 {
@@ -131,6 +132,9 @@ private:
     /// On a read-only disk: the keys of the backups of the targets of pending replacements, by the keys of the targets.
     MultiVersion<std::unordered_map<std::string, std::string>> backups_of_pending_replace_targets{
         std::make_unique<const std::unordered_map<std::string, std::string>>()};
+    /// The remote paths of the directories of the targets of the pending replacements seen by the last completed load.
+    /// Protected by `load_mutex`, like `local_paths_by_remote_directory`.
+    std::unordered_set<std::string> remote_directories_of_pending_replaces;
     AtomicStopwatch previous_refresh;
 };
 
