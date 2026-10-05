@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -1274,13 +1275,18 @@ inline std::unique_ptr<PostgreSQLProtocol::Messaging::StartupMessage> PostgreSQL
 /// case in PostgreSQL, so only the exact `"pg_catalog"` spelling is matched there.
 /// For the same reason an unquoted name qualified with `pg_catalog` is folded to lower case, so that
 /// `PG_CATALOG.PG_TYPE` names the `pg_type` view, as in PostgreSQL, where every catalog object has a
-/// lower-case name.
+/// lower-case name. An unqualified unquoted name of an emulated catalog object (such as `PG_TYPE`) is
+/// folded to lower case as well; other identifiers keep their case, because ClickHouse identifiers are
+/// case-sensitive.
 static String removePgCatalogQualifier(const String & query)
 {
     static constexpr std::string_view pg_catalog = "pg_catalog";
+    static constexpr std::string_view pg_prefix = "pg_";
+    static constexpr std::array<std::string_view, 8> catalog_objects
+        = {"pg_am", "pg_attribute", "pg_class", "pg_enum", "pg_namespace", "pg_proc", "pg_range", "pg_type"};
 
-    /// A fast path for the common case of a query that does not mention the schema at all.
-    if (std::search(query.begin(), query.end(), pg_catalog.begin(), pg_catalog.end(),
+    /// A fast path for the common case of a query that does not mention the catalog at all.
+    if (std::search(query.begin(), query.end(), pg_prefix.begin(), pg_prefix.end(),
             [](char a, char b) { return equalsCaseInsensitive(a, b); }) == query.end())
         return query;
 
@@ -1294,6 +1300,15 @@ static String removePgCatalogQualifier(const String & query)
         std::string_view text(token.begin, token.size());
         return (token.type == TokenType::BareWord && equalsCaseInsensitive(text, pg_catalog))
             || (token.type == TokenType::QuotedIdentifier && text == "\"pg_catalog\"");
+    };
+
+    auto is_catalog_object = [](const Token & token)
+    {
+        if (token.type != TokenType::BareWord)
+            return false;
+        std::string_view text(token.begin, token.size());
+        return std::any_of(catalog_objects.begin(), catalog_objects.end(),
+            [&](std::string_view name) { return equalsCaseInsensitive(text, name); });
     };
 
     auto next_significant = [&](size_t i) -> std::optional<size_t>
@@ -1311,26 +1326,26 @@ static String removePgCatalogQualifier(const String & query)
     for (size_t i = 0; i < tokens.size(); ++i)
     {
         const Token & token = tokens[i];
-        if (fold_to_lower_case == i)
+        bool after_dot = prev_emitted_significant && tokens[*prev_emitted_significant].type == TokenType::Dot;
+        if (fold_to_lower_case == i || (!after_dot && is_catalog_object(token)))
         {
             for (const char * pos = token.begin; pos != token.end; ++pos)
                 result.push_back(toLowerASCII(*pos));
             prev_emitted_significant = i;
             continue;
         }
-        if (is_pg_catalog(token)
-            && (!prev_emitted_significant || tokens[*prev_emitted_significant].type != TokenType::Dot))
+        if (is_pg_catalog(token) && !after_dot)
         {
             auto dot = next_significant(i);
             if (dot && tokens[*dot].type == TokenType::Dot)
             {
-                auto after_dot = next_significant(*dot);
-                if (after_dot
-                    && (tokens[*after_dot].type == TokenType::BareWord || tokens[*after_dot].type == TokenType::QuotedIdentifier))
+                auto qualified_name = next_significant(*dot);
+                if (qualified_name
+                    && (tokens[*qualified_name].type == TokenType::BareWord || tokens[*qualified_name].type == TokenType::QuotedIdentifier))
                 {
                     /// Skip the qualifier and the dot (and anything insignificant in between).
-                    if (tokens[*after_dot].type == TokenType::BareWord)
-                        fold_to_lower_case = *after_dot;
+                    if (tokens[*qualified_name].type == TokenType::BareWord)
+                        fold_to_lower_case = qualified_name;
                     i = *dot;
                     continue;
                 }
