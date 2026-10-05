@@ -761,11 +761,13 @@ def should_skip_job(job_name):
                 return True, f"Skipped: pull requests run LLVM coverage only with the '{Labels.CI_COVERAGE}' label"
             _add_pipeline_note(Labels.CI_COVERAGE)
 
-    # With `ci-coverage` the coverage jobs run these configurations themselves.
+    # With `ci-coverage` the coverage jobs run these configurations themselves. `ci-no-coverage` wins
+    # over `ci-coverage` for the coverage jobs, so with both labels the replacement jobs still run.
     if (
         job_name in COVERAGE_REPLACEMENT_JOBS
         and _info_cache.pr_number > 0
         and Labels.CI_COVERAGE in _info_cache.pr_labels
+        and Labels.CI_NO_COVERAGE not in _info_cache.pr_labels
     ):
         return True, f"Skipped, labeled with '{Labels.CI_COVERAGE}' - the LLVM coverage jobs run this configuration"
 

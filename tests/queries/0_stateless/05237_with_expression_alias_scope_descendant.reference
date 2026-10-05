@@ -31,3 +31,7 @@ live lambda	10
 mutation lambda	10
 live subquery	10
 mutation subquery	10
+mutation own lambda	10
+mutation own lambda qualified	1
+modify query own lambda qualified	1
+modify query own lambda	10

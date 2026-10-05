@@ -25,6 +25,7 @@
 #include <Interpreters/ExternalDictionariesLoader.h>
 #include <Interpreters/misc.h>
 #include <Poco/String.h>
+#include <optional>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -237,11 +238,22 @@ private:
                 visitTableFunction(*table_expression->table_function);
         }
 
+        std::optional<std::unordered_set<String>> enclosing_lambda_aliases;
         if (auto * function = ast.as<ASTFunction>(); function && function->arguments)
+        {
+            if (isASTLambdaFunction(*function))
+            {
+                enclosing_lambda_aliases = expression_aliases;
+                addLambdaAliases(*function);
+            }
             visitFunctionTableNameArguments(*function);
+        }
 
         for (auto & child : ast.children)
             visitTableExpressionsImpl(*child);
+
+        if (enclosing_lambda_aliases)
+            expression_aliases = std::move(*enclosing_lambda_aliases);
     }
 
     /// Qualify the table names which are carried by function arguments rather than by table
@@ -534,8 +546,26 @@ private:
         if (!alias.empty())
             expression_aliases.insert(alias);
 
+        /// The parameters of a lambda and the aliases in its body are visible only inside the lambda,
+        /// they are added when the visitor descends into it (`addLambdaAliases`).
+        if (const auto * function = ast->as<ASTFunction>(); function && isASTLambdaFunction(*function))
+            return;
+
         for (const auto & child : ast->children)
             collectAliases(child);
+    }
+
+    /// Add the names a lambda declares for its body: its parameters and the aliases in the body,
+    /// except inside a nested lambda or a subquery.
+    void addLambdaAliases(const ASTFunction & lambda) const
+    {
+        for (const auto & parameter : lambda.arguments->children[0]->as<ASTFunction &>().arguments->children)
+        {
+            if (const auto * identifier = parameter->as<ASTIdentifier>())
+                expression_aliases.insert(identifier->name());
+        }
+        ApplyWithSubqueryVisitor::forEachExpressionAlias(
+            lambda.arguments->children[1], [&](const String & alias, const ASTPtr &) { expression_aliases.insert(alias); });
     }
 
     void visit(ASTSelectIntersectExceptQuery & select, ASTPtr &) const
@@ -669,6 +699,13 @@ private:
         bool is_operator_in = functionIsInOrGlobalInOperator(function.name);
         bool is_dict_get = functionIsDictGet(function.name);
 
+        std::optional<std::unordered_set<String>> enclosing_lambda_aliases;
+        if (isASTLambdaFunction(function))
+        {
+            enclosing_lambda_aliases = expression_aliases;
+            addLambdaAliases(function);
+        }
+
         for (auto & child : function.children)
         {
             if (child.get() == function.arguments.get())
@@ -736,6 +773,9 @@ private:
                 visit(child);
             }
         }
+
+        if (enclosing_lambda_aliases)
+            expression_aliases = std::move(*enclosing_lambda_aliases);
     }
 
     void visit(ASTRefreshStrategy & refresh, ASTPtr &) const
