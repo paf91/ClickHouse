@@ -913,6 +913,18 @@ void FillingTransform::transformRange(
 
 void FillingTransform::transform(Chunk & chunk)
 {
+    transformImpl(chunk);
+
+    /// On a hard cancellation (`KILL QUERY`, Ctrl+C) the loops above only stop generating rows, and an
+    /// interrupted `INTERPOLATE` makes `insertFromFillingRow` insert defaults, so the chunk may hold partial
+    /// or default-filled rows of the cancelled range. Drop it instead of publishing it.
+    /// A soft `timeout_overflow_mode = 'break'` timeout keeps the partial result.
+    if (isCancelled())
+        chunk.clear();
+}
+
+void FillingTransform::transformImpl(Chunk & chunk)
+{
     logDebug("new chunk rows", chunk.getNumRows());
     logDebug("all chunks processed", all_chunks_processed);
 
