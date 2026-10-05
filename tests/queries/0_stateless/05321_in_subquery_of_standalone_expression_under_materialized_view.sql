@@ -19,7 +19,9 @@ CREATE TABLE in_sub_mv_dst (x UInt64) ENGINE = MergeTree ORDER BY x;
 CREATE MATERIALIZED VIEW in_sub_mv_view TO in_sub_mv_dst
     AS SELECT x FROM in_sub_mv_src WHERE x IN (SELECT x FROM in_sub_mv_merge);
 
-INSERT INTO in_sub_mv_src VALUES (2), (3), (4);
+-- Not an asynchronous insert: its flush context has no current database, so the unqualified table of the row policy
+-- would be resolved in the default database instead.
+INSERT INTO in_sub_mv_src SETTINGS async_insert = 0 VALUES (2), (3), (4);
 SELECT x FROM in_sub_mv_dst ORDER BY x;
 
 DROP ROW POLICY in_sub_mv_policy_05321 ON in_sub_mv_child;
