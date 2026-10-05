@@ -465,9 +465,13 @@ protected:
                 if (context->hasSessionContext())
                 {
                     Tables external_tables = context->getSessionContext()->getExternalTables();
+                    const auto filter_by_table_name = tables_filter.getFilterByTableName();
 
                     for (auto & table : external_tables)
                     {
+                        if (filter_by_table_name && !filter_by_table_name(table.first))
+                            continue;
+
                         const auto * alias = table.second->as<StorageAlias>();
                         const bool can_expose_metadata
                             = !alias || alias->isTargetTableGranted(context, AccessType::SHOW_TABLES, {});

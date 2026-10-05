@@ -153,3 +153,12 @@ DROP TABLE t_b;
 DROP TABLE t_c;
 DROP TABLE t_rep;
 DROP TABLE t_dist;
+
+SELECT '-- session temporary tables are filtered by name too';
+CREATE TEMPORARY TABLE t_tmp_1 (x UInt8, CONSTRAINT c_tmp_1 CHECK x > 0);
+CREATE TEMPORARY TABLE t_tmp_2 (y UInt8, CONSTRAINT c_tmp_2 CHECK y > 0);
+SELECT name FROM system.tables WHERE database = '' AND name IN ('t_tmp_1', 'missing') ORDER BY name;
+SELECT table, name FROM system.columns WHERE database = '' AND table IN ('t_tmp_2') ORDER BY ALL;
+SELECT table, name FROM system.constraints WHERE database = '' AND table = 't_tmp_1' ORDER BY ALL;
+DROP TEMPORARY TABLE t_tmp_1;
+DROP TEMPORARY TABLE t_tmp_2;

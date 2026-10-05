@@ -165,7 +165,11 @@ protected:
             }
 
             for (; rows_count < max_block_size && external_tables_it != external_tables.end(); ++external_tables_it)
+            {
+                if (table_name_filter && !table_name_filter(external_tables_it->first))
+                    continue;
                 add_constraints("", external_tables_it->first, external_tables_it->second);
+            }
         }
 
         if (rows_count == 0)

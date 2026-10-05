@@ -545,6 +545,8 @@ void ReadFromSystemColumns::initializePipeline(QueryPipelineBuilder & pipeline, 
             {
                 for (auto & [table_name, table] : external_tables)
                 {
+                    if (table_name_filter && !table_name_filter(table_name))
+                        continue;
                     storages[{"", table_name}] = table;
                     table_column_mut->insert(table_name);
                 }

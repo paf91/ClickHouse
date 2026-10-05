@@ -42,3 +42,7 @@ distribution_queue	1
 detached_tables	1
 -- system.replicas rows are complete
 t_rep	0
+-- session temporary tables are filtered by name too
+t_tmp_1
+t_tmp_2	y
+t_tmp_1	c_tmp_1
