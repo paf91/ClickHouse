@@ -2,6 +2,10 @@
 -- are pushed down into the column scan, and values that do not match them are read as empty strings.
 -- The result of every query must be the same with the setting enabled and disabled.
 
+-- The string filters are not applied when the read columns may be written to the columns cache
+-- (it is randomized in tests), and the test checks that they are applied.
+SET use_columns_cache = 0;
+
 DROP TABLE IF EXISTS t_string_filter_wide;
 DROP TABLE IF EXISTS t_string_filter_compact;
 DROP TABLE IF EXISTS t_string_filter_single;

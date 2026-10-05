@@ -2,6 +2,10 @@
 -- from WHERE to PREWHERE even when they use all queried columns: they are still beneficial,
 -- because the reader skips copying the values that do not match them.
 
+-- The string filters are not applied when the read columns may be written to the columns cache
+-- (it is randomized in tests), and the test checks that they are applied.
+SET use_columns_cache = 0;
+
 -- The test is about the decision to move a condition to PREWHERE, so the optimization must be enabled
 -- (it is randomized in tests), and the queries below that turn it off do it explicitly.
 SET optimize_move_to_prewhere = 1, query_plan_optimize_prewhere = 1;

@@ -106,7 +106,11 @@ IMergeTreeReader::IMergeTreeReader(
     /// a pending `DELETE WHERE throwIf(empty(s)) = 0` would start throwing. Read the values in full then.
     const bool has_mutations_on_fly = alter_conversions && alter_conversions->hasMutations();
 
-    if (settings.string_value_filters && !settings.string_value_filters->empty() && !has_mutations_on_fly)
+    /// The columns read from the part may be written to the columns cache and then served to other
+    /// queries, which must not see the substituted empty strings. Read the values in full then.
+    const bool may_write_to_columns_cache = columns_cache && settings.enable_columns_cache_writes;
+
+    if (settings.string_value_filters && !settings.string_value_filters->empty() && !has_mutations_on_fly && !may_write_to_columns_cache)
     {
         /// Count how many requested columns read from each storage column
         /// (e.g. a column requested together with its subcolumn).

@@ -3,6 +3,10 @@
 -- padded needle and replace every value with an empty string, making the condition reject all rows.
 -- The extractor must therefore ignore a constant that is not a `String`.
 
+-- The string filters are not applied when the read columns may be written to the columns cache
+-- (it is randomized in tests), and the test checks that they are applied.
+SET use_columns_cache = 0;
+
 DROP TABLE IF EXISTS t_string_filter_fixed_string;
 
 CREATE TABLE t_string_filter_fixed_string (id UInt32, s String)

@@ -8,6 +8,10 @@
 -- later rejects. Therefore the optimization must be disabled for a column that the row policy reads.
 -- Here `throwIf` would fire for every non-matching row if the value had been replaced.
 
+-- The string filters are not applied when the read columns may be written to the columns cache
+-- (it is randomized in tests), and the test checks that they are applied.
+SET use_columns_cache = 0;
+
 DROP TABLE IF EXISTS t_string_filter_row_policy;
 DROP TABLE IF EXISTS t_string_filter_row_policy_parquet;
 
