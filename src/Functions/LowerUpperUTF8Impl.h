@@ -66,56 +66,72 @@ struct LowerUpperUTF8Impl
             ucasemap_close(case_map);
         });
 
-        const auto & two_byte_table = getTwoByteTable(case_map);
+        const UInt8 * src = data.data();
+        const auto * src_offsets = offsets.data();
+        auto * dst_offsets = res_offsets.data();
+        const UInt16 * table = getTwoByteTable(case_map).mapped.data();
+        UInt8 * dst = res_data.data();
 
-        /// ASCII and table mappings keep the length, so outside the rows ICU maps, input byte `i` goes to
-        /// `dst_anchor + i - src_anchor`, where the anchors are the input and output ends of the last such row.
-        size_t src_anchor = 0;
-        size_t dst_anchor = 0;
+        /// Outside the rows ICU maps, input byte `i` goes to output byte `i + delta` (unsigned: ICU can shorten a row).
+        size_t delta = 0;
         size_t row = 0;
 
-        LowerUpperImpl<not_case_lower_bound, not_case_upper_bound>::vectorRaw(data.data(), data.data() + pos, res_data.data());
+        LowerUpperImpl<not_case_lower_bound, not_case_upper_bound>::vectorRaw(src, src + pos, dst);
 
         while (pos < size)
         {
-            if (data[pos] < 0x80)
+            if (src[pos] < 0x80)
             {
-                const size_t end = pos + findFirstNonASCII(data.data() + pos, size - pos);
-                LowerUpperImpl<not_case_lower_bound, not_case_upper_bound>::vectorRaw(
-                    data.data() + pos, data.data() + end, res_data.data() + dst_anchor + pos - src_anchor);
+                /// Shorter stretches cost less inline than the two calls.
+                constexpr size_t max_inline_ascii = 16;
+                constexpr UInt8 flip_case_mask = 'A' ^ 'a';
+                const size_t limit = std::min(size, pos + max_inline_ascii);
+                size_t end = pos;
+                for (; end < limit && src[end] < 0x80; ++end)
+                {
+                    const UInt8 b = src[end];
+                    dst[end + delta] = b ^ ((b >= not_case_lower_bound && b <= not_case_upper_bound) ? flip_case_mask : UInt8(0));
+                }
+                if (end == limit && end < size && src[end] < 0x80)
+                {
+                    const size_t stretch_end = end + findFirstNonASCII(src + end, size - end);
+                    LowerUpperImpl<not_case_lower_bound, not_case_upper_bound>::vectorRaw(
+                        src + end, src + stretch_end, dst + (end + delta));
+                    end = stretch_end;
+                }
                 pos = end;
                 continue;
             }
 
-            while (offsets[row] <= pos)
+            while (src_offsets[row] <= pos)
             {
-                res_offsets[row] = dst_anchor + offsets[row] - src_anchor;
+                dst_offsets[row] = src_offsets[row] + delta;
                 ++row;
             }
-            const size_t row_end = offsets[row];
+            const size_t row_end = src_offsets[row];
 
             /// A sequence never continues into the next row.
-            const UInt8 c = data[pos];
-            if (c >= 0xC2 && c <= 0xDF && pos + 1 < row_end && (data[pos + 1] & 0xC0) == 0x80)
+            while (pos + 1 < row_end)
             {
-                const size_t code_point = static_cast<size_t>(c & 0x1F) << 6 | static_cast<size_t>(data[pos + 1] & 0x3F);
-                const UInt16 mapped = two_byte_table.mapped[code_point - 0x80];
-                if (mapped != 0)
-                {
-                    UInt8 * dst = res_data.data() + dst_anchor + pos - src_anchor;
-                    dst[0] = static_cast<UInt8>(mapped >> 8);
-                    dst[1] = static_cast<UInt8>(mapped);
-                    pos += 2;
-                    continue;
-                }
+                const UInt8 c = src[pos];
+                if (c < 0xC2 || c > 0xDF || (src[pos + 1] & 0xC0) != 0x80)
+                    break;
+                const UInt16 mapped = table[(static_cast<size_t>(c & 0x1F) << 6 | static_cast<size_t>(src[pos + 1] & 0x3F)) - 0x80];
+                if (mapped == 0)
+                    break;
+                dst[pos + delta] = static_cast<UInt8>(mapped >> 8);
+                dst[pos + delta + 1] = static_cast<UInt8>(mapped);
+                pos += 2;
             }
+            if (pos >= row_end || src[pos] < 0x80)
+                continue;
 
             /// The output before `resume` is ICU's, so ICU maps only the rest of the row. In the root locale only
             /// final sigma depends on other characters, and it needs the last one its check does not skip.
-            const size_t row_start = row == 0 ? 0 : offsets[row - 1];
+            const size_t row_start = row == 0 ? 0 : src_offsets[row - 1];
             size_t resume = pos;
             if constexpr (!upper)
-                resume = row_start + findSigmaContextStart(data.data() + row_start, pos - row_start);
+                resume = row_start + findSigmaContextStart(src + row_start, pos - row_start);
 
             /// ICU APIs accept `int32_t` for buffer sizes and return the required output
             /// length as `int32_t` on `U_BUFFER_OVERFLOW_ERROR`. Unicode full case mapping
@@ -132,21 +148,22 @@ struct LowerUpperUTF8Impl
                     src_size,
                     upper ? "upperUTF8" : "lowerUTF8");
 
-            const size_t dst_pos = dst_anchor + resume - src_anchor;
-            dst_anchor = dst_pos + mapWithICU(case_map, data.data() + resume, row_end - resume, res_data, dst_pos);
-            src_anchor = row_end;
-            res_offsets[row] = dst_anchor;
+            const size_t dst_pos = resume + delta;
+            const size_t dst_end = dst_pos + mapWithICU(case_map, src + resume, row_end - resume, res_data, dst_pos);
+            delta = dst_end - row_end;
+            dst_offsets[row] = dst_end;
             ++row;
             pos = row_end;
 
-            if (res_data.size() < dst_anchor + (size - src_anchor))
-                res_data.resize(dst_anchor + (size - src_anchor));
+            if (res_data.size() < size + delta)
+                res_data.resize(size + delta);
+            dst = res_data.data();
         }
 
         for (; row < input_rows_count; ++row)
-            res_offsets[row] = dst_anchor + offsets[row] - src_anchor;
+            dst_offsets[row] = src_offsets[row] + delta;
 
-        res_data.resize(dst_anchor + (size - src_anchor));
+        res_data.resize(size + delta);
     }
 
     static void vectorFixed(const ColumnString::Chars &, size_t, ColumnString::Chars &, size_t)
@@ -156,7 +173,8 @@ struct LowerUpperUTF8Impl
 
 private:
     /// Maps `src` with ICU to `res_data` at `dst_pos`, growing `res_data` if the output does not fit. Returns the output size.
-    static size_t mapWithICU(const UCaseMap * case_map, const UInt8 * src, size_t src_size, ColumnString::Chars & res_data, size_t dst_pos)
+    static ALWAYS_INLINE size_t mapWithICU(
+        const UCaseMap * case_map, const UInt8 * src, size_t src_size, ColumnString::Chars & res_data, size_t dst_pos)
     {
         const auto * src_chars = reinterpret_cast<const char *>(src);
         const auto safe_src_size = static_cast<int32_t>(src_size);
