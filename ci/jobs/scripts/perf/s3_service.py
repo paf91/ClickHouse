@@ -31,20 +31,6 @@ def endpoint_url(namespace):
     return f"http://localhost:{S3_PORT}/{S3_BUCKET}/perf/{namespace}/"
 
 
-def test_requires_s3(test_path):
-    """Whether a test declares that it needs the job-local S3 endpoint."""
-    from xml.etree import ElementTree
-
-    return ElementTree.parse(test_path).getroot().get("requires_s3") == "1"
-
-
-def test_requires_read_dataset(test_path):
-    """Whether a test needs the shared TPC-H dataset attached before startup."""
-    from xml.etree import ElementTree
-
-    return ElementTree.parse(test_path).getroot().get("requires_s3_read_dataset") == "1"
-
-
 def iceberg_s3_database_ddl_commands(server_path):
     """Attach the performance job's shared S3 fixture on one server."""
     metadata = f"{server_path}/db/metadata"

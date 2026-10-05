@@ -27,7 +27,7 @@ from ci.jobs.scripts.dataset_download import (
     download_and_extract_datasets,
     iceberg_database_ddl_commands,
 )
-from ci.jobs.scripts.perf import s3_service
+from ci.jobs.scripts.perf import s3_service, test_discovery
 from ci.praktika._environment import _Environment
 from ci.praktika.info import Info
 from ci.praktika.result import Result
@@ -2331,9 +2331,7 @@ def main():
     test_keyword = args.test
 
     # Selected up front (after the release_base vintage checkout above): Configure needs the list for the S3 decision.
-    test_files = [
-        file for file in os.listdir("./tests/performance/") if file.endswith(".xml")
-    ]
+    test_files = test_discovery.list_test_files("./tests/performance/")
     # TODO: in PRs filter test files against changed files list if only tests has been changed
     # changed_files = info.get_custom_data("changed_files")
     if test_keyword:
@@ -2346,11 +2344,11 @@ def main():
 
     # Test metadata keeps S3 off for old release_base vintages and shards without S3 tests.
     needs_s3 = any(
-        s3_service.test_requires_s3(f"./tests/performance/{file}")
+        test_discovery.test_requires_s3(f"./tests/performance/{file}")
         for file in test_files
     )
     needs_s3_read_dataset = any(
-        s3_service.test_requires_read_dataset(f"./tests/performance/{file}")
+        test_discovery.test_requires_read_dataset(f"./tests/performance/{file}")
         for file in test_files
     )
 

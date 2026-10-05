@@ -516,13 +516,20 @@ def execute_query_group(connection, q_list, query_id, settings):
 
 
 def load_settings_file(xml_root, base_dir):
-    """Load settings from a JSON file referenced by <settings file="..."/> attribute."""
-    elem = xml_root.find("settings")
-    if elem is None or "file" not in elem.attrib:
-        return {}
-    path = os.path.join(base_dir, elem.attrib["file"])
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)["settings"]
+    """Load and merge settings from every <settings file="..."/> element.
+
+    After include expansion a test can carry more than one file-backed <settings>
+    (e.g. one from the test and one from an included fragment); honor them all
+    instead of silently dropping every file but the first. Inline settings are
+    already merged across all <settings> blocks via findall("settings/*")."""
+    merged = {}
+    for elem in xml_root.findall("settings"):
+        if "file" not in elem.attrib:
+            continue
+        path = os.path.join(base_dir, elem.attrib["file"])
+        with open(path, "r", encoding="utf-8") as f:
+            merged.update(json.load(f)["settings"])
+    return merged
 
 
 # Build a list of test queries, substituting parameters to query templates.

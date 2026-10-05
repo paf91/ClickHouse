@@ -2023,8 +2023,8 @@ class JobConfigs:
             include_paths=[
                 "./ci/jobs/collect_clickhouse_profiles.py",
                 "./ci/jobs/scripts/server_cleanup.py",
-                # Detects (and skips) tests that need the perf job's S3 endpoint
-                "./ci/jobs/scripts/perf/s3_service.py",
+                # Classifies tests (needs-S3 / shell-query) for the skip decisions
+                "./ci/jobs/scripts/perf/test_discovery.py",
                 "./cmake/profile_optimization.cmake",
                 "./tests/performance/",
             ],
