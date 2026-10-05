@@ -52,6 +52,7 @@
 #include <Storages/ObjectStorage/StorageObjectStorageSource.h>
 #include <Storages/ObjectStorage/Utils.h>
 #include <Storages/VirtualColumnUtils.h>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/operators.hpp>
 #include <Common/FailPoint.h>
 #include <Poco/String.h>
@@ -1160,6 +1161,11 @@ StorageObjectStorageSource::ReaderHolder StorageObjectStorageSource::createReade
     auto is_top_k_filter_allowed = [&](const ObjectInfoPtr & object) -> bool
     {
         if (!format_filter_info || !format_filter_info->top_k_filter)
+            return false;
+        /// Only the Parquet reader consumes the filter, and a data lake table configured as `Parquet`
+        /// can also contain files of other formats (e.g. ORC in Iceberg). Such a file is read as
+        /// without TopN, so it keeps using the query condition cache.
+        if (!boost::iequals(object->getFileFormat().value_or(configuration->format), "Parquet"))
             return false;
         if (object->data_lake_metadata && object->data_lake_metadata->schema_transform)
             return false;
