@@ -1154,29 +1154,32 @@ static Float64 estimateIEJoinKeyPairSelectivity(
     const auto & [first_op, first_lhs, first_rhs] = first;
     const auto & [second_op, second_lhs, second_rhs] = second;
 
-    bool same_left = first_lhs.getColumnName() == second_lhs.getColumnName();
-    bool same_right = first_rhs.getColumnName() == second_rhs.getColumnName();
-    if (!same_left && !same_right)
+    bool shared_column_on_left = first_lhs.getColumnName() == second_lhs.getColumnName();
+    bool shared_column_on_right = first_rhs.getColumnName() == second_rhs.getColumnName();
+    if (!shared_column_on_left && !shared_column_on_right)
         return first_selectivity * second_selectivity;
 
     /// Candidates are oriented `left op right`, so the directions compare whichever side the shared column is on.
     if (isLessFamily(first_op) == isLessFamily(second_op))
         return std::min(first_selectivity, second_selectivity);
 
-    /// The ends of the band are the operands opposite the shared column: `x < r` makes `r` the
-    /// upper end, `l < x` makes `l` the lower end.
-    const auto & ends_stats = same_left ? planning_context.right_column_stats : planning_context.left_column_stats;
-    const auto & first_end = same_left ? first_rhs : first_lhs;
-    const auto & second_end = same_left ? second_rhs : second_lhs;
-    bool first_is_upper = same_left == isLessFamily(first_op);
-    auto lo_range = getIEJoinOperandRange(ends_stats, first_is_upper ? second_end : first_end);
-    auto hi_range = getIEJoinOperandRange(ends_stats, first_is_upper ? first_end : second_end);
-    bool ends_ordered = lo_range && hi_range && lo_range->min <= hi_range->min && lo_range->max <= hi_range->max;
+    /// The bounds of the band are the operands opposite the shared column: `x < r` makes `r` the
+    /// upper bound, `l < x` makes `l` the lower bound.
+    const auto & bounds_stats = shared_column_on_left ? planning_context.right_column_stats : planning_context.left_column_stats;
+    const auto & first_bound = shared_column_on_left ? first_rhs : first_lhs;
+    const auto & second_bound = shared_column_on_left ? second_rhs : second_lhs;
+    bool first_bound_is_upper = shared_column_on_left ? isLessFamily(first_op) : !isLessFamily(first_op);
+    const auto & lower_bound = first_bound_is_upper ? second_bound : first_bound;
+    const auto & upper_bound = first_bound_is_upper ? first_bound : second_bound;
+    auto lower_bound_range = getIEJoinOperandRange(bounds_stats, lower_bound);
+    auto upper_bound_range = getIEJoinOperandRange(bounds_stats, upper_bound);
+    bool bounds_ordered = lower_bound_range && upper_bound_range
+        && lower_bound_range->min <= upper_bound_range->min && lower_bound_range->max <= upper_bound_range->max;
 
     /// Rounding in the marginals can leave a sum of exactly 1 slightly above it.
     static constexpr Float64 rounding_tolerance = 1e-12;
     Float64 band_selectivity = first_selectivity + second_selectivity - 1.0;
-    if (ends_ordered && band_selectivity > rounding_tolerance)
+    if (bounds_ordered && band_selectivity > rounding_tolerance)
         return band_selectivity;
     return first_selectivity * second_selectivity;
 }
