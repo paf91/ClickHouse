@@ -91,7 +91,7 @@ size_t DistinctSortedStreamTransform::buildFilterForRange(
 {
     /// The state is built per equal-range of the sorted prefix but the columns span the whole chunk,
     /// so the range it will be asked about has to be passed explicitly.
-    typename Method::State state(other_columns, other_columns_sizes, nullptr, {range_begin, range_end});
+    ColumnsHashing::SubRangeState<typename Method::State> state(other_columns, other_columns_sizes, nullptr, {range_begin, range_end});
 
     size_t count = 0;
     for (size_t i = range_begin; i < range_end; ++i)

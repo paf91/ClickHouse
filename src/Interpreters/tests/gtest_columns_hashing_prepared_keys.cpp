@@ -7,19 +7,23 @@
 
 using namespace DB;
 
-/// `HashMethodKeysFixed` batch-packs the keys of the rows it is told it will be asked about: the whole
-/// column, or a sub-range of at least `min_rows_to_batch_pack_sub_range` rows; a shorter sub-range is
-/// packed per row. Neither the choice nor the packed layout is observable from SQL: there is no
-/// ProfileEvent for either, and the key column reordering that the layout goes with is undone before
-/// results.
+/// A sub-range `HashMethodKeysFixed` batch-packs the keys of the rows it is told it will be asked about:
+/// the whole column, or a sub-range of at least `min_rows_to_batch_pack_sub_range` rows; a shorter
+/// sub-range is packed per row. Neither the choice nor the packed layout is observable from SQL: there
+/// is no ProfileEvent for either, and the key column reordering that the layout goes with is undone
+/// before results.
 namespace
 {
 
-/// Two 8-byte non-nullable keys pack into 16 bytes, the widest key `usePreparedKeys` accepts. This is
-/// the state DISTINCT in order builds per equal-range of the sorting prefix (`SetVariants.h` keys128).
-using PreparedState = SetMethodKeysFixed<ClearableHashSet<UInt128, UInt128HashCRC32>>::State;
-/// Three of them need 24 bytes, which leaves that class.
-using UnpreparedState = SetMethodKeysFixed<ClearableHashSet<UInt256, UInt256HashCRC32>>::State;
+/// Two 8-byte non-nullable keys pack into 16 bytes, the widest key `usePreparedKeys` accepts.
+using WholeBlockState = SetMethodKeysFixed<ClearableHashSet<UInt128, UInt128HashCRC32>>::State;
+/// The state DISTINCT in order builds per equal-range of the sorting prefix (`SetVariants.h` keys128).
+using PreparedState = ColumnsHashing::SubRangeState<WholeBlockState>;
+/// Three of them need 24 bytes, which leaves that class, so they have no sub-range variant.
+using UnpreparedState = ColumnsHashing::SubRangeState<SetMethodKeysFixed<ClearableHashSet<UInt256, UInt256HashCRC32>>::State>;
+
+static_assert(!std::is_same_v<PreparedState, WholeBlockState>);
+static_assert(std::is_same_v<UnpreparedState, SetMethodKeysFixed<ClearableHashSet<UInt256, UInt256HashCRC32>>::State>);
 
 constexpr size_t num_rows = 64;
 /// Long enough to hold sub-ranges on both sides of `min_rows_to_batch_pack_sub_range`.
@@ -90,19 +94,28 @@ private:
 
 }
 
-/// The whole-block callers (every fixed-key `GROUP BY` outside the in-order path) must keep batching.
+/// The whole-block callers (every fixed-key `GROUP BY` outside the in-order path) must keep batching,
+/// whatever range they pass.
 TEST(ColumnsHashingPreparedKeys, WholeBlockIsBatched)
 {
     const KeyColumns keys(2);
     Arena arena;
 
-    PreparedState state(keys.columns, keys.sizes, nullptr);
+    WholeBlockState state(keys.columns, keys.sizes, nullptr);
+    WholeBlockState given_range(keys.columns, keys.sizes, nullptr, {7, 29});
+    PreparedState sub_range_state(keys.columns, keys.sizes, nullptr);
 
     ASSERT_EQ(state.prepared_keys.size(), num_rows);
-    ASSERT_FALSE(state.covers_sub_range);
+    ASSERT_EQ(given_range.prepared_keys.size(), num_rows);
+    ASSERT_EQ(sub_range_state.prepared_keys.size(), num_rows);
+    ASSERT_FALSE(sub_range_state.covers_sub_range);
     for (size_t row = 0; row < num_rows; ++row)
-        ASSERT_EQ(state.getKeyHolder(row, arena), packFixed<UInt128>(row, keys.sizes.size(), keys.columns, keys.sizes))
-            << "row " << row;
+    {
+        const auto expected = packFixed<UInt128>(row, keys.sizes.size(), keys.columns, keys.sizes);
+        ASSERT_EQ(state.getKeyHolder(row, arena), expected) << "row " << row;
+        ASSERT_EQ(given_range.getKeyHolder(row, arena), expected) << "row " << row;
+        ASSERT_EQ(sub_range_state.getKeyHolder(row, arena), expected) << "row " << row;
+    }
 }
 
 /// An in-order block that happens to be a single run passes its whole extent explicitly, and must not

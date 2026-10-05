@@ -443,12 +443,14 @@ template <
     bool has_nullable_keys_ = false,
     bool has_low_cardinality_ = false,
     bool use_cache = true,
-    bool need_offset = false>
+    bool need_offset = false,
+    /// Built over a sub-range of the block (see `SubRangeState`), so it packs only the rows of the range.
+    bool for_sub_range = false>
 struct HashMethodKeysFixed
     : private columns_hashing_impl::BaseStateKeysFixed<Key, has_nullable_keys_>
-    , public columns_hashing_impl::HashMethodBase<HashMethodKeysFixed<Value, Key, Mapped, has_nullable_keys_, has_low_cardinality_, use_cache, need_offset>, Value, Mapped, use_cache, need_offset>
+    , public columns_hashing_impl::HashMethodBase<HashMethodKeysFixed<Value, Key, Mapped, has_nullable_keys_, has_low_cardinality_, use_cache, need_offset, for_sub_range>, Value, Mapped, use_cache, need_offset>
 {
-    using Self = HashMethodKeysFixed<Value, Key, Mapped, has_nullable_keys_, has_low_cardinality_, use_cache, need_offset>;
+    using Self = HashMethodKeysFixed<Value, Key, Mapped, has_nullable_keys_, has_low_cardinality_, use_cache, need_offset, for_sub_range>;
     using BaseHashed = columns_hashing_impl::HashMethodBase<Self, Value, Mapped, use_cache, need_offset>;
     using Base = columns_hashing_impl::BaseStateKeysFixed<Key, has_nullable_keys_>;
 
@@ -529,24 +531,29 @@ struct HashMethodKeysFixed
 
         if (usePreparedKeys(key_sizes))
         {
-            /// Batch-packing costs one pass over the rows it packs, so a state that will be asked about
-            /// only a sub-range packs just that sub-range: one state per run of a sorted prefix would
-            /// otherwise pay for the whole block each time. Same trade as `Params::aggregation_in_order`.
-            const size_t block_rows = key_columns.empty() ? 0 : key_columns[0]->size();
-            const size_t rows_end = std::min(rows.end, block_rows);
-            if (rows.begin == 0 && rows_end >= block_rows)
+            if constexpr (for_sub_range)
             {
-                packFixedBatch(keys_size, Base::getActualColumns(), key_sizes, prepared_keys);
-            }
-            else
-            {
-                covers_sub_range = true;
-                if (rows_end > rows.begin && rows_end - rows.begin >= min_rows_to_batch_pack_sub_range)
+                /// Batch-packing costs one pass over the rows it packs, so a state that will be asked about
+                /// only a sub-range packs just that sub-range: one state per run of a sorted prefix would
+                /// otherwise pay for the whole block each time. Same trade as `Params::aggregation_in_order`.
+                const size_t block_rows = key_columns.empty() ? 0 : key_columns[0]->size();
+                const size_t rows_end = std::min(rows.end, block_rows);
+                if (rows.begin == 0 && rows_end >= block_rows)
                 {
-                    prepared_keys_begin = rows.begin;
-                    packFixedBatchRange(keys_size, Base::getActualColumns(), key_sizes, prepared_keys, rows.begin, rows_end);
+                    packFixedBatch(keys_size, Base::getActualColumns(), key_sizes, prepared_keys);
+                }
+                else
+                {
+                    covers_sub_range = true;
+                    if (rows_end > rows.begin && rows_end - rows.begin >= min_rows_to_batch_pack_sub_range)
+                    {
+                        prepared_keys_begin = rows.begin;
+                        packFixedBatchRange(keys_size, Base::getActualColumns(), key_sizes, prepared_keys, rows.begin, rows_end);
+                    }
                 }
             }
+            else
+                packFixedBatch(keys_size, Base::getActualColumns(), key_sizes, prepared_keys);
         }
 
 #if defined(__SSSE3__) && !defined(MEMORY_SANITIZER)
@@ -615,12 +622,15 @@ struct HashMethodKeysFixed
                 return packFixed<Key, true>(row, keys_size, low_cardinality_keys.nested_columns, key_sizes,
                                             &low_cardinality_keys.positions, &low_cardinality_keys.position_sizes);
 
-            if (covers_sub_range)
+            if constexpr (for_sub_range)
             {
-                const size_t index = row - prepared_keys_begin;
-                if (index < prepared_keys.size())
-                    return prepared_keys[index];
-                return packFixedLongestFirst<Key>(row, keys_size, Base::getActualColumns(), key_sizes);
+                if (covers_sub_range)
+                {
+                    const size_t index = row - prepared_keys_begin;
+                    if (index < prepared_keys.size())
+                        return prepared_keys[index];
+                    return packFixedLongestFirst<Key>(row, keys_size, Base::getActualColumns(), key_sizes);
+                }
             }
 
             if (!prepared_keys.empty())
@@ -674,6 +684,14 @@ struct HashMethodKeysFixed
         key_columns.swap(new_columns);
         return new_sizes;
     }
+};
+
+/// Only a state that can batch-pack its keys has a sub-range variant; the others would be identical copies.
+template <typename Value, typename Key, typename Mapped, bool has_nullable_keys, bool has_low_cardinality, bool use_cache, bool need_offset>
+struct SubRangeStateOf<HashMethodKeysFixed<Value, Key, Mapped, has_nullable_keys, has_low_cardinality, use_cache, need_offset, false>>
+{
+    using Type = HashMethodKeysFixed<Value, Key, Mapped, has_nullable_keys, has_low_cardinality, use_cache, need_offset,
+        !has_nullable_keys && !has_low_cardinality && sizeof(Key) <= 16>;
 };
 
 /// Bitwise comparator of rows over fixed-width contiguous key columns, flattening tuples

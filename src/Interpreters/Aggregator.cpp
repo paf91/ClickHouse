@@ -1057,7 +1057,7 @@ void Aggregator::executeOnBlockSmall(
         result.key_sizes = key_sizes;
     }
 
-    executeImpl(result, row_begin, row_end, key_columns, aggregate_instructions);
+    executeImpl</*for_sub_range=*/true>(result, row_begin, row_end, key_columns, aggregate_instructions);
     CurrentMemoryTracker::check();
 }
 
@@ -1091,7 +1091,7 @@ void Aggregator::mergeOnBlockSmall(
     if (false) {} // NOLINT
 #define M(NAME, IS_TWO_LEVEL) \
     else if (result.type == AggregatedDataVariants::Type::NAME) \
-        mergeStreamsImpl(result.aggregates_pool, *result.NAME, result.NAME->data, \
+        mergeStreamsImpl<!(IS_TWO_LEVEL)>(result.aggregates_pool, *result.NAME, result.NAME->data, \
                          result.without_key, \
                          result.consecutive_keys_cache_stats, \
                          /* no_more_keys= */ false, \
@@ -1106,6 +1106,7 @@ void Aggregator::mergeOnBlockSmall(
     CurrentMemoryTracker::check();
 }
 
+template <bool for_sub_range>
 void Aggregator::executeImpl(
     AggregatedDataVariants & result,
     size_t row_begin,
@@ -1116,9 +1117,11 @@ void Aggregator::executeImpl(
     bool all_keys_are_const,
     AggregateDataPtr overflow_row) const
 {
+    /// A two-level variant keeps the whole-block state, which serves any rows: the in-order path reaches one only
+    /// through a size hint, which does not justify a second copy of its aggregation loops.
     #define M(NAME, IS_TWO_LEVEL) \
         else if (result.type == AggregatedDataVariants::Type::NAME) \
-            executeImpl(*result.NAME, result.aggregates_pool, row_begin, row_end, key_columns, aggregate_instructions, \
+            executeImpl<for_sub_range && !(IS_TWO_LEVEL)>(*result.NAME, result.aggregates_pool, row_begin, row_end, key_columns, aggregate_instructions, \
                         result.consecutive_keys_cache_stats, no_more_keys, all_keys_are_const, overflow_row);
 
     if (false) {} // NOLINT
@@ -1126,7 +1129,7 @@ void Aggregator::executeImpl(
     #undef M
 }
 
-template <typename Method>
+template <bool for_sub_range, typename Method>
 void NO_INLINE Aggregator::executeImpl(
     Method & method,
     Arena * aggregates_pool,
@@ -1143,19 +1146,23 @@ void NO_INLINE Aggregator::executeImpl(
     double cache_hit_rate = total_records ? static_cast<double>(consecutive_keys_cache_stats.hits) / static_cast<double>(total_records) : 1.0;
     bool use_cache = !is_simple_count && cache_hit_rate >= static_cast<double>(params.min_hit_rate_to_use_consecutive_keys_optimization);
 
+    using State = std::conditional_t<for_sub_range, ColumnsHashing::SubRangeState<typename Method::State>, typename Method::State>;
+    using StateNoCache
+        = std::conditional_t<for_sub_range, ColumnsHashing::SubRangeState<typename Method::StateNoCache>, typename Method::StateNoCache>;
+
     /// Const key columns hold one row, addressed as row 0 rather than through the block's range.
     const ColumnsHashing::RowRange rows
         = all_keys_are_const ? ColumnsHashing::RowRange{} : ColumnsHashing::RowRange{row_begin, row_end};
 
     if (use_cache)
     {
-        typename Method::State state(key_columns, key_sizes, aggregation_state_cache, rows);
+        State state(key_columns, key_sizes, aggregation_state_cache, rows);
         executeImpl(method, state, key_columns, aggregates_pool, row_begin, row_end, aggregate_instructions, no_more_keys, all_keys_are_const, overflow_row);
         consecutive_keys_cache_stats.update(row_end - row_begin, state.getCacheMissesSinceLastReset());
     }
     else
     {
-        typename Method::StateNoCache state(key_columns, key_sizes, aggregation_state_cache, rows);
+        StateNoCache state(key_columns, key_sizes, aggregation_state_cache, rows);
         executeImpl(method, state, key_columns, aggregates_pool, row_begin, row_end, aggregate_instructions, no_more_keys, all_keys_are_const, overflow_row);
     }
 }
@@ -1365,10 +1372,10 @@ size_t Aggregator::executeImplUntilAdaptiveFreeze(
         /// or packing), which must not be repeated per slice.
         if (use_cache)
         {
-            typename Method::State state(key_columns, key_sizes, aggregation_state_cache, {row_begin, row_end});
+            typename Method::State state(key_columns, key_sizes, aggregation_state_cache);
             return run_slices(state, [&](size_t rows) { cache_stats.update(rows, state.getCacheMissesSinceLastReset()); });
         }
-        typename Method::StateNoCache state(key_columns, key_sizes, aggregation_state_cache, {row_begin, row_end});
+        typename Method::StateNoCache state(key_columns, key_sizes, aggregation_state_cache);
         return run_slices(state, [](size_t) {});
     };
 
@@ -5336,7 +5343,7 @@ void NO_INLINE Aggregator::mergeStreamsImpl(
     const AggregateColumnsConstData & aggregate_columns_data = makeAggregateColumnsData(columns, params.keys_size, params.aggregates_size);
     ColumnRawPtrs key_columns = makeRawKeyColumns(columns, params.keys_size);
 
-    mergeStreamsImpl<Method, Table>(
+    mergeStreamsImpl</*for_sub_range=*/false, Method, Table>(
         aggregates_pool,
         method,
         data,
@@ -5351,7 +5358,7 @@ void NO_INLINE Aggregator::mergeStreamsImpl(
         arena_for_keys);
 }
 
-template <typename Method, typename Table>
+template <bool for_sub_range, typename Method, typename Table>
 void NO_INLINE Aggregator::mergeStreamsImpl(
     Arena * aggregates_pool,
     Method & method [[maybe_unused]],
@@ -5405,9 +5412,13 @@ void NO_INLINE Aggregator::mergeStreamsImpl(
         }
     };
 
+    using State = std::conditional_t<for_sub_range, ColumnsHashing::SubRangeState<typename Method::State>, typename Method::State>;
+    using StateNoCache
+        = std::conditional_t<for_sub_range, ColumnsHashing::SubRangeState<typename Method::StateNoCache>, typename Method::StateNoCache>;
+
     if (use_cache)
     {
-        typename Method::State state(key_columns, key_sizes, aggregation_state_cache, {row_begin, row_end});
+        State state(key_columns, key_sizes, aggregation_state_cache, {row_begin, row_end});
         if (is_simple_count)
         {
             /// A set method has no aggregates, so it never sets `is_simple_count` and never reaches this.
@@ -5435,7 +5446,7 @@ void NO_INLINE Aggregator::mergeStreamsImpl(
     }
     else
     {
-        typename Method::StateNoCache state(key_columns, key_sizes, aggregation_state_cache, {row_begin, row_end});
+        StateNoCache state(key_columns, key_sizes, aggregation_state_cache, {row_begin, row_end});
         if (is_simple_count)
         {
             /// A set method has no aggregates, so it never sets `is_simple_count` and never reaches this.
