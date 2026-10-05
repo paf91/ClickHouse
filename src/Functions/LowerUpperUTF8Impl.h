@@ -115,7 +115,7 @@ struct LowerUpperUTF8Impl
             const size_t row_start = row == 0 ? 0 : offsets[row - 1];
             size_t resume = pos;
             if constexpr (!upper)
-                resume = row_start + findSigmaContextStart(data.data() + row_start, pos - row_start, two_byte_table);
+                resume = row_start + findSigmaContextStart(data.data() + row_start, pos - row_start);
 
             /// ICU APIs accept `int32_t` for buffer sizes and return the required output
             /// length as `int32_t` on `U_BUFFER_OVERFLOW_ERROR`. Unicode full case mapping
@@ -206,8 +206,6 @@ private:
     {
         /// (first << 8) | second output byte for each code point U+0080..U+07FF, 0 if a row containing it goes to ICU.
         std::array<UInt16, 0x800 - 0x80> mapped{};
-        /// Case_Ignorable code points U+0000..U+07FF, which the final sigma check of ICU skips (lowerUTF8 only).
-        std::bitset<0x800> sigma_ignorable;
     };
 
     static const TwoByteTable & getTwoByteTable(const UCaseMap * case_map)
@@ -256,22 +254,32 @@ private:
                 table.mapped[code_point - 0x80] = static_cast<UInt16>(static_cast<UInt8>(mapped[0]) << 8 | static_cast<UInt8>(mapped[1]));
         }
 
-        if constexpr (!upper)
-            for (UInt32 code_point = 0; code_point < 0x800; ++code_point)
-                table.sigma_ignorable[code_point] = u_hasBinaryProperty(static_cast<UChar32>(code_point), UCHAR_CASE_IGNORABLE);
-
         return table;
+    }
+
+    /// Case_Ignorable code points U+0000..U+07FF, which the final sigma check of ICU skips.
+    static const std::bitset<0x800> & getSigmaIgnorable()
+    {
+        static const std::bitset<0x800> ignorable = []
+        {
+            std::bitset<0x800> res;
+            for (UInt32 code_point = 0; code_point < 0x800; ++code_point)
+                res[code_point] = u_hasBinaryProperty(static_cast<UChar32>(code_point), UCHAR_CASE_IGNORABLE);
+            return res;
+        }();
+        return ignorable;
     }
 
     /// Start of the last character before `pos` that the final sigma check of ICU does not skip, or 0.
     /// The bytes before `pos` are ASCII or two-byte sequences with a table entry.
-    static size_t findSigmaContextStart(const UInt8 * src, size_t pos, const TwoByteTable & table)
+    static size_t findSigmaContextStart(const UInt8 * src, size_t pos)
     {
+        const auto & ignorable = getSigmaIgnorable();
         while (pos > 0)
         {
             pos -= src[pos - 1] < 0x80 ? 1 : 2;
             const size_t code_point = src[pos] < 0x80 ? src[pos] : (static_cast<size_t>(src[pos] & 0x1F) << 6 | (src[pos + 1] & 0x3F));
-            if (!table.sigma_ignorable[code_point])
+            if (!ignorable[code_point])
                 return pos;
         }
         return 0;
