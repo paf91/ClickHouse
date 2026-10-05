@@ -50,3 +50,8 @@ SELECT 'snowman ☃ and é' AS value FORMAT PrettyCompact;
 
 -- The setting can be disabled to print raw bytes (the old behavior).
 SELECT 'nul\0here' AS value FORMAT PrettyCompact SETTINGS output_format_pretty_display_control_characters = 0;
+
+-- The name of a named `Tuple` column displayed above its subcolumns gets the same treatment as any
+-- other column name, including the line feed, and so do the names of its elements.
+SELECT (1, 2)::Tuple(x UInt8, y UInt8) AS `a\nb` FORMAT PrettyCompact;
+SELECT (1, 2)::Tuple(`x\0`  UInt8, y UInt8) AS `t\x01` FORMAT Pretty;

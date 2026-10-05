@@ -401,7 +401,16 @@ void PrettyBlockOutputFormat::writeChunk(const Chunk & chunk, PortKind port_kind
     Strings group_names;
     group_names.reserve(flattened.groups.size());
     for (const auto & group : flattened.groups)
-        group_names.push_back(group.name);
+    {
+        /// The name of a Tuple column is written into the single-line header just like the name of
+        /// any other column (see `calculateWidths`), so its control characters, including the line
+        /// feed, are replaced the same way.
+        if (format_settings.pretty.display_control_characters)
+            group_names.push_back(replaceControlCharactersWithPictures(
+                group.name, /*highlight_trailing_whitespace=*/ false, /*replace_line_feeds=*/ true));
+        else
+            group_names.push_back(group.name);
+    }
 
     /// The name of a Tuple column is displayed above the combined span of its subcolumns and must
     /// fit into it; widen the subcolumns if it does not. The groups are processed in reverse
