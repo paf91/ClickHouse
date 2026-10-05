@@ -444,6 +444,10 @@ void FutureSetFromSubquery::prepareForDistributedPlan(const ContextPtr & context
 
     if (!set_and_key->set->hasExplicitSetElements())
         set_and_key->set->fillSetElements();
+
+    /// TODO: Support spilling for the sets that a distributed plan ships. 
+    set_settings.disableSpilling();
+
     if (source)
         convertSetSourceForDistributedPlan(*source, context);
 }
@@ -541,6 +545,10 @@ SetPtr FutureSetFromSubquery::buildOrderedSetInplace(const ContextPtr & context)
 
     const auto & settings = context->getSettingsRef();
     SizeLimits network_transfer_limits(settings[Setting::max_rows_to_transfer], settings[Setting::max_bytes_to_transfer], settings[Setting::transfer_overflow_mode]);
+
+    /// TODO: Support spilling for the sets that a distributed plan ships.
+    if (settings[Setting::make_distributed_plan])
+        set_settings.disableSpilling();
 
     /// This is a *speculative* build, run during primary key / skip index analysis so that index
     /// analysis can use the set. Prefer a build that does not destroy the canonical `source` plan: if
