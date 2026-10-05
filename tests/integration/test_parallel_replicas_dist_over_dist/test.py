@@ -111,7 +111,7 @@ def parallel_replicas_coordinators(query_id):
     coordinators = []
     for node in nodes:
         # SYSTEM FLUSH LOGS is not cluster-aware, it has to be issued on each node separately.
-        node.query("SYSTEM FLUSH LOGS")
+        node.query("SYSTEM FLUSH LOGS query_log")
         reads = int(
             node.query(
                 f"""

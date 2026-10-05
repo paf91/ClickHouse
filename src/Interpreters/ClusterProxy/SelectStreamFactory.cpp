@@ -14,6 +14,7 @@
 #include <Processors/QueryPlan/DistributedCreateLocalPlan.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Processors/QueryPlan/QueryPlan.h>
+#include <Storages/StorageDistributed.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Storages/removeGroupingFunctionSpecializations.h>
 #include <TableFunctions/TableFunctionFactory.h>
@@ -109,19 +110,27 @@ void SelectStreamFactory::createForShardImpl(
     AdditionalShardFilterGenerator shard_filter_generator,
     const UnavailableShardTrackerPtr & unavailable_shard_tracker) const
 {
+    ContextPtr context_without_parallel_replicas;
+
     /// `local_storage` is the table the local plan will read, null when it is not resolved.
     auto emplace_local_stream = [&](const StoragePtr & local_storage)
     {
         /// A local plan does not go through `ReadFromRemote`, so nothing sets `cluster_for_parallel_replicas`
         /// to this hop's cluster and the read would be scoped by another one. Keep parallel replicas only
-        /// for a nested `Distributed`, which sets up its own cluster.
+        /// for a nested `Distributed`, which sets up its own cluster. A `View` over a `Distributed` is left
+        /// out: it reads without parallel replicas, as it did before.
         auto local_context = context;
-        if (context->canUseTaskBasedParallelReplicas() && !(local_storage && local_storage->isRemote()))
+        if (context->canUseTaskBasedParallelReplicas() && !typeid_cast<const StorageDistributed *>(local_storage.get()))
         {
-            auto context_without_parallel_replicas = Context::createCopy(context);
-            context_without_parallel_replicas->setSetting(
-                "allow_experimental_parallel_reading_from_replicas", Field{0});
-            local_context = std::move(context_without_parallel_replicas);
+            if (!context_without_parallel_replicas)
+            {
+                auto mutable_context = Context::createCopy(context);
+                Settings settings_without_parallel_replicas = mutable_context->getSettingsCopy();
+                settings_without_parallel_replicas[Setting::allow_experimental_parallel_reading_from_replicas] = 0;
+                mutable_context->setSettings(settings_without_parallel_replicas);
+                context_without_parallel_replicas = std::move(mutable_context);
+            }
+            local_context = context_without_parallel_replicas;
         }
 
         local_plans.emplace_back(createLocalPlan(
