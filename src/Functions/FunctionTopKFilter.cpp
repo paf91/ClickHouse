@@ -4,6 +4,7 @@
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <DataTypes/DataTypesNumber.h>
+#include <DataTypes/TypeTree.h>
 #include <Functions/FunctionFactory.h>
 #include <Functions/FunctionHelpers.h>
 #include <Functions/IFunction.h>
@@ -46,21 +47,14 @@ bool hasEmptyTuple(const DataTypePtr & type)
 /// `Map`) compare their elements lexicographically, so a float anywhere inside them matters too.
 bool hasFloatingPoint(const DataTypePtr & type)
 {
-    if (isFloat(type))
-        return true;
-
-    bool found = false;
-    type->forEachChild([&](const IDataType & child) { found = found || isFloat(child); });
-    return found;
+    return anyInTypeTree(*type, [](const IDataType & node) { return isFloat(node); });
 }
 
 /// A `NULL` nested inside a container type (e.g. `Tuple(Nullable(UInt32))`) makes the comparison functions
 /// return `Nullable(UInt8)` and ignores `nulls_direction`; the column comparison path handles both.
 bool hasNestedNullable(const DataTypePtr & type)
 {
-    bool found = false;
-    type->forEachChild([&](const IDataType & child) { found = found || child.isNullable(); });
-    return found;
+    return anyInTypeTree(*type, [](const IDataType & node) { return node.isNullable(); });
 }
 
 }

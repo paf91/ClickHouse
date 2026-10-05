@@ -5357,12 +5357,8 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
         const auto & column_type = top_k_filter_info->data_type;
         /// Also nested inside `Tuple`, `Array`, ...: the threshold is compared as a raw `Field`, which places
         /// a nested NULL or NaN regardless of NULLS FIRST/LAST.
-        auto is_placed_by_nulls_direction = [](const IDataType & type) { return type.isNullable() || isFloat(type); };
-        bool has_nulls_direction_dependent_part = is_placed_by_nulls_direction(*column_type);
-        column_type->forEachChild([&](const IDataType & child)
-        {
-            has_nulls_direction_dependent_part = has_nulls_direction_dependent_part || is_placed_by_nulls_direction(child);
-        });
+        bool has_nulls_direction_dependent_part = anyInTypeTree(
+            *column_type, [](const IDataType & type) { return type.isNullable() || isFloat(type); });
         auto it = std::find(primary_key.column_names.begin(), primary_key.column_names.end(), top_k_filter_info->column_name);
         if (it != primary_key.column_names.end() && !has_nulls_direction_dependent_part)
         {
