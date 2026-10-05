@@ -23,6 +23,7 @@
 #include <Databases/PostgreSQL/fetchPostgreSQLTableStructure.h>
 #include <Common/quoteString.h>
 #include <Common/logger_useful.h>
+#include <Common/ProfileEvents.h>
 #include <Core/Settings.h>
 #include <Core/BackgroundSchedulePool.h>
 #include <filesystem>
@@ -30,6 +31,11 @@
 
 #include <Disks/IDisk.h>
 namespace fs = std::filesystem;
+
+namespace ProfileEvents
+{
+    extern const Event DatabaseTablesEnumerated;
+}
 
 namespace DB
 {
@@ -177,6 +183,7 @@ DatabaseTablesIteratorPtr DatabasePostgreSQL::getTablesIterator(ContextPtr local
         tryLogCurrentException(__PRETTY_FUNCTION__, "", toleratedConnectionFailureLogLevel());
     }
 
+    ProfileEvents::increment(ProfileEvents::DatabaseTablesEnumerated, tables.size());
     return std::make_unique<DatabaseTablesSnapshotIterator>(tables, database_name);
 }
 

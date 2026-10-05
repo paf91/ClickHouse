@@ -58,6 +58,12 @@
 #include <Parsers/ASTSetQuery.h>
 #include <Common/FailPoint.h>
 #include <Common/HTTPHeaderFilter.h>
+#include <Common/ProfileEvents.h>
+
+namespace ProfileEvents
+{
+    extern const Event DatabaseTablesEnumerated;
+}
 
 namespace DB
 {
@@ -1290,6 +1296,7 @@ DatabaseTablesIteratorPtr DatabaseDataLake::getTablesIteratorImpl(
         [[maybe_unused]] bool inserted = tables.emplace(table_name, table_ptr).second;
         chassert(inserted);
     }
+    ProfileEvents::increment(ProfileEvents::DatabaseTablesEnumerated, tables.size());
     return std::make_unique<DatabaseTablesSnapshotIterator>(tables, getDatabaseName());
 }
 
@@ -1341,6 +1348,7 @@ std::vector<LightWeightTableDetails> DatabaseDataLake::getLightweightTablesItera
         result.emplace_back(catalog_table.name);
     }
 
+    ProfileEvents::increment(ProfileEvents::DatabaseTablesEnumerated, result.size());
     return result;
 }
 

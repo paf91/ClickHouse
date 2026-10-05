@@ -24,6 +24,7 @@
 #include <Storages/NamedCollectionsHelpers.h>
 #include <Storages/getStructureOfRemoteTable.h>
 #include <Common/NetException.h>
+#include <Common/ProfileEvents.h>
 #include <Common/RemoteHostFilter.h>
 #include <Common/logger_useful.h>
 #include <Common/parseAddress.h>
@@ -33,6 +34,11 @@
 
 #include <algorithm>
 #include <vector>
+
+namespace ProfileEvents
+{
+    extern const Event DatabaseTablesEnumerated;
+}
 
 namespace DB
 {
@@ -842,6 +848,7 @@ DatabaseTablesIteratorPtr DatabaseRemote::getTablesIteratorImpl(
         LOG_DEBUG(log, "Cannot list the tables of the remote database: {}", getCurrentExceptionMessage(/* with_stacktrace = */ false));
     }
 
+    ProfileEvents::increment(ProfileEvents::DatabaseTablesEnumerated, tables.size());
     return std::make_unique<DatabaseTablesSnapshotIterator>(tables, getDatabaseName());
 }
 
@@ -869,6 +876,7 @@ std::vector<LightWeightTableDetails> DatabaseRemote::getLightweightTablesIterato
         result.emplace_back(LightWeightTableDetails{table_name});
     }
 
+    ProfileEvents::increment(ProfileEvents::DatabaseTablesEnumerated, result.size());
     return result;
 }
 
