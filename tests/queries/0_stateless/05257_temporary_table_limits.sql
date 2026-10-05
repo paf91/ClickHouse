@@ -44,6 +44,14 @@ SET default_temporary_table_engine = 'Memory';
 CREATE TEMPORARY TABLE tmp_default AS SELECT number FROM numbers(1000000); -- { serverError TOO_MANY_BYTES }
 SELECT engine, total_bytes <= 1048576 FROM system.tables WHERE database = '' AND is_temporary AND name = 'tmp_default';
 DROP TEMPORARY TABLE tmp_default;
+-- A mutation that makes the data larger is limited as well, and leaves the data unchanged.
+CREATE TEMPORARY TABLE tmp_mutate (s String) ENGINE = Memory;
+INSERT INTO tmp_mutate SELECT '' FROM numbers(1000);
+ALTER TABLE tmp_mutate UPDATE s = repeat('a', 10000) WHERE 1; -- { serverError TOO_MANY_BYTES }
+SELECT sum(length(s)) FROM tmp_mutate;
+ALTER TABLE tmp_mutate UPDATE s = 'a' WHERE 1;
+SELECT sum(length(s)) FROM tmp_mutate;
+DROP TEMPORARY TABLE tmp_mutate;
 -- The eviction by `max_rows_to_keep` happens before the check: each insert replaces the previous one.
 CREATE TEMPORARY TABLE tmp_evicting (x UInt64) ENGINE = Memory SETTINGS max_rows_to_keep = 50000;
 INSERT INTO tmp_evicting SELECT number FROM numbers(50000) SETTINGS max_block_size = 50000, max_insert_block_size = 50000;

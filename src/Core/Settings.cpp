@@ -4590,6 +4590,9 @@ is being received and again before it is added: if the table would exceed it, th
 `TOO_MANY_BYTES` error code and the data is not added. An `INSERT` that writes with several threads (see
 `max_insert_threads`) adds the data of every thread separately, so the data of some threads may already be added when
 another one throws, but the table never exceeds the limit. The value is taken from the settings of the `INSERT` query.
+The limit is also checked after a mutation (`ALTER TABLE ... UPDATE`, `MATERIALIZE COLUMN`, etc.), with the value from
+the settings of the `ALTER` query: if the mutated data would exceed it, the mutation throws an exception with the
+`TOO_MANY_BYTES` error code and the data is left unchanged.
 
 Note that the `max_bytes_to_keep` setting of the `Memory` engine is different: it evicts the oldest data instead of
 rejecting the new one. If both are set, the eviction is applied first.
@@ -4609,6 +4612,9 @@ The limit is checked on every `INSERT` into the table (including `CREATE TEMPORA
 data part is committed: if the table would exceed it, the `INSERT` throws an exception with the `TOO_MANY_BYTES` error
 code and the part is not added. Parts committed earlier by the same `INSERT` stay in the table, as with any other
 error during an `INSERT` of multiple blocks. The value is taken from the settings of the `INSERT` query.
+
+Only `INSERT` is limited: the parts written by background merges and mutations (`ALTER TABLE ... UPDATE`,
+`MATERIALIZE COLUMN`, etc.) are not checked, so a mutation that makes the data larger can make the table exceed the limit.
 
 Possible values:
 

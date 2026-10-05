@@ -87,6 +87,15 @@ namespace FailPoints
     extern const char backup_add_empty_memory_table[];
 }
 
+/// Enforces `max_temporary_table_memory_usage`, zero means no limit.
+static void checkTemporaryTableMemoryUsage(UInt64 total_bytes, UInt64 max_temporary_table_memory_usage)
+{
+    if (max_temporary_table_memory_usage && total_bytes > max_temporary_table_memory_usage)
+        throw Exception(ErrorCodes::TOO_MANY_BYTES,
+            "The temporary table would use {} of memory, the maximum is {} (the `max_temporary_table_memory_usage` setting)",
+            ReadableSize(total_bytes), ReadableSize(max_temporary_table_memory_usage));
+}
+
 class MemorySink final : public SinkToStorage
 {
 public:
@@ -178,10 +187,7 @@ public:
 private:
     void checkTemporaryTableMemoryUsage(UInt64 total_bytes) const
     {
-        if (max_temporary_table_memory_usage && total_bytes > max_temporary_table_memory_usage)
-            throw Exception(ErrorCodes::TOO_MANY_BYTES,
-                "The temporary table would use {} of memory, the maximum is {} (the `max_temporary_table_memory_usage` setting)",
-                ReadableSize(total_bytes), ReadableSize(max_temporary_table_memory_usage));
+        DB::checkTemporaryTableMemoryUsage(total_bytes, max_temporary_table_memory_usage);
     }
 
     Blocks new_blocks;
@@ -438,6 +444,11 @@ void StorageMemory::mutate(const MutationCommands & commands, ContextPtr context
         new_data->rows += buffer.rows();
         new_data->bytes += buffer.allocatedBytes();
     }
+
+    /// A mutation can make the data larger (e.g. `UPDATE` with longer strings or `MATERIALIZE COLUMN`).
+    if (is_temporary_table)
+        checkTemporaryTableMemoryUsage(new_data->bytes, context->getSettingsRef()[Setting::max_temporary_table_memory_usage]);
+
     setData(std::move(new_data));
 }
 
