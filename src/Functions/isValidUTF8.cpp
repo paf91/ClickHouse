@@ -3,9 +3,9 @@
 #include <Functions/FunctionFactory.h>
 #include <Functions/FunctionStringOrArrayToT.h>
 
-#include <algorithm>
-
 #include "config.h"
+
+#include <algorithm>
 
 #if USE_SIMDUTF
 #    include <simdutf.h>
@@ -24,34 +24,41 @@ struct ValidUTF8Impl
 
     static constexpr bool is_fixed_to_constant = false;
 
-    static size_t asciiPrefixLength([[maybe_unused]] const UInt8 * data, [[maybe_unused]] size_t len)
+    /// Rows validated in one pass, few enough that their bytes are still in cache when the row boundaries are checked.
+    static constexpr size_t chunk_rows = 1024;
+
+    /// Row i is the bytes [row_begin(i), row_begin(i + 1)).
+    template <typename RowBegin>
+    static void validateRows(const UInt8 * data, size_t rows, RowBegin row_begin, PaddedPODArray<UInt8> & res)
     {
+        size_t row = 0;
+        while (row < rows)
+        {
+            const size_t chunk_end = std::min(rows, row + chunk_rows);
 #if USE_SIMDUTF
-        return simdutf::validate_ascii_with_errors(reinterpret_cast<const char *>(data), len).count;
-#else
-        return 0;
+            /// The bytes before valid_end are valid UTF-8, so a row there is valid iff it does not end in the middle of a
+            /// code point, i.e. the byte after it is not a continuation byte. Its start is checked as the previous row's end.
+            const size_t begin = row_begin(row);
+            const size_t valid_end = begin
+                + simdutf::validate_utf8_with_errors(reinterpret_cast<const char *>(data + begin), row_begin(chunk_end) - begin).count;
+            for (; row < chunk_end; ++row)
+            {
+                const size_t end = row_begin(row + 1);
+                if (end >= valid_end || (data[end] & 0xC0) == 0x80)
+                    break;
+                res[row] = 1;
+            }
+            for (; row < chunk_end && row_begin(row + 1) == valid_end; ++row)
+                res[row] = 1;
 #endif
+            for (; row < chunk_end; ++row)
+                res[row] = isValidUTF8(data + row_begin(row), row_begin(row + 1) - row_begin(row));
+        }
     }
 
     static void vector(const ColumnString::Chars & data, const ColumnString::Offsets & offsets, PaddedPODArray<UInt8> & res, size_t input_rows_count)
     {
-        if (input_rows_count == 0)
-            return;
-
-        /// A row that ends inside the column's leading run of ASCII bytes is valid UTF-8.
-        const size_t prefix = asciiPrefixLength(data.data(), offsets[input_rows_count - 1]);
-        const size_t ascii_rows = std::upper_bound(offsets.begin(), offsets.begin() + input_rows_count, prefix) - offsets.begin();
-        std::fill(res.begin(), res.begin() + ascii_rows, 1);
-        if (ascii_rows == input_rows_count)
-            return;
-
-        res[ascii_rows] = isValidUTF8(data.data() + prefix, offsets[ascii_rows] - prefix);
-        size_t prev_offset = offsets[ascii_rows];
-        for (size_t i = ascii_rows + 1; i < input_rows_count; ++i)
-        {
-            res[i] = isValidUTF8(data.data() + prev_offset, offsets[i] - prev_offset);
-            prev_offset = offsets[i];
-        }
+        validateRows(data.data(), input_rows_count, [&](size_t i) { return offsets[static_cast<ssize_t>(i) - 1]; }, res);
     }
 
     static void vectorFixedToConstant(const ColumnString::Chars &, size_t, UInt8 &, size_t)
@@ -60,15 +67,7 @@ struct ValidUTF8Impl
 
     static void vectorFixedToVector(const ColumnString::Chars & data, size_t n, PaddedPODArray<UInt8> & res, size_t input_rows_count)
     {
-        const size_t prefix = asciiPrefixLength(data.data(), n * input_rows_count);
-        const size_t ascii_rows = prefix / n;
-        std::fill(res.begin(), res.begin() + ascii_rows, 1);
-        if (ascii_rows == input_rows_count)
-            return;
-
-        res[ascii_rows] = isValidUTF8(data.data() + prefix, (ascii_rows + 1) * n - prefix);
-        for (size_t i = ascii_rows + 1; i < input_rows_count; ++i)
-            res[i] = isValidUTF8(data.data() + i * n, n);
+        validateRows(data.data(), input_rows_count, [n](size_t i) { return i * n; }, res);
     }
 
     [[noreturn]] static void array(const ColumnString::Offsets &, PaddedPODArray<UInt8> &, size_t)

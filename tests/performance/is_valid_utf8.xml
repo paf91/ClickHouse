@@ -1,7 +1,5 @@
-<!-- The first two queries, all ASCII, are checked by the column's ASCII pass; the others take one arm
-     each of DB::UTF8::isValidUTF8, plus one malformed input. 12 and 16 bytes bracket the
-     tuned cutoff simdutf_min_len_after_ascii; 1023 and 148 bytes bracket entering simdutf ahead of the
-     ASCII pre-pass; simdutf_min_len is simdutf's block size, so that arm is sampled, not bracketed.
+<!-- Valid rows are validated by simdutf many rows at a time, so the valid inputs differ in their mix of ASCII and 2-, 3- and
+     4-byte code points and in row length; the malformed input takes the per-row path of DB::UTF8::isValidUTF8.
      materialize() keeps the argument out of constant folding; the malformed row needs its alias, because
      the folded argument would otherwise become the result column's name and the harness client decodes
      header strings as strict UTF-8. -->
