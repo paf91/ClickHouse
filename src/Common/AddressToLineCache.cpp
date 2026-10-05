@@ -1,6 +1,7 @@
 #if (defined(__ELF__) && !defined(OS_FREEBSD)) || defined(OS_DARWIN)
 
 #include <Common/AddressToLineCache.h>
+#include <Common/CurrentMetrics.h>
 #include <Common/SymbolIndex.h>
 #include <Common/VectorWithMemoryTracking.h>
 #include <IO/WriteBufferFromArena.h>
@@ -8,6 +9,12 @@
 
 #include <filesystem>
 #include <shared_mutex>
+
+namespace CurrentMetrics
+{
+    extern const Metric AddressToLineCacheEntries;
+    extern const Metric AddressToLineCacheBytes;
+}
 
 namespace DB
 {
@@ -80,14 +87,14 @@ std::string_view AddressToLineCache::impl(uintptr_t addr)
 
 std::string_view AddressToLineCache::implCached(uintptr_t addr)
 {
-    /// Fast path: read lock — concurrent reads don't block each other
+    /// Fast path: read lock - concurrent reads don't block each other
     {
         std::shared_lock read_lock(mutex);
         if (auto * it = map.find(addr); it)
             return it->getMapped();
     }
 
-    /// Slow path: write lock — DWARF lookup + insert
+    /// Slow path: write lock - DWARF lookup + insert
     std::unique_lock write_lock(mutex);
 
     /// Double-check: another thread may have inserted while we waited for the write lock.
@@ -102,6 +109,10 @@ std::string_view AddressToLineCache::implCached(uintptr_t addr)
     bool inserted = false;
     map.emplace(addr, it, inserted);
     it->getMapped() = result;
+
+    CurrentMetrics::set(CurrentMetrics::AddressToLineCacheEntries, map.size());
+    CurrentMetrics::set(CurrentMetrics::AddressToLineCacheBytes, arena.allocatedBytes() + map.getBufferSizeInBytes());
+
     return it->getMapped();
 }
 
