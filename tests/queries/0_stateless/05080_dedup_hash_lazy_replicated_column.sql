@@ -14,13 +14,14 @@ INSERT INTO t_dedup_build SELECT number % 10, number FROM numbers(1000);
 
 CREATE TABLE t_dedup_dst (s String, n UInt64) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/t_dedup_dst', '1') ORDER BY n;
 
+-- Both inserts must read on one server: parallel replicas return the replicas' rows in a different order each time.
 INSERT INTO t_dedup_dst SELECT p.s AS s, b.n AS n FROM t_dedup_probe p INNER JOIN t_dedup_build b ON p.k = b.y
-SETTINGS query_plan_join_swap_table = 'false', max_threads = 1,
+SETTINGS query_plan_join_swap_table = 'false', max_threads = 1, enable_parallel_replicas = 0,
          deduplicate_insert_select = 'enable_even_for_bad_queries', enable_lazy_columns_replication = 1;
 
 -- The same rows in the same order, only the column representation differs.
 INSERT INTO t_dedup_dst SELECT p.s AS s, b.n AS n FROM t_dedup_probe p INNER JOIN t_dedup_build b ON p.k = b.y
-SETTINGS query_plan_join_swap_table = 'false', max_threads = 1,
+SETTINGS query_plan_join_swap_table = 'false', max_threads = 1, enable_parallel_replicas = 0,
          deduplicate_insert_select = 'enable_even_for_bad_queries', enable_lazy_columns_replication = 0;
 
 SELECT count() FROM t_dedup_dst;
