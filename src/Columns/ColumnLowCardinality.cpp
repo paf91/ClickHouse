@@ -31,7 +31,9 @@ void throwUnexpectedLowCardinalityIndexType(size_t size)
 
 namespace
 {
-    constexpr size_t max_rows_to_translate_individually = 32;
+    /// Benchmarked at 16-1024 rows: with a few distinct short keys the range path overtakes per-row translation at 66-85 rows,
+    /// with 100 or more distinct keys per-row translation stays faster past 128 rows.
+    constexpr size_t max_rows_to_translate_individually = 64;
 
     void checkColumn(const IColumn & column)
     {
