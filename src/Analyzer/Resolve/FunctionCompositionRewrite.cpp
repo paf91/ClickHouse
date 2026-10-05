@@ -140,8 +140,9 @@ struct PlaceholderCollector
             case QueryTreeNodeType::QUERY:
             case QueryTreeNodeType::UNION:
             {
-                /// Placeholders are not supported inside subqueries; identifiers there are
-                /// resolved as usual.
+                /// Placeholders are not looked for inside subqueries; identifiers there are
+                /// resolved as usual. This matches explicit lambdas: a subquery cannot reference
+                /// the argument of a lambda either, e.g. `arrayMap(x -> (SELECT x), [1])` fails.
                 return;
             }
             default:
