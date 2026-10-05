@@ -36,10 +36,14 @@ if [ "${value1}" == "${value2}" ]; then echo "same value in both processes"; els
 echo "-- With reads from the query cache on disk disabled, the entry is ignored (0 hits expected)"
 ${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "${query}, enable_reads_from_query_cache_on_disk = false; SELECT countIf(event = 'QueryCacheOnDiskHits' AND value > 0) FROM system.events;"
 
-echo "-- A stale entry (expired TTL) is a cache miss"
+echo "-- A stale entry (expired TTL) is a cache miss and is replaced by a fresh entry"
 ${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "SELECT 'ttl test' SETTINGS ${on_disk_cache_settings}, query_cache_ttl = 1" > /dev/null
 sleep 2
-${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "SELECT 'ttl test' SETTINGS ${on_disk_cache_settings}, query_cache_ttl = 1; ${events_query};"
+# The TTL is not part of the key, so this query sees the stale entry and replaces it with an entry which stays fresh for the rest of the test.
+${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "SELECT 'ttl test' SETTINGS ${on_disk_cache_settings}, query_cache_ttl = 3600; ${events_query};"
+
+echo "-- The replacing entry is served from disk"
+${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "SELECT 'ttl test' SETTINGS ${on_disk_cache_settings}, query_cache_ttl = 3600; ${events_query};"
 
 rm -rf "${CACHE_DIR}"
 rm "${CONFIG_FILE}"
