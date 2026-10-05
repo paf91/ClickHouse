@@ -34,6 +34,8 @@ empty	0	10
 shared	0	0
 disjunction	[0,5,10,19]
 index	1000	4995000
+progress	10
+progress rows	1010
 report	key8	1	1	1	1
 report	key16	1	1	1	1
 report	key32 Int32	1	1	1	1
@@ -70,20 +72,14 @@ report	empty	1	0	0	0
 report	shared	1	1	1	1
 report	disjunction	1	1	1	1
 report	index	1	1	1	1
-in memory 37 0
+report	progress	1	1	1	1
+in memory 38 0
 30000
 30000
-LZ4	1
+LZ4	1	1	0
 30000
 30000
-NONE	0
-1010
-0
-1010
-1
-2048
-1
-0
+NONE	0	1	0
 BAD_ARGUMENTS
 TOO_MANY_ROWS_OR_BYTES
 NOT_ENOUGH_SPACE

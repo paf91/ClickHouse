@@ -31,8 +31,8 @@ run_logged()
 }
 
 # One query per key representation of the set, plus `NULL`s, casts and constants, each counting and
-# checksumming the rows found. With a threshold of 1 byte, every set spills to disk before its first chunk, and
-# blocks of 1000 rows make the sorter write a run for each chunk.
+# checksumming the rows found. With a threshold of 1 byte, every set spills to disk before its first chunk,
+# and blocks of 1000 rows make the sorter write a run for each chunk.
 PARITY_QUERIES=$(cat <<'SQL'
 WITH rhs AS (SELECT toUInt8(number * 7 % 101) FROM numbers(3000))
 SELECT 'key8', countIf(x IN rhs), countIf(x NOT IN rhs), sum(cityHash64(number) * (x IN rhs))
@@ -147,11 +147,14 @@ CREATE TABLE lhs (k UInt64) ENGINE = MergeTree ORDER BY k SETTINGS index_granula
 INSERT INTO lhs SELECT number FROM numbers(100000);
 SELECT 'index', count(), sum(k) FROM lhs WHERE k IN (SELECT number * 10 FROM numbers(1000)) SETTINGS use_index_for_in_with_subqueries = 1;
 DROP TABLE lhs;
+
+-- The rows of the subquery count once in the query progress, whether the set is in memory or on disk.
+SELECT 'progress', count() FROM numbers(10) WHERE number IN (SELECT number FROM numbers(1000));
 SQL
 )
 
 # For each query by its label: the sets it filled, how many spilled, how many times their runs were merged,
-# and whether its lookups read the disk.
+# and whether its lookups read the disk. Then the rows that the progress counted for its query.
 PARITY_REPORT=$(cat <<'SQL'
 SYSTEM FLUSH LOGS query_log;
 SELECT 'report', extract(query, 'SELECT \'([^\']+)\'') AS label, ProfileEvents['SetsBuiltFromSubquery'],
@@ -159,6 +162,9 @@ SELECT 'report', extract(query, 'SELECT \'([^\']+)\'') AS label, ProfileEvents['
 FROM system.query_log
 WHERE type = 'QueryFinish' AND query_kind = 'Select' AND label != '' AND current_database = currentDatabase()
 ORDER BY event_time_microseconds;
+SELECT 'progress rows', ProfileEvents['SelectedRows']
+FROM system.query_log
+WHERE type = 'QueryFinish' AND extract(query, 'SELECT \'([^\']+)\'') = 'progress' AND current_database = currentDatabase();
 SQL
 )
 
@@ -176,56 +182,29 @@ grep -v '^report' "${LOCAL_DIR}/parity-1.out"
 grep '^report' "${LOCAL_DIR}/parity-1.out"
 grep '^report' "${LOCAL_DIR}/parity-0.out" | awk -F'\t' '{ built += $3; spilled += $4 } END { print "in memory", built, spilled }'
 
-# Prints the value of an event, 0 if it did not occur.
-event()
-{
-    echo "SELECT sum(value) FROM system.events WHERE event = '$1';"
-}
-
-# The runs and the set use `temporary_files_codec`: `LZ4` compresses the keys, and `NONE` adds a header to each
-# block. Both find the same keys, for keys of 8 and 32 bytes.
+# The runs and the set use `temporary_files_codec`: `LZ4` compresses the keys, and `NONE` adds a header to
+# each block. Both find the same keys, for keys of 8 and 32 bytes, and the files are removed when the queries
+# finish.
 for codec in LZ4 NONE; do
     run "codec-${codec}" --max_bytes_before_external_set 1 --temporary_files_codec "${codec}" --multiquery <<SQL
 SELECT countIf(number IN (SELECT number * 3 FROM numbers(30000))) FROM numbers(90000);
 SELECT countIf(toUInt256(number) IN (SELECT toUInt256(number * 3) FROM numbers(30000))) FROM numbers(90000);
 SELECT '${codec}', (SELECT sum(value) FROM system.events WHERE event = 'ExternalSetCompressedBytes')
-    < (SELECT sum(value) FROM system.events WHERE event = 'ExternalSetUncompressedBytes');
+    < (SELECT sum(value) FROM system.events WHERE event = 'ExternalSetUncompressedBytes'),
+    (SELECT sum(value) > 0 FROM system.events WHERE event = 'ExternalSetWritePart'),
+    (SELECT value FROM system.metrics WHERE metric = 'TemporaryFilesForSet');
 SQL
 done
 
-# The rows of the subquery count once in the query progress, whether the set is in memory or on disk.
-for threshold in 0 1; do
-    run "progress-${threshold}" --max_bytes_before_external_set "${threshold}" --multiquery <<SQL
-SELECT count() FROM numbers(10) WHERE number IN (SELECT number FROM numbers(1000)) FORMAT Null;
-$(event SelectedRows)
-$(event SetsSpilledToDisk)
+# The checks of the settings and of the space for temporary data stop the query, and so does a set whose
+# writing stops before its end, as at the time limit in the `break` overflow mode. One process runs the
+# queries and continues after each error; the failpoint stays enabled, so its query comes last.
+run errors --max_bytes_before_external_set 1 --ignore-error --multiquery 2> "${LOCAL_DIR}/errors.err" <<'SQL'
+SELECT 1 IN (SELECT number FROM numbers(10)) SETTINGS max_bytes_ratio_before_external_set = 1;
+SELECT 1 IN (SELECT number FROM numbers(10000)) SETTINGS max_temporary_data_on_disk_size_for_query = 1;
+SELECT 1 IN (SELECT number FROM numbers(100)) SETTINGS min_free_disk_space_for_temporary_data = 1000000000000000;
+SYSTEM ENABLE FAILPOINT disk_set_builder_stop_before_finish;
+SELECT count() FROM numbers(10) WHERE number IN (SELECT number FROM numbers(1000));
 SQL
-done
-
-# The files are removed when the queries finish.
-run cleanup --max_bytes_before_external_set 1 --multiquery <<SQL
-SELECT count() FROM numbers(2048) WHERE number IN (SELECT number FROM numbers(2048));
-SELECT sum(value) > 0 FROM system.events WHERE event = 'ExternalSetWritePart';
-SELECT value FROM system.metrics WHERE metric = 'TemporaryFilesForSet';
-SQL
-
-expect_error()
-{
-    local expected="$1"
-    local query="$2"
-    if run errors --max_bytes_before_external_set 1 --multiquery --query "$query" > "${LOCAL_DIR}/error.out" 2> "${LOCAL_DIR}/error.err"; then
-        echo "Expected ${expected}"
-        return 1
-    fi
-    grep -q "(${expected})" "${LOCAL_DIR}/error.err"
-    echo "$expected"
-}
-
-expect_error BAD_ARGUMENTS "SELECT 1 IN (SELECT number FROM numbers(10)) SETTINGS max_bytes_ratio_before_external_set = 1"
-expect_error TOO_MANY_ROWS_OR_BYTES "SELECT 1 IN (SELECT number FROM numbers(10000)) SETTINGS max_temporary_data_on_disk_size_for_query = 1"
-expect_error NOT_ENOUGH_SPACE "SELECT 1 IN (SELECT number FROM numbers(100)) SETTINGS min_free_disk_space_for_temporary_data = 1000000000000000"
-
-# A set whose writing stops before its end, as at the time limit in the `break` overflow mode, is not used: the
-# query throws.
-expect_error QUERY_WAS_CANCELLED "SYSTEM ENABLE FAILPOINT disk_set_builder_stop_before_finish;
-    SELECT count() FROM numbers(10) WHERE number IN (SELECT number FROM numbers(1000))"
+# The message of an error can nest the message of the same error, so only the first code of each is printed.
+awk '/DB::Exception/ && match($0, /\([A-Z_]+\)/) { print substr($0, RSTART + 1, RLENGTH - 2) }' "${LOCAL_DIR}/errors.err"
