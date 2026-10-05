@@ -1877,6 +1877,12 @@ ProjectionNames QueryAnalyzer::resolveFunction(QueryTreeNodePtr & node, Identifi
                 String unique_column_name
                     = fmt::format("__subquery_column_{}_{}", subquery_hash.low64, subquery_hash.high64);
 
+                /// The set of a regular IN ignores the totals row of `WITH TOTALS`, so drop it here as
+                /// well: otherwise the `TotalsHaving` step of the subquery ends up on the right side of
+                /// the join built by the decorrelation, leaks the totals row into the outer query, and
+                /// fails with `LOGICAL_ERROR` when the outer query has `WITH TOTALS` itself.
+                subquery_node->as<QueryNode>()->setIsGroupByWithTotals(false);
+
                 /// Re-resolve subquery columns setting the unique alias
                 auto subquery_projection_columns = subquery_node->as<QueryNode>()->getProjectionColumns();
                 subquery_node->as<QueryNode>()->clearProjectionColumns();
