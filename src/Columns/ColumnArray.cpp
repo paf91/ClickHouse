@@ -738,8 +738,7 @@ void ColumnArray::doInsertRangeFrom(const IColumn & src, size_t start, size_t le
     const ColumnArray & src_concrete = assert_cast<const ColumnArray &>(src);
 
     if (start + length > src_concrete.getOffsets().size())
-        throw Exception(ErrorCodes::PARAMETER_OUT_OF_BOUND, "Parameter out of bound in ColumnArray::insertRangeFrom method. "
-            "[start({}) + length({}) > offsets.size({})]", start, length, src_concrete.getOffsets().size());
+        throwInsertRangeFromOutOfBound("ColumnArray", start, length, src_concrete.getOffsets().size());
 
     size_t nested_offset = src_concrete.offsetAt(start);
     size_t nested_length = src_concrete.getOffsets()[start + length - 1] - nested_offset;

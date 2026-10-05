@@ -27,7 +27,6 @@ namespace ErrorCodes
     extern const int TOO_LARGE_STRING_SIZE;
     extern const int SIZE_OF_FIXED_STRING_DOESNT_MATCH;
     extern const int SIZES_OF_COLUMNS_DOESNT_MATCH;
-    extern const int PARAMETER_OUT_OF_BOUND;
     extern const int LOGICAL_ERROR;
 }
 
@@ -297,9 +296,7 @@ void ColumnFixedString::doInsertRangeFrom(const IColumn & src, size_t start, siz
     chassert(this->n == src_concrete.n);
 
     if (start + length > src_concrete.size())
-        throw Exception(ErrorCodes::PARAMETER_OUT_OF_BOUND, "Parameters start = {}, length = {} are out of bound "
-                        "in ColumnFixedString::insertRangeFrom method (size() = {}).",
-                        toString(start), toString(length), toString(src_concrete.size()));
+        throwInsertRangeFromOutOfBound("ColumnFixedString", start, length, src_concrete.size());
 
     size_t old_size = chars.size();
     chars.resize(old_size + length * n);

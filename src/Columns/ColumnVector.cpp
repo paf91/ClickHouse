@@ -54,7 +54,6 @@ namespace DB
 
 namespace ErrorCodes
 {
-    extern const int PARAMETER_OUT_OF_BOUND;
     extern const int SIZES_OF_COLUMNS_DOESNT_MATCH;
     extern const int LOGICAL_ERROR;
     extern const int NOT_IMPLEMENTED;
@@ -754,10 +753,7 @@ void ColumnVector<T>::doInsertRangeFrom(const IColumn & src, size_t start, size_
     const ColumnVector & src_vec = assert_cast<const ColumnVector &>(src);
 
     if (start + length > src_vec.data.size())
-        throw Exception(ErrorCodes::PARAMETER_OUT_OF_BOUND,
-                        "Parameters start = {}, length = {} are out of bound "
-                        "in ColumnVector<T>::insertRangeFrom method (data.size() = {}).",
-                        toString(start), toString(length), toString(src_vec.data.size()));
+        throwInsertRangeFromOutOfBound("ColumnVector<T>", start, length, src_vec.data.size());
 
     size_t old_size = data.size();
     data.resize(old_size + length);
