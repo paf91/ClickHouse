@@ -198,6 +198,10 @@ void MergeSortingTransform::serialize()
     current_chunk = merge_sorter->read();
     if (!current_chunk)
         merge_sorter.reset();
+    /// A read of `MergeSorter::Mode::MergeUniqueChunks` that consumes only duplicates returns no rows. The
+    /// run gets no block for it, and the next call reads on.
+    else if (!current_chunk.hasRows())
+        current_chunk.clear();
 }
 
 void MergeSortingTransform::generate()
@@ -237,6 +241,9 @@ void MergeSortingTransform::generate()
         generated_chunk = merge_sorter->read();
         if (!generated_chunk)
             merge_sorter.reset();
+        /// A read that consumes only duplicates returns no rows, which are not output.
+        else if (!generated_chunk.hasRows())
+            generated_chunk.clear();
         else
             enrichChunkWithConstants(generated_chunk);
     }
