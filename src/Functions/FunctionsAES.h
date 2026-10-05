@@ -101,7 +101,7 @@ private:
     std::array<char, EVP_MAX_KEY_LENGTH> key{};
 };
 
-/// Reads the rows of a String or FixedString argument column without a virtual call per row.
+/// Reads the rows of a `String` or `FixedString` argument column without a virtual call per row.
 class StringArgumentReader
 {
 public:
@@ -388,7 +388,7 @@ private:
     /// so those rows go through a CBC context that is re-initialized with only the IV
     /// (keeping the expanded key schedule) between rows. A row shorter than a block is a
     /// single block with no chaining, so runs of such rows are encrypted in place with one
-    /// EVP_EncryptUpdate.
+    /// `EVP_EncryptUpdate`.
     /// See https://github.com/ClickHouse/ClickHouse/issues/65116
     template <CipherMode mode>
     static ColumnPtr doEncryptBlockCipher(
@@ -446,7 +446,7 @@ private:
         CachedKeyState cbc_key_state;
         static constexpr unsigned char zero_iv[EVP_MAX_IV_LENGTH]{};
 
-        /// [pending, encrypted) holds padded blocks of deferred rows, not yet encrypted with the key in ecb_ctx.
+        /// `[pending, encrypted)` holds padded blocks of deferred rows, not yet encrypted with the key in `ecb_ctx`.
         auto * pending = encrypted;
         auto encrypt_pending = [&]
         {
@@ -549,8 +549,7 @@ private:
                     encrypted += output_len;
                 }
 
-                /// The last block: remaining input bytes plus PKCS#7 padding. A deferred row's
-                /// only block is built in place and encrypted with the pending run.
+                /// The last block: remaining input bytes plus PKCS#7 padding.
                 const size_t remaining = input_size - full_blocks * block_size;
                 unsigned char last_buf[block_size];
                 auto * last = deferred ? reinterpret_cast<unsigned char *>(encrypted) : last_buf;
