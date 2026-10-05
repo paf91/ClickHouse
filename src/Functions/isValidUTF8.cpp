@@ -5,8 +5,6 @@
 
 #include "config.h"
 
-#include <algorithm>
-
 #if USE_SIMDUTF
 #    include <simdutf.h>
 #endif
@@ -24,36 +22,45 @@ struct ValidUTF8Impl
 
     static constexpr bool is_fixed_to_constant = false;
 
-    /// Rows validated in one pass, few enough that their bytes are still in cache when the row boundaries are checked.
-    static constexpr size_t chunk_rows = 1024;
-
     /// Row i is the bytes [row_begin(i), row_begin(i + 1)).
     template <typename RowBegin>
     static void validateRows(const UInt8 * data, size_t rows, RowBegin row_begin, PaddedPODArray<UInt8> & res)
     {
+#if USE_SIMDUTF
+        const size_t data_end = row_begin(rows);
         size_t row = 0;
         while (row < rows)
         {
-            const size_t chunk_end = std::min(rows, row + chunk_rows);
-#if USE_SIMDUTF
             /// The bytes before valid_end are valid UTF-8, so a row there is valid iff it does not end in the middle of a
             /// code point, i.e. the byte after it is not a continuation byte. Its start is checked as the previous row's end.
             const size_t begin = row_begin(row);
-            const size_t valid_end = begin
-                + simdutf::validate_utf8_with_errors(reinterpret_cast<const char *>(data + begin), row_begin(chunk_end) - begin).count;
-            for (; row < chunk_end; ++row)
+            const size_t valid_end
+                = begin + simdutf::validate_utf8_with_errors(reinterpret_cast<const char *>(data + begin), data_end - begin).count;
+            for (; row < rows; ++row)
             {
                 const size_t end = row_begin(row + 1);
                 if (end >= valid_end || (data[end] & 0xC0) == 0x80)
                     break;
                 res[row] = 1;
             }
-            for (; row < chunk_end && row_begin(row + 1) == valid_end; ++row)
+            for (; row < rows && row_begin(row + 1) == valid_end; ++row)
                 res[row] = 1;
-#endif
-            for (; row < chunk_end; ++row)
+            if (row == rows)
+                break;
+            /// This row contains the first invalid byte or ends in the middle of a code point. The rows after it are checked one
+            /// by one up to the next valid one, so that a run of invalid rows does not cost a simdutf call per row.
+            res[row++] = 0;
+            while (row < rows)
+            {
                 res[row] = isValidUTF8(data + row_begin(row), row_begin(row + 1) - row_begin(row));
+                if (res[row++])
+                    break;
+            }
         }
+#else
+        for (size_t row = 0; row < rows; ++row)
+            res[row] = isValidUTF8(data + row_begin(row), row_begin(row + 1) - row_begin(row));
+#endif
     }
 
     static void vector(const ColumnString::Chars & data, const ColumnString::Offsets & offsets, PaddedPODArray<UInt8> & res, size_t input_rows_count)

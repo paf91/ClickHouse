@@ -169,6 +169,6 @@ select groupArray(isValidUTF8(s)) from (select arrayJoin([repeat('a', 70) || '\x
 select groupArray(isValidUTF8(s)) from (select arrayJoin(['\xD0\xB0', 'a\xE6', '\x97\xA5b', '\xD0\xB0', '']) as s);
 select groupArray(isValidUTF8(toFixedString(s, 3))) from (select arrayJoin(['\xD0\xB0a', 'b\xE6\x97', '\xA5cd', 'efg']) as s);
 
--- Invalid rows and a code point split across rows around the boundaries between groups of 1024 rows.
+-- Invalid rows and a code point split across rows in one long column, so validation restarts after invalid rows.
 select countIf(v), arraySort(groupArrayIf(number, not v)) from (select number, isValidUTF8(multiIf(number = 1023, 'a\xC3', number = 1024, '\xA9b', number = 1500, '\xE6\x97', number = 2047, '\xFF', number = 2048, '\xC3\xA9', 'x\xD0\xB0')) as v from numbers(3000)) settings max_block_size = 65536;
 select countIf(v), arraySort(groupArrayIf(number, not v)) from (select number, isValidUTF8(toFixedString(multiIf(number = 1023, 'ab\xC3', number = 1024, '\xA9cd', number = 1500, 'a\xE6\x97', number = 2047, '\xFFab', number = 2048, '\xC3\xA9a', 'x\xD0\xB0'), 3)) as v from numbers(3000)) settings max_block_size = 65536;
