@@ -31,8 +31,6 @@
 #include <Analyzer/JoinNode.h>
 #include <Analyzer/SetUtils.h>
 
-#include <Core/Settings.h>
-
 
 namespace DB
 {
