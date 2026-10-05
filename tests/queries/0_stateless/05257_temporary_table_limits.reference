@@ -15,4 +15,6 @@ max_temporary_table_size_bytes_compressed
 0
 max_temporary_table_size_bytes_uncompressed
 1000
+10000
+10000
 1000000

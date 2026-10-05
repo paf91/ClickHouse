@@ -83,6 +83,14 @@ INSERT INTO tmp_mt SELECT number FROM numbers(1000);
 INSERT INTO tmp_mt SELECT 1 FROM numbers(100000) SETTINGS max_block_size = 1000000, max_insert_block_size = 1000000; -- { serverError TOO_MANY_BYTES }
 SELECT count() FROM tmp_mt;
 DROP TEMPORARY TABLE tmp_mt;
+-- A deduplicated insert adds nothing, so it is not limited.
+CREATE TEMPORARY TABLE tmp_mt (x UInt64) ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '', non_replicated_deduplication_window = 100;
+INSERT INTO tmp_mt SELECT number FROM numbers(10000) SETTINGS insert_deduplication_token = 'a', max_block_size = 1000000, max_insert_block_size = 1000000;
+INSERT INTO tmp_mt SELECT number FROM numbers(10000) SETTINGS insert_deduplication_token = 'a', max_block_size = 1000000, max_insert_block_size = 1000000;
+SELECT count() FROM tmp_mt;
+INSERT INTO tmp_mt SELECT number FROM numbers(10000) SETTINGS insert_deduplication_token = 'b', max_block_size = 1000000, max_insert_block_size = 1000000; -- { serverError TOO_MANY_BYTES }
+SELECT count() FROM tmp_mt;
+DROP TEMPORARY TABLE tmp_mt;
 -- Regular tables are not limited.
 DROP TABLE IF EXISTS regular_mt;
 CREATE TABLE regular_mt (x UInt64) ENGINE = MergeTree ORDER BY tuple();

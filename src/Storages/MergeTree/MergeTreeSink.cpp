@@ -326,9 +326,9 @@ void MergeTreeSink::finishDelayedChunk()
             partition.temp_part->part->getDataPartStorage().commitTransaction();
 
             auto & part = partition.temp_part->part;
-            checkTemporaryTableSize(*part);
-
             auto deduplication_hashes = partition.deduplication_info->getDeduplicationHashes(part->info.getPartitionId(), deduplicate);
+            checkTemporaryTableSize(*part, deduplication_hashes);
+
             auto conflicts = commitPart(part, deduplication_hashes);
 
             if (conflicts.empty())
@@ -419,8 +419,20 @@ void MergeTreeSink::finishDelayedChunk()
     delayed_chunk.reset();
 }
 
-void MergeTreeSink::checkTemporaryTableSize(const IMergeTreeDataPart & part) const
+void MergeTreeSink::checkTemporaryTableSize(const IMergeTreeDataPart & part, const std::vector<DeduplicationHash> & deduplication_hashes) const
 {
+    if (!max_temporary_table_size_bytes_compressed && !max_temporary_table_size_bytes_uncompressed)
+        return;
+
+    /// A block that is already in the deduplication log is not committed as is: `commitPart` reports the conflict,
+    /// and the part is either skipped or rewritten from the remaining rows, which is checked on the next try.
+    if (!deduplication_hashes.empty())
+    {
+        auto * deduplication_log = storage.getDeduplicationLog();
+        if (deduplication_log && deduplication_log->containsAny(getDeduplicationBlockIds(deduplication_hashes)))
+            return;
+    }
+
     /// The check is not atomic with the commit, so concurrent inserts may exceed the limits slightly.
     if (max_temporary_table_size_bytes_compressed)
     {
