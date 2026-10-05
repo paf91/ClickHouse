@@ -33,7 +33,11 @@ HAVING_QID="totals_having_kill_${CLICKHOUSE_DATABASE}_$$"
 # a small group count would never reach the 4096-row boundary where the failpoint sits. Force a
 # single-level aggregation instead: it converts the whole aggregation result into one chunk, which
 # keeps the group count (and with it the memory and the runtime of this test) small.
-SETTINGS_SUFFIX="group_by_two_level_threshold=0, enable_adaptive_aggregator=0, max_threads=1, max_rows_to_read=0"
+# Both thresholds of `worthConvertToTwoLevel()` have to be disabled: it switches to two levels when
+# `group_by_two_level_threshold` OR `group_by_two_level_threshold_bytes` is exceeded, and the
+# stateless harness randomizes the latter, so zeroing only the former makes this test pass locally
+# and time out on CI.
+SETTINGS_SUFFIX="group_by_two_level_threshold=0, group_by_two_level_threshold_bytes=0, enable_adaptive_aggregator=0, max_threads=1, max_rows_to_read=0"
 
 TOTALS_QUERY="SELECT intDiv(number, 10) AS k, count() AS cnt, sum(number) AS total
 FROM numbers(1000000)
