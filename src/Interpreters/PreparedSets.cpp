@@ -445,7 +445,7 @@ void FutureSetFromSubquery::prepareForDistributedPlan(const ContextPtr & context
     if (!set_and_key->set->hasExplicitSetElements())
         set_and_key->set->fillSetElements();
 
-    /// TODO: Support spilling for the sets that a distributed plan ships. 
+    /// TODO: Support spilling for the sets that a distributed plan ships.
     set_settings.disableSpilling();
 
     if (source)
