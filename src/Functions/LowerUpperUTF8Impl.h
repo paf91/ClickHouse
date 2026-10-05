@@ -20,12 +20,6 @@
 #    include <string>
 #    include <string_view>
 
-#    if defined(__aarch64__) && defined(__ARM_NEON)
-#        include <arm_neon.h>
-#    elif defined(__SSE2__)
-#        include <immintrin.h>
-#    endif
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
 
@@ -51,14 +45,15 @@ struct LowerUpperUTF8Impl
         if (input_rows_count == 0)
             return;
 
-        bool all_ascii = isAllASCIIWithEarlyExit(data.data(), data.size());
-        if (all_ascii)
+        const size_t size = data.size();
+        size_t pos = findFirstNonASCII(data.data(), size);
+        if (pos == size)
         {
             LowerUpperImpl<not_case_lower_bound, not_case_upper_bound>::vector(data, offsets, res_data, res_offsets, input_rows_count);
             return;
         }
 
-        res_data.resize(data.size());
+        res_data.resize(size);
         res_offsets.resize_exact(input_rows_count);
 
         UErrorCode error_code = U_ZERO_ERROR;
@@ -73,66 +68,54 @@ struct LowerUpperUTF8Impl
 
         const auto & two_byte_table = getTwoByteTable(case_map);
 
-        size_t curr_offset = 0;
+        /// ASCII and table mappings keep the length, so outside the rows ICU maps, input byte `i` goes to
+        /// `dst_anchor + i - src_anchor`, where the anchors are the input and output ends of the last such row.
+        size_t src_anchor = 0;
+        size_t dst_anchor = 0;
+        size_t row = 0;
 
-        auto ensure_capacity = [&](size_t size)
+        LowerUpperImpl<not_case_lower_bound, not_case_upper_bound>::vectorRaw(data.data(), data.data() + pos, res_data.data());
+
+        while (pos < size)
         {
-            if (curr_offset > res_data.size() || size > res_data.size() - curr_offset)
-                res_data.resize(curr_offset + size);
-        };
-
-        auto process_ascii_run = [&](size_t first_row, size_t last_row)
-        {
-            if (first_row == last_row)
-                return;
-
-            const size_t src_begin_offset = first_row == 0 ? 0 : offsets[first_row - 1];
-            const size_t src_end_offset = offsets[last_row - 1];
-            const size_t src_size = src_end_offset - src_begin_offset;
-
-            ensure_capacity(src_size);
-
-            const size_t dst_begin_offset = curr_offset;
-            LowerUpperImpl<not_case_lower_bound, not_case_upper_bound>::vectorRaw(
-                data.data() + src_begin_offset,
-                data.data() + src_end_offset,
-                res_data.data() + dst_begin_offset);
-            curr_offset += src_size;
-
-            for (size_t row_i = first_row; row_i < last_row; ++row_i)
-                res_offsets[row_i] = dst_begin_offset + offsets[row_i] - src_begin_offset;
-        };
-
-        size_t ascii_run_start = 0;
-        for (size_t row_i = 0; row_i < input_rows_count; ++row_i)
-        {
-            const size_t src_begin_offset = row_i == 0 ? 0 : offsets[row_i - 1];
-            const size_t src_end_offset = offsets[row_i];
-            const size_t src_size = src_end_offset - src_begin_offset;
-            if (isAllASCIIWithEarlyExit(data.data() + src_begin_offset, src_size))
-                continue;
-
-            process_ascii_run(ascii_run_start, row_i);
-            ascii_run_start = row_i + 1;
-
-            ensure_capacity(src_size);
-            const UInt8 * row = data.data() + src_begin_offset;
-            size_t resume = tryMapTwoByteRow(row, src_size, res_data.data() + curr_offset, two_byte_table);
-            if (resume == src_size)
+            if (data[pos] < 0x80)
             {
-                curr_offset += src_size;
-                res_offsets[row_i] = curr_offset;
+                const size_t end = pos + findFirstNonASCII(data.data() + pos, size - pos);
+                LowerUpperImpl<not_case_lower_bound, not_case_upper_bound>::vectorRaw(
+                    data.data() + pos, data.data() + end, res_data.data() + dst_anchor + pos - src_anchor);
+                pos = end;
                 continue;
             }
 
-            /// The table's output before `resume` is ICU's, so ICU maps only the rest of the row. In the root locale only
-            /// final sigma depends on other characters, and it needs the last one its check does not skip.
-            if constexpr (!upper)
-                resume = findSigmaContextStart(row, resume, two_byte_table);
-            curr_offset += resume;
+            while (offsets[row] <= pos)
+            {
+                res_offsets[row] = dst_anchor + offsets[row] - src_anchor;
+                ++row;
+            }
+            const size_t row_end = offsets[row];
 
-            const auto * src = reinterpret_cast<const char *>(row + resume);
-            const size_t icu_size = src_size - resume;
+            /// A sequence never continues into the next row.
+            const UInt8 c = data[pos];
+            if (c >= 0xC2 && c <= 0xDF && pos + 1 < row_end && (data[pos + 1] & 0xC0) == 0x80)
+            {
+                const size_t code_point = static_cast<size_t>(c & 0x1F) << 6 | static_cast<size_t>(data[pos + 1] & 0x3F);
+                const UInt16 mapped = two_byte_table.mapped[code_point - 0x80];
+                if (mapped != 0)
+                {
+                    UInt8 * dst = res_data.data() + dst_anchor + pos - src_anchor;
+                    dst[0] = static_cast<UInt8>(mapped >> 8);
+                    dst[1] = static_cast<UInt8>(mapped);
+                    pos += 2;
+                    continue;
+                }
+            }
+
+            /// The output before `resume` is ICU's, so ICU maps only the rest of the row. In the root locale only
+            /// final sigma depends on other characters, and it needs the last one its check does not skip.
+            const size_t row_start = row == 0 ? 0 : offsets[row - 1];
+            size_t resume = pos;
+            if constexpr (!upper)
+                resume = row_start + findSigmaContextStart(data.data() + row_start, pos - row_start, two_byte_table);
 
             /// ICU APIs accept `int32_t` for buffer sizes and return the required output
             /// length as `int32_t` on `U_BUFFER_OVERFLOW_ERROR`. Unicode full case mapping
@@ -140,6 +123,7 @@ struct LowerUpperUTF8Impl
             /// from a 2-byte input) expands UTF-8 output by at most 3x. Reject inputs
             /// whose worst-case case-mapped output could exceed `INT32_MAX` — the retry
             /// path could otherwise receive an overflowed `dst_size` and corrupt `res_data`.
+            const size_t src_size = row_end - row_start;
             if (static_cast<int64_t>(src_size) * 3 > INT32_MAX)
                 throw Exception(
                     ErrorCodes::BAD_ARGUMENTS,
@@ -148,73 +132,21 @@ struct LowerUpperUTF8Impl
                     src_size,
                     upper ? "upperUTF8" : "lowerUTF8");
 
-            /// `res_data` accumulates output for all rows and may exceed `INT32_MAX`. Cap
-            /// the destination capacity passed to ICU; the `U_BUFFER_OVERFLOW_ERROR` retry
-            /// path enlarges `res_data` to fit and the guard above keeps the per-row
-            /// requested length representable as `int32_t`.
-            auto safe_dest_capacity = static_cast<int32_t>(std::min<size_t>(res_data.size() - curr_offset, INT32_MAX));
-            auto safe_src_size = static_cast<int32_t>(icu_size);
+            const size_t dst_pos = dst_anchor + resume - src_anchor;
+            dst_anchor = dst_pos + mapWithICU(case_map, data.data() + resume, row_end - resume, res_data, dst_pos);
+            src_anchor = row_end;
+            res_offsets[row] = dst_anchor;
+            ++row;
+            pos = row_end;
 
-            int32_t dst_size = 0;
-            if constexpr (upper)
-                dst_size = ucasemap_utf8ToUpper(
-                    case_map,
-                    reinterpret_cast<char *>(&res_data[curr_offset]),
-                    safe_dest_capacity,
-                    src,
-                    safe_src_size,
-                    &error_code);
-            else
-                dst_size = ucasemap_utf8ToLower(
-                    case_map,
-                    reinterpret_cast<char *>(&res_data[curr_offset]),
-                    safe_dest_capacity,
-                    src,
-                    safe_src_size,
-                    &error_code);
-
-            if (error_code == U_BUFFER_OVERFLOW_ERROR)
-            {
-                size_t new_size = curr_offset + dst_size;
-                res_data.resize(new_size);
-
-                safe_dest_capacity = static_cast<int32_t>(std::min<size_t>(res_data.size() - curr_offset, INT32_MAX));
-
-                error_code = U_ZERO_ERROR;
-                if constexpr (upper)
-                    dst_size = ucasemap_utf8ToUpper(
-                        case_map,
-                        reinterpret_cast<char *>(&res_data[curr_offset]),
-                        safe_dest_capacity,
-                        src,
-                        safe_src_size,
-                        &error_code);
-                else
-                    dst_size = ucasemap_utf8ToLower(
-                        case_map,
-                        reinterpret_cast<char *>(&res_data[curr_offset]),
-                        safe_dest_capacity,
-                        src,
-                        safe_src_size,
-                        &error_code);
-            }
-
-            if (error_code != U_ZERO_ERROR && error_code != U_STRING_NOT_TERMINATED_WARNING)
-                throw Exception(
-                    ErrorCodes::LOGICAL_ERROR,
-                    "Error calling {}: {} input: {} input_size: {}",
-                    upper ? "ucasemap_utf8ToUpper" : "ucasemap_utf8ToLower",
-                    u_errorName(error_code),
-                    std::string_view(src, icu_size),
-                    icu_size);
-
-            curr_offset += dst_size;
-            res_offsets[row_i] = curr_offset;
+            if (res_data.size() < dst_anchor + (size - src_anchor))
+                res_data.resize(dst_anchor + (size - src_anchor));
         }
 
-        process_ascii_run(ascii_run_start, input_rows_count);
+        for (; row < input_rows_count; ++row)
+            res_offsets[row] = dst_anchor + offsets[row] - src_anchor;
 
-        res_data.resize(curr_offset);
+        res_data.resize(dst_anchor + (size - src_anchor));
     }
 
     static void vectorFixed(const ColumnString::Chars &, size_t, ColumnString::Chars &, size_t)
@@ -223,6 +155,53 @@ struct LowerUpperUTF8Impl
     }
 
 private:
+    /// Maps `src` with ICU to `res_data` at `dst_pos`, growing `res_data` if the output does not fit. Returns the output size.
+    static size_t mapWithICU(const UCaseMap * case_map, const UInt8 * src, size_t src_size, ColumnString::Chars & res_data, size_t dst_pos)
+    {
+        const auto * src_chars = reinterpret_cast<const char *>(src);
+        const auto safe_src_size = static_cast<int32_t>(src_size);
+
+        /// `res_data` accumulates output for all rows and may exceed `INT32_MAX`. Cap
+        /// the destination capacity passed to ICU; the `U_BUFFER_OVERFLOW_ERROR` retry
+        /// path enlarges `res_data` to fit and the guard in `vector` keeps the per-row
+        /// requested length representable as `int32_t`.
+        auto safe_dest_capacity = static_cast<int32_t>(std::min<size_t>(res_data.size() - dst_pos, INT32_MAX));
+
+        UErrorCode error_code = U_ZERO_ERROR;
+        int32_t dst_size = 0;
+        if constexpr (upper)
+            dst_size = ucasemap_utf8ToUpper(
+                case_map, reinterpret_cast<char *>(&res_data[dst_pos]), safe_dest_capacity, src_chars, safe_src_size, &error_code);
+        else
+            dst_size = ucasemap_utf8ToLower(
+                case_map, reinterpret_cast<char *>(&res_data[dst_pos]), safe_dest_capacity, src_chars, safe_src_size, &error_code);
+
+        if (error_code == U_BUFFER_OVERFLOW_ERROR)
+        {
+            res_data.resize(dst_pos + dst_size);
+            safe_dest_capacity = static_cast<int32_t>(std::min<size_t>(res_data.size() - dst_pos, INT32_MAX));
+
+            error_code = U_ZERO_ERROR;
+            if constexpr (upper)
+                dst_size = ucasemap_utf8ToUpper(
+                    case_map, reinterpret_cast<char *>(&res_data[dst_pos]), safe_dest_capacity, src_chars, safe_src_size, &error_code);
+            else
+                dst_size = ucasemap_utf8ToLower(
+                    case_map, reinterpret_cast<char *>(&res_data[dst_pos]), safe_dest_capacity, src_chars, safe_src_size, &error_code);
+        }
+
+        if (error_code != U_ZERO_ERROR && error_code != U_STRING_NOT_TERMINATED_WARNING)
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "Error calling {}: {} input: {} input_size: {}",
+                upper ? "ucasemap_utf8ToUpper" : "ucasemap_utf8ToLower",
+                u_errorName(error_code),
+                std::string_view(src_chars, src_size),
+                src_size);
+
+        return static_cast<size_t>(dst_size);
+    }
+
     struct TwoByteTable
     {
         /// (first << 8) | second output byte for each code point U+0080..U+07FF, 0 if a row containing it goes to ICU.
@@ -284,35 +263,6 @@ private:
         return table;
     }
 
-    /// Maps the row up to the first non-ASCII character without a table entry. Returns the number of bytes mapped.
-    static size_t tryMapTwoByteRow(const UInt8 * src, size_t size, UInt8 * dst, const TwoByteTable & table)
-    {
-        constexpr UInt8 flip_case_mask = 'A' ^ 'a';
-        for (size_t i = 0; i < size;)
-        {
-            const UInt8 c = src[i];
-            if (c < 0x80)
-            {
-                dst[i] = c ^ ((c >= not_case_lower_bound && c <= not_case_upper_bound) ? flip_case_mask : UInt8(0));
-                ++i;
-                continue;
-            }
-
-            if (c < 0xC2 || c > 0xDF || i + 1 >= size || (src[i + 1] & 0xC0) != 0x80)
-                return i;
-
-            const size_t code_point = static_cast<size_t>(c & 0x1F) << 6 | static_cast<size_t>(src[i + 1] & 0x3F);
-            const UInt16 mapped = table.mapped[code_point - 0x80];
-            if (mapped == 0)
-                return i;
-
-            dst[i] = static_cast<UInt8>(mapped >> 8);
-            dst[i + 1] = static_cast<UInt8>(mapped);
-            i += 2;
-        }
-        return size;
-    }
-
     /// Start of the last character before `pos` that the final sigma check of ICU does not skip, or 0.
     /// The bytes before `pos` are ASCII or two-byte sequences with a table entry.
     static size_t findSigmaContextStart(const UInt8 * src, size_t pos, const TwoByteTable & table)
@@ -325,54 +275,6 @@ private:
                 return pos;
         }
         return 0;
-    }
-
-    static bool isAllASCIIWithEarlyExit(const UInt8 * data, size_t size)
-    {
-        size_t i = 0;
-#    if defined(__AVX2__)
-        for (; i + 128 <= size; i += 128)
-        {
-            auto any = _mm256_setzero_si256();
-            for (size_t j = 0; j < 128; j += 32)
-                any = _mm256_or_si256(any, _mm256_loadu_si256(reinterpret_cast<const __m256i *>(data + i + j)));
-
-            if (_mm256_movemask_epi8(any))
-                return false;
-        }
-#    elif defined(__aarch64__) && defined(__ARM_NEON)
-        for (; i + 64 <= size; i += 64)
-        {
-            const auto bytes0 = vld1q_u8(reinterpret_cast<const uint8_t *>(data + i));
-            const auto bytes1 = vld1q_u8(reinterpret_cast<const uint8_t *>(data + i + 16));
-            const auto bytes2 = vld1q_u8(reinterpret_cast<const uint8_t *>(data + i + 32));
-            const auto bytes3 = vld1q_u8(reinterpret_cast<const uint8_t *>(data + i + 48));
-            const auto any = vorrq_u8(vorrq_u8(bytes0, bytes1), vorrq_u8(bytes2, bytes3));
-            if (vmaxvq_u8(any) & 0x80)
-                return false;
-        }
-#    elif defined(__SSE2__)
-        for (; i + 64 <= size; i += 64)
-        {
-            auto any = _mm_setzero_si128();
-            for (size_t j = 0; j < 64; j += 16)
-                any = _mm_or_si128(any, _mm_loadu_si128(reinterpret_cast<const __m128i *>(data + i + j)));
-
-            if (_mm_movemask_epi8(any))
-                return false;
-        }
-#    endif
-
-        /// Keep the existing vectorized scan for larger tails. For short rows,
-        /// stop at the first non-ASCII byte because this check is on the hot path.
-        if (size - i >= 32)
-            return isAllASCII(data + i, size - i);
-
-        for (; i < size; ++i)
-            if (data[i] & 0x80)
-                return false;
-
-        return true;
     }
 };
 
