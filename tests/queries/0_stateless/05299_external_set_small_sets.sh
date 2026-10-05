@@ -22,14 +22,17 @@ ${CLICKHOUSE_LOCAL} --path "${LOCAL_DIR}" --config-file "${LOCAL_DIR}/query-log.
 CREATE TABLE t (k UInt64) ENGINE = MergeTree ORDER BY k SETTINGS index_granularity = 1024;
 INSERT INTO t SELECT number FROM numbers(1000000);
 
--- The aggregation of the subquery keeps query memory above the threshold. The set of 100 keys stays in memory,
--- so the primary key reads only one granule, while the set of 1,000,000 keys spills.
+-- The aggregation of the subquery keeps query memory above the threshold, and it stays in memory whatever
+-- memory the machine has free. The set of 100 keys stays in memory, so the primary key reads only one
+-- granule, while the set of 1,000,000 keys spills.
 SELECT 'aggregation, small set', count() FROM t
 WHERE k IN (SELECT g % 100 FROM (SELECT number AS g FROM numbers(1000000) GROUP BY g))
-SETTINGS max_bytes_before_external_set = '16M', log_comment = 'aggregation, small set';
+SETTINGS max_bytes_before_external_set = '16M', max_bytes_ratio_before_external_group_by = 0,
+    log_comment = 'aggregation, small set';
 SELECT 'aggregation, large set', count() FROM t
 WHERE k IN (SELECT g FROM (SELECT number AS g FROM numbers(1000000) GROUP BY g))
-SETTINGS max_bytes_before_external_set = '16M', log_comment = 'aggregation, large set';
+SETTINGS max_bytes_before_external_set = '16M', max_bytes_ratio_before_external_group_by = 0,
+    log_comment = 'aggregation, large set';
 
 -- Spilling needs more memory than a threshold of 1 MB leaves: a set of 10 keys stays in memory, and a set of
 -- 1,000,000 keys spills once it takes the threshold.
