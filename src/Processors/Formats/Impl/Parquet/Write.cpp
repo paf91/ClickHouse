@@ -1100,6 +1100,14 @@ void writeColumnImpl(
     {
         encoded.clear();
 
+        /// Unless the next value starts a record, the record is split, and pages no longer start
+        /// where the page index says they do.
+        if (pages_change_on_record_boundaries && def_offset + def_count < num_values && s.rep[def_offset + def_count] != 0)
+        {
+            s.indexes.column_index_valid = false;
+            s.indexes.offset_index_valid = false;
+        }
+
         /// Concatenate encoded rep, def, and data.
 
         size_t row_count = def_count;
@@ -1316,6 +1324,11 @@ void writeColumnImpl(
 
     static constexpr size_t max_record_bytes = (2uz << 30) - (64uz << 20);
 
+    /// The converter materializes every value it is given, so a long record is handed to it in
+    /// slices of this many values. The slices of a record go into the same page, unless the page
+    /// would grow past `max_record_bytes`.
+    const size_t max_batch_values = std::max(options.write_batch_size, 64uz << 10);
+
     auto max_levels_size = [&](size_t count)
     {
         size_t res = 0;
@@ -1371,14 +1384,6 @@ void writeColumnImpl(
 
             if (i > 0 && page_bytes > max_record_bytes)
             {
-                /// Unless this value starts a record, the record is split, and pages no longer start
-                /// where the page index says they do.
-                if (pages_change_on_record_boundaries && s.rep[batch_def_offset + i] != 0)
-                {
-                    s.indexes.column_index_valid = false;
-                    s.indexes.offset_index_valid = false;
-                }
-
                 def_count = i;
                 data_count = data_idx;
                 break;
@@ -1422,19 +1427,22 @@ void writeColumnImpl(
             if (pages_change_on_record_boundaries)
             {
                 /// Each record (table row) starts with a value with rep = 0.
-                while (next_def_offset + def_count < num_values && s.rep[next_def_offset + def_count] != 0)
+                while (next_def_offset + def_count < num_values && s.rep[next_def_offset + def_count] != 0
+                    && def_count < max_batch_values)
                 {
                     data_count += s.def[next_def_offset + def_count] == s.max_def;
                     ++def_count;
                 }
             }
 
-            /// Encode the data (but not the levels yet), so that we can estimate its encoded size.
-            const typename ParquetDType::c_type * converted = converter.getBatch(next_data_offset, data_count);
+            /// Only the size of a byte array has to be known from the converted value, so the batch
+            /// of any other type is cut before it is converted.
+            const typename ParquetDType::c_type * converted = nullptr;
 
             BatchSize batch_size;
             if constexpr (std::is_same_v<ParquetDType, parquet::ByteArrayType>)
             {
+                converted = converter.getBatch(next_data_offset, data_count);
                 batch_size = limit_batch_by_bytes(
                     next_def_offset, def_count, data_count, sizeof(uint32_t),
                     [&](size_t i) { return static_cast<size_t>(converted[i].len); });
@@ -1471,6 +1479,9 @@ void writeColumnImpl(
                     break;
                 }
             }
+
+            if constexpr (!std::is_same_v<ParquetDType, parquet::ByteArrayType>)
+                converted = converter.getBatch(next_data_offset, data_count);
 
             if (options.write_page_statistics || options.write_column_chunk_statistics)
                 for (size_t i = 0; i < data_count; ++i)
@@ -1536,9 +1547,12 @@ void writeColumnImpl(
                 break;
             }
 
+            /// A page ends with a record, unless the record does not fit a page at all.
+            const bool at_record_boundary = !pages_change_on_record_boundaries || next_def_offset == num_values
+                || s.rep[next_def_offset] == 0;
             const size_t page_target = std::min(options.data_page_size, max_record_bytes);
             if (next_def_offset == num_values ||
-                static_cast<size_t>(encoder->EstimatedDataEncodedSize()) >= page_target)
+                (at_record_boundary && static_cast<size_t>(encoder->EstimatedDataEncodedSize()) >= page_target))
             {
                 flush_page(next_def_offset - def_offset, next_data_offset - data_offset);
                 break;
