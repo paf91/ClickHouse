@@ -164,8 +164,10 @@ protected:
 private:
     /// `Quantized` is declarative: it only takes effect through the serialization that a column-level `CODEC`
     /// attaches to the column. A codec given as a string (a table-level, network or temporary files setting, a
-    /// server config) has no column, so accepting it there would silently do nothing. Throws if `family_name`
-    /// names such a codec.
+    /// server config) has no column, so accepting it there would silently do nothing. `Default` stands for the
+    /// codec that encloses a column-level `CODEC`; a codec given as a string has no such enclosing default, so it
+    /// would silently resolve to the factory default instead of the table or server default selection.
+    /// Throws if `family_name` names such a codec.
     static void checkCodecIsNotColumnLevelOnly(const String & family_name);
 
     /// The same check for every codec of a chain parsed from a string, e.g. "Delta, Quantized('int8', 64)".

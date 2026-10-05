@@ -18,4 +18,8 @@ $CLICKHOUSE_COMPRESSOR --stat --input "$compressed" > /dev/null && echo "stat ok
 $CLICKHOUSE_COMPRESSOR --codec "Quantized('int8', 64)" --input "$data" --output "$compressed" 2>&1 | grep -c "can only be specified in the column definition"
 $CLICKHOUSE_COMPRESSOR --codec 'LZ4' --codec "quantized('int8', 64)" --input "$data" --output "$compressed" 2>&1 | grep -c "can only be specified in the column definition"
 
+# `Default` needs an enclosing default, so it is rejected here in any spelling.
+$CLICKHOUSE_COMPRESSOR --codec 'default' --input "$data" --output "$compressed" 2>&1 | grep -c "can only be specified in the column definition"
+$CLICKHOUSE_COMPRESSOR --codec 'Delta' --codec 'Default' --input "$data" --output "$compressed" 2>&1 | grep -c "can only be specified in the column definition"
+
 rm -f "$data" "$compressed"

@@ -24,4 +24,5 @@ ALP(STD)
 1
 -- `Multiple` is still not nameable directly, in any spelling
 -- `Quantized` only works in a column definition, so it is rejected in a codec given as a string
+-- `Default` needs an enclosing default, so it is rejected in a codec given as a string, in any spelling
 -- an unknown codec is still unknown

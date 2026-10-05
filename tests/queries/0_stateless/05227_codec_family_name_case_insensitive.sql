@@ -96,6 +96,12 @@ CREATE TABLE t_codec_case_bad (v Array(Float32)) ENGINE = MergeTree ORDER BY tup
 CREATE TABLE t_codec_case_bad (v Array(Float32)) ENGINE = MergeTree ORDER BY tuple() SETTINGS default_compression_codec = 'LZ4, quantized(''int8'', 64)'; -- { serverError BAD_ARGUMENTS }
 SELECT number FROM numbers(100000) ORDER BY number DESC SETTINGS max_bytes_before_external_sort = 1, max_bytes_ratio_before_external_sort = 0, temporary_files_codec = 'Quantized(''int8'', 64)' FORMAT Null; -- { serverError BAD_ARGUMENTS }
 
+SELECT '-- `Default` needs an enclosing default, so it is rejected in a codec given as a string, in any spelling';
+
+CREATE TABLE t_codec_case_bad (x UInt64) ENGINE = MergeTree ORDER BY tuple() SETTINGS default_compression_codec = 'default'; -- { serverError BAD_ARGUMENTS }
+CREATE TABLE t_codec_case_bad (x UInt64) ENGINE = MergeTree ORDER BY tuple() SETTINGS default_compression_codec = 'Delta, Default'; -- { serverError BAD_ARGUMENTS }
+SELECT number FROM numbers(100000) ORDER BY number DESC SETTINGS max_bytes_before_external_sort = 1, max_bytes_ratio_before_external_sort = 0, temporary_files_codec = 'DEFAULT' FORMAT Null; -- { serverError BAD_ARGUMENTS }
+
 SELECT '-- an unknown codec is still unknown';
 
 CREATE TABLE t_codec_case_bad (x UInt64 CODEC(NoSuchCodec)) ENGINE = MergeTree ORDER BY tuple(); -- { serverError UNKNOWN_CODEC }

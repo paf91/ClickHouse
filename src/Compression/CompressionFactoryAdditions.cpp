@@ -47,7 +47,7 @@ extern const SettingsBool allow_suspicious_codecs;
 
 void CompressionCodecFactory::checkCodecIsNotColumnLevelOnly(const String & family_name)
 {
-    if (equalsCaseInsensitive(family_name, "Quantized"))
+    if (equalsCaseInsensitive(family_name, "Quantized") || equalsCaseInsensitive(family_name, DEFAULT_CODEC_NAME))
         throw Exception(ErrorCodes::BAD_ARGUMENTS,
             "Codec {} can only be specified in the column definition", family_name);
 }
