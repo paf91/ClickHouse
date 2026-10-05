@@ -10,7 +10,7 @@ struct Settings;
 
 /// The query settings that define a set of `IN`: its size limits, its handling of `NULL`s, the
 /// values that it keeps for index analysis and, for a set built from a subquery, its spilling to
-/// disk while it is filled (see `Set::setSpillSettings`).
+/// disk (see `Set::setSpillSettings`).
 struct FutureSetSettings
 {
     /// `max_rows_in_set`, `max_bytes_in_set` and `set_overflow_mode`.
@@ -32,6 +32,12 @@ struct FutureSetSettings
     FutureSetSettings() = default;
 
     explicit FutureSetSettings(const Settings & settings);
+
+    void disableSpilling()
+    {
+        max_bytes_before_external_set = 0;
+        max_bytes_ratio_before_external_set = 0;
+    }
 };
 
 }
