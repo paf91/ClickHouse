@@ -27,7 +27,6 @@
 #include <Functions/IFunctionAdaptors.h>
 #include <Functions/IFunctionDateOrDateTime.h>
 #include <Functions/geometryConverters.h>
-#include <Common/FieldAccurateComparison.h>
 #include <Common/FieldVisitorToString.h>
 #include <Common/RegexpUtils.h>
 #include <Common/HilbertUtils.h>
@@ -3207,13 +3206,7 @@ void KeyCondition::analyzeKeyExpressionForSetIndex(const RPNBuilderTreeNode & ar
 /// a type of its own that hashing and comparison look at before the value.
 static bool typeHasValueCarriers(const IDataType & type)
 {
-    bool result = type.hasDynamicSubcolumns() || isVariant(type);
-    type.forEachChild([&](const IDataType & child)
-    {
-        if (isVariant(child))
-            result = true;
-    });
-    return result;
+    return type.hasDynamicSubcolumns() || anyInTypeTree(type, [](const IDataType & node) { return isVariant(node); });
 }
 
 static bool tryPrepareSetColumnsForIndex(
