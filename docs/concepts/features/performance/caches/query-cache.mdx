@@ -304,7 +304,10 @@ filesystem cache runs out of space. There are no separate limits on their total 
 cache itself apply. Statement `SYSTEM CLEAR QUERY CACHE` (and `SYSTEM CLEAR QUERY CACHE TAG 'tag'`) also removes the entries (with the
 given tag) of the query cache on disk from the filesystem cache selected by setting `query_cache_on_disk_cache_name` of the session
 (e.g. after `SET query_cache_on_disk_cache_name = 'query_results'`), and leaves the other data of the filesystem cache in place. To
-find the entries, it scans all keys of the filesystem cache. Statement `SYSTEM DROP FILESYSTEM CACHE '<name>'` removes them together
+find the entries, it scans all keys of the filesystem cache and recognizes an entry by its header at the beginning of the entry. If the
+filesystem cache has already evicted the beginning of an entry, the remainder of the entry can no longer be told apart from other data:
+it is left in place until the filesystem cache evicts it or the same query result is written again, but it is never served. An entry
+which is still being written is left in place as well. Statement `SYSTEM DROP FILESYSTEM CACHE '<name>'` removes them together
 with everything else in the filesystem cache. System table
 [system.query_cache](/reference/system-tables/query_cache) shows only the entries of the in-memory query cache. The number of query
 cache hits and misses on disk are shown as events "QueryCacheOnDiskHits" and "QueryCacheOnDiskMisses" in system table

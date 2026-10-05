@@ -563,7 +563,9 @@ void QueryResultCacheOnDisk::clear(const Settings & settings, const std::optiona
 
     /// The entries are ordinary keys of the filesystem cache, so find them by content: every key whose first segment is downloaded
     /// is a candidate, and only the keys which start with the magic of an entry are removed. Collect the candidates first, the
-    /// filesystem cache must not be accessed from inside `iterate`.
+    /// filesystem cache must not be accessed from inside `iterate`. The remainder of an entry whose first segment was already evicted
+    /// cannot be recognized (the keys carry no marker of their owner), so it stays until it is evicted as well or the entry is written
+    /// again (see `probeExistingEntry`). It is never served: a reader requires the whole entry starting from the header.
     std::unordered_set<FileCacheKey> candidates;
     file_cache->iterate([&](const FileSegmentInfo & info)
     {
