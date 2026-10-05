@@ -36,6 +36,16 @@ namespace ErrorCodes
     #endif
 }
 
+/// A connection string or option list given as an SQL string literal in a dictionary `SOURCE`, keeping its quotes.
+static bool maskQuotedMongoDBConnectionString(String & literal)
+{
+    String value = literal.substr(1, literal.size() - 2);
+    if (!maskMongoDBConnectionString(value))
+        return false;
+    literal = "'" + value + "'";
+    return true;
+}
+
 void registerDictionarySourceMongoDB(DictionarySourceFactory & factory);
 void registerDictionarySourceMongoDB(DictionarySourceFactory & factory)
 {
@@ -124,7 +134,7 @@ void registerDictionarySourceMongoDB(DictionarySourceFactory & factory)
     factory.registerSource("mongodb", create_dictionary_source,
         SecretArgumentsSpec{
             .secret_keys = {"password"},
-            .partial = {{"uri", [](String & value) { return maskURIPassword(&value); }}}},
+            .partial = {{"uri", maskQuotedMongoDBConnectionString}, {"options", maskQuotedMongoDBConnectionString}}},
         Documentation{
         .description = R"DOCS_MD(
 # MongoDB dictionary source
@@ -295,7 +305,7 @@ std::string MongoDBDictionarySource::toString() const
 {
     /// Shown in `system.dictionaries` and in the logs.
     String uri = configuration->uri->to_string();
-    maskURIPassword(&uri);
+    maskMongoDBConnectionString(uri);
     return fmt::format("MongoDB: {}", uri);
 }
 #endif
