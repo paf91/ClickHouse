@@ -49,16 +49,19 @@ count_mismatches "SET join_default_strictness = 'ANY';" "SELECT count(), min(v) 
 count_mismatches "" "SELECT count(), min(v) FROM oracle_any_join_view WHERE v > 10;"
 count_mismatches "" "SELECT count(), min(v) FROM oracle_default_join_view WHERE v > 10;"
 
-# The oracles run their rewrites as internal queries, and only the TLP Aggregate rewrite names a
-# state `_s_0`. With `ALL` the join is checked; a view that sets its own thread count is not,
-# because the oracles pin a single thread.
-count_mismatches "" "SELECT count(), min(v) FROM oracle_any_join ALL INNER JOIN oracle_any_join AS a ON w = a.w WHERE v > 10;" >/dev/null
+# The oracles run their rewrites as internal queries that keep the seed's `log_comment`, and only
+# the TLP Aggregate rewrite names a state `_s_0`. The fuzzer can turn the seeds above into `ALL`
+# joins too, so the `ALL` count is limited to its own batch. With `ALL` the join is checked; a view
+# that sets its own thread count is not, because the oracles pin a single thread.
+all_join_comment="${CLICKHOUSE_TEST_UNIQUE_NAME}_all_join"
+count_mismatches "SET log_comment = '$all_join_comment';" "SELECT count(), min(v) FROM oracle_any_join ALL INNER JOIN oracle_any_join AS a ON w = a.w WHERE v > 10;" >/dev/null
 count_mismatches "" "SELECT count(), min(v) FROM oracle_threads_view WHERE v > 10;" >/dev/null
 $CLICKHOUSE_CLIENT --query "
     SYSTEM FLUSH LOGS query_log;
-    SELECT countIf(position(query, '_s_0') > 0) > 0, countIf(position(query, '_s_0') > 0 AND position(query, 'oracle_threads_view') > 0)
+    SELECT countIf(log_comment = '$all_join_comment' AND position(query, 'ALL INNER JOIN') > 0) > 0,
+        countIf(position(query, 'oracle_threads_view') > 0)
     FROM system.query_log
-    WHERE current_database = currentDatabase() AND is_internal AND type = 'QueryStart';
+    WHERE current_database = currentDatabase() AND is_internal AND type = 'QueryStart' AND position(query, '_s_0') > 0;
 "
 
 $CLICKHOUSE_CLIENT --query "
