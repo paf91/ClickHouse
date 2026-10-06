@@ -96,3 +96,8 @@ FROM
         t.2 AS s
 )
 FORMAT TSV;
+
+-- A two-byte lead byte followed in its row by a byte that is not a continuation byte is invalid.
+SELECT concat('0x', hex(s)), concat('0x', hex(lowerUTF8(s))), concat('0x', hex(upperUTF8(s)))
+FROM (SELECT arrayJoin(['Ж\xC3A', '\xC3A', 'é\xC3\xC3\xA9', 'Ab\xDFx', '\xC2 ', 'Ab']) AS s)
+FORMAT TSV;
