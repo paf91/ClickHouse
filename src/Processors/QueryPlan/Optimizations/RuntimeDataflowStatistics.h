@@ -45,7 +45,12 @@ struct RuntimeDataflowStatistics
 
 inline RuntimeDataflowStatistics operator+(const RuntimeDataflowStatistics & lhs, const RuntimeDataflowStatistics & rhs)
 {
-    return RuntimeDataflowStatistics{lhs.input_bytes + rhs.input_bytes, lhs.output_bytes + rhs.output_bytes};
+    return RuntimeDataflowStatistics{
+        .input_bytes = lhs.input_bytes + rhs.input_bytes,
+        .duplicated_bytes = lhs.duplicated_bytes + rhs.duplicated_bytes,
+        .output_bytes = lhs.output_bytes + rhs.output_bytes,
+        .total_rows_to_read = lhs.total_rows_to_read + rhs.total_rows_to_read,
+    };
 }
 
 class RuntimeDataflowStatisticsCache
