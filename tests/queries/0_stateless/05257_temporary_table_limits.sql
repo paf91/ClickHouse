@@ -82,6 +82,25 @@ DROP TEMPORARY TABLE tmp_mt;
 CREATE TEMPORARY TABLE tmp_mt ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '' AS SELECT rand64() AS x FROM numbers(100000) SETTINGS max_block_size = 1000000, max_insert_block_size = 1000000; -- { serverError TOO_MANY_BYTES }
 SELECT count() FROM tmp_mt;
 DROP TEMPORARY TABLE tmp_mt;
+-- Parts added without `INSERT` are limited as well.
+DROP TABLE IF EXISTS source_mt;
+DROP TABLE IF EXISTS source_mt_small;
+CREATE TABLE source_mt (x UInt64) ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '';
+INSERT INTO source_mt SELECT rand64() FROM numbers(100000) SETTINGS max_block_size = 1000000, max_insert_block_size = 1000000;
+CREATE TABLE source_mt_small (x UInt64) ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '';
+INSERT INTO source_mt_small SELECT number FROM numbers(1000);
+CREATE TEMPORARY TABLE tmp_mt (x UInt64) ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '';
+ALTER TABLE tmp_mt ATTACH PARTITION tuple() FROM source_mt; -- { serverError TOO_MANY_BYTES }
+ALTER TABLE tmp_mt REPLACE PARTITION tuple() FROM source_mt; -- { serverError TOO_MANY_BYTES }
+ALTER TABLE tmp_mt ATTACH PARTITION tuple() FROM source_mt_small;
+SELECT count() FROM tmp_mt;
+DROP TEMPORARY TABLE tmp_mt;
+CREATE TEMPORARY TABLE tmp_mt ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '' CLONE AS source_mt; -- { serverError TOO_MANY_BYTES }
+SELECT count() FROM tmp_mt;
+DROP TEMPORARY TABLE tmp_mt;
+SELECT count() FROM source_mt;
+DROP TABLE source_mt;
+DROP TABLE source_mt_small;
 SET max_temporary_table_size_bytes_compressed = 0;
 
 SELECT 'max_temporary_table_size_bytes_uncompressed';

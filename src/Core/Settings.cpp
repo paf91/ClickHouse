@@ -4613,7 +4613,12 @@ data part is committed: if the table would exceed it, the `INSERT` throws an exc
 code and the part is not added. Parts committed earlier by the same `INSERT` stay in the table, as with any other
 error during an `INSERT` of multiple blocks. The value is taken from the settings of the `INSERT` query.
 
-Only `INSERT` is limited: the parts written by background merges and mutations (`ALTER TABLE ... UPDATE`,
+The operations that add existing parts to the table are limited in the same way, with the value from the settings of
+their query: `ATTACH PART`, `ATTACH PARTITION`, `ATTACH PARTITION ... FROM`, `REPLACE PARTITION ... FROM`
+and `CREATE TEMPORARY TABLE ... CLONE AS`. They are rejected as a whole, unless they do
+not increase the size of the table.
+
+The parts written by background merges and mutations (`ALTER TABLE ... UPDATE`,
 `MATERIALIZE COLUMN`, etc.) are not checked, so a mutation that makes the data larger can make the table exceed the limit.
 
 Possible values:

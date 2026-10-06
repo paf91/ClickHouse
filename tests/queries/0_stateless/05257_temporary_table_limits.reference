@@ -15,6 +15,9 @@ Memory	1
 max_temporary_table_size_bytes_compressed
 101000
 0
+1000
+0
+100000
 max_temporary_table_size_bytes_uncompressed
 1000
 10000
