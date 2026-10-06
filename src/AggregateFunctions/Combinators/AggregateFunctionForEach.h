@@ -284,13 +284,7 @@ public:
         }
 
         AggregateFunctionForEachData & state = ensureAggregateData(place, end - begin, *arena);
-
-        char * nested_state = state.array_of_aggregate_datas;
-        for (size_t i = begin; i < end; ++i)
-        {
-            nested_func->add(nested_state, nested.data(), i, arena);
-            nested_state += nested_size_of_data;
-        }
+        nested_func->addBatchConsecutivePlaces(begin, end, state.array_of_aggregate_datas, nested_size_of_data, nested.data(), arena);
     }
 
     /// The row-at-a-time `add` rejects a row whose array arguments do not share boundaries. The
@@ -329,13 +323,7 @@ public:
         size_t end = offsets[row];
         assertArraySizesMatch(trailing_offsets, row, begin, end);
         AggregateFunctionForEachData & state = ensureAggregateData(place, end - begin, *arena);
-
-        char * nested_state = state.array_of_aggregate_datas;
-        for (size_t i = begin; i < end; ++i)
-        {
-            nested_func->add(nested_state, nested, i, arena);
-            nested_state += nested_size_of_data;
-        }
+        nested_func->addBatchConsecutivePlaces(begin, end, state.array_of_aggregate_datas, nested_size_of_data, nested, arena);
     }
 
     /// Optimized batch aggregation for rows belonging to the same place.
