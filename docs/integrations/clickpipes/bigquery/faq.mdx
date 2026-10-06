@@ -7,28 +7,6 @@ doc_type: 'reference'
 keywords: ['clickpipes', 'bigquery', 'cdc', 'time travel', 'data ingestion']
 ---
 
-### My ClickPipe fails with "change history start time is before allowed time travel interval". What does it mean? {#time-travel-window-exceeded}
+### My ClickPipe fails with "change history start time is before allowed time travel interval" {#time-travel-window-exceeded}
 
-The [`APPENDS`](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/time-series-functions#appends) and [`CHANGES`](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/time-series-functions#changes) replication methods can read only changes that are still inside the source table's [BigQuery time travel window](https://docs.cloud.google.com/bigquery/docs/time-travel). By default that window is seven days, and it can be as short as two days.
-
-The ClickPipe resumes each poll from the point it last replicated. If that point is older than the time travel window, BigQuery no longer has the change history in between and rejects the query with an error like:
-
-```text
-The change history start time is before allowed time travel interval
-```
-
-This happens when replication falls behind by more than the window, for example when the ClickPipe was paused or failing for longer than the window, or when the window on the dataset was shortened. The changes that fell out of the window can't be recovered from BigQuery, so retrying doesn't help.
-
-To fix it:
-
-1. Run a fresh initial load to restore a complete copy of the affected tables in ClickHouse.
-2. To make this less likely to happen again, keep the ClickPipe running and resume it promptly after a pause or failure. You can also extend the dataset's time travel window, up to seven days:
-
-   ```sql
-   ALTER SCHEMA `your_project.your_dataset`
-   SET OPTIONS (max_time_travel_hours = 168);
-   ```
-
-   See [Configure the time travel window](https://docs.cloud.google.com/bigquery/docs/time-travel#configure_the_time_travel_window) in the BigQuery documentation. A longer window can increase BigQuery storage costs.
-
-Query based replication reads rows by watermark column instead of change history, so it isn't affected by this limit.
+[`APPENDS`](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/time-series-functions#appends) and [`CHANGES`](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/time-series-functions#changes) can only read changes within the source table's [time travel window](https://docs.cloud.google.com/bigquery/docs/time-travel), seven days by default. If the ClickPipe falls behind by more than that window, BigQuery no longer has the changes it needs. Resync the ClickPipe to unblock it.
