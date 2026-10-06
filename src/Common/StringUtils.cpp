@@ -55,14 +55,15 @@ MULTITARGET_FUNCTION_X86_V4(
         if (size >= ALIGN_THRESHOLD)
         {
             memcpy(&bytes, data, sizeof(bytes));
-            if (!__builtin_reduce_or(__builtin_convertvector(bytes >> 7, NonASCIIMask)))
+            if (__builtin_reduce_or(bytes) >= 0)
                 i = 64 - (reinterpret_cast<uintptr_t>(data) & 63);
         }
 
         for (; i + sizeof(bytes) <= size; i += sizeof(bytes))
         {
             memcpy(&bytes, data + i, sizeof(bytes));
-            if (__builtin_reduce_or(__builtin_convertvector(bytes >> 7, NonASCIIMask)))
+            /// The sign bit of the OR tests a block without its bit mask, which takes several instructions on AArch64.
+            if (__builtin_reduce_or(bytes) < 0)
             {
                 if constexpr (std::endian::native == std::endian::little)
                     return i + static_cast<size_t>(std::countr_zero(__builtin_bit_cast(UInt64, __builtin_convertvector(bytes >> 7, NonASCIIMask))));
