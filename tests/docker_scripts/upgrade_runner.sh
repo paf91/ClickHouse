@@ -701,8 +701,8 @@ cp /var/log/clickhouse-server/clickhouse-server.upgrade.log /test_output/clickho
 #       Requires the `StorageKeeperMap` logger AND the backquoted fixture-table prefix, so the same message on any
 #       other KeeperMap table - the shape a real metadata-compatibility regression takes - still fails this job.
 # `shard_1.data` + `ReplicatedMergeTreeAttachThread` + a read-only initialization on an empty `columns` znode is
-#       `02980_dist_insert_readonly_replica` breaking that replica on purpose; an injected fault can stop the file
-#       before its final `DROP DATABASE`. Any other table, error code or `columns` value still fails this job.
+#       `02980_dist_insert_readonly_replica` breaking it on purpose; an injected fault can stop the file before its
+#       final `DROP DATABASE`. Other tables and error codes still fail; a `columns` value cut inside its header does not.
 # `Query memory tracker: fault injected` is the stress phase's own fault injection (`memory_tracker_fault_probability`
 #       of stress worker 1) reaching the upgraded server with the work the stress phase left behind: a distributed
 #       DDL entry (e.g. an `ON CLUSTER` `BACKUP`) and a pending batch of a `Distributed` table both keep the settings
