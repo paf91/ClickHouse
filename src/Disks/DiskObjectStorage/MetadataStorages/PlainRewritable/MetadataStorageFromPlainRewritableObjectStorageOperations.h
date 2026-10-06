@@ -46,11 +46,23 @@ class MetadataStorageFromPlainObjectStoragePublishOperation final : public IMeta
 private:
     const std::shared_ptr<FsSnapshot> fs_tree;
     FsMetadata & fs;
+    const std::shared_ptr<IObjectStorage> object_storage;
+    const std::shared_ptr<PlainRewritableLayout> layout;
+    StoredObjects & removed_objects;
+
+    /// The blobs that lost their last link only when the changes were published, see `FsMetadata::applyJournal`.
+    StoredObjects unlinked_blobs;
 
 public:
-    MetadataStorageFromPlainObjectStoragePublishOperation(std::shared_ptr<FsSnapshot> fs_tree_, FsMetadata & fs_);
+    MetadataStorageFromPlainObjectStoragePublishOperation(
+        std::shared_ptr<FsSnapshot> fs_tree_,
+        FsMetadata & fs_,
+        std::shared_ptr<IObjectStorage> object_storage_,
+        std::shared_ptr<PlainRewritableLayout> layout_,
+        StoredObjects & removed_objects_);
 
     void execute() override;
+    void finalize() override;
 };
 
 class MetadataStorageFromPlainObjectStorageCreateDirectoryOperation final : public IMetadataOperation

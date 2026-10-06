@@ -199,15 +199,36 @@ void MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation::execut
 
 MetadataStorageFromPlainObjectStoragePublishOperation::MetadataStorageFromPlainObjectStoragePublishOperation(
     std::shared_ptr<FsSnapshot> fs_tree_,
-    FsMetadata & fs_)
+    FsMetadata & fs_,
+    std::shared_ptr<IObjectStorage> object_storage_,
+    std::shared_ptr<PlainRewritableLayout> layout_,
+    StoredObjects & removed_objects_)
     : fs_tree(std::move(fs_tree_))
     , fs(fs_)
+    , object_storage(std::move(object_storage_))
+    , layout(std::move(layout_))
+    , removed_objects(removed_objects_)
 {
 }
 
 void MetadataStorageFromPlainObjectStoragePublishOperation::execute()
 {
-    fs.applyJournal(fs_tree->getJournal());
+    /// A transaction that removes a link to a shared blob does not exclude the transactions removing the other links
+    /// to it, because they lock only the paths of their own files. Each of them may see the other link left and keep
+    /// the blob, so the last link is found only here, where the publications are serialized.
+    for (const auto & blob_key : fs.applyJournal(fs_tree->getJournal()))
+        unlinked_blobs.emplace_back(layout->constructBlobObjectKey(blob_key));
+}
+
+void MetadataStorageFromPlainObjectStoragePublishOperation::finalize()
+{
+    if (unlinked_blobs.empty())
+        return;
+
+    LOG_TRACE(getLogger("MetadataStorageFromPlainObjectStoragePublishOperation"),
+        "Removing {} blobs whose last links were removed by concurrent transactions", unlinked_blobs.size());
+    object_storage->removeObjectsIfExist(unlinked_blobs);
+    removed_objects.append_range(unlinked_blobs);
 }
 
 MetadataStorageFromPlainObjectStorageCreateDirectoryOperation::MetadataStorageFromPlainObjectStorageCreateDirectoryOperation(
