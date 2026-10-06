@@ -193,4 +193,12 @@ SELECT countIf(s IN (SELECT toFixedString('02', 3))) FROM t_lossy_const_str_key;
 SELECT count() FROM t_lossy_const_str_key WHERE s IN (SELECT '02');
 SELECT countIf(s IN (SELECT '02')) FROM t_lossy_const_str_key;
 
+
+-- A `Map` element carries no type of its own, so it gets no exemption from the rule above: the index must
+-- not be used, and the query has to raise the same conversion error as the full scan instead of
+-- pruning the part from the rendered map.
+INSERT INTO t_lossy_const_str_key VALUES ('x');
+SELECT count() FROM t_lossy_const_str_key WHERE s IN (SELECT map('a', toUInt8(1))); -- { serverError TYPE_MISMATCH }
+SELECT countIf(s IN (SELECT map('a', toUInt8(1)))) FROM t_lossy_const_str_key; -- { serverError TYPE_MISMATCH }
+
 DROP TABLE t_lossy_const_str_key;

@@ -3203,10 +3203,12 @@ void KeyCondition::analyzeKeyExpressionForSetIndex(const RPNBuilderTreeNode & ar
 }
 
 /// Whether `type` holds a `Dynamic`, a `Variant` or a `JSON` anywhere, i.e. whether a value of it carries
-/// a type of its own that hashing and comparison look at before the value.
+/// a type of its own that hashing and comparison look at before the value. `hasDynamicSubcolumns` is not
+/// the question: a `Map` answers it to expose its `key_*` subcolumns, but its values carry no type of
+/// their own and are hashed and compared as the nested `Array`.
 static bool typeHasValueCarriers(const IDataType & type)
 {
-    return type.hasDynamicSubcolumns() || anyInTypeTree(type, [](const IDataType & node) { return isVariant(node); });
+    return anyInTypeTree(type, [](const IDataType & node) { return isDynamic(node) || isVariant(node) || isObject(node); });
 }
 
 static bool tryPrepareSetColumnsForIndex(
