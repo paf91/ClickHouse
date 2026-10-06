@@ -440,10 +440,10 @@ bool ReadFromMemoryStorageStep::supportsTopKDynamicFilter(const ColumnWithTypeAn
 
     /// The source fills a column that a block does not have (e.g. one added by `ALTER TABLE ADD COLUMN`
     /// after the block was inserted) with the defaults of the type. For a column without a default
-    /// expression these are the same values the sorting above gets. A column with a `DEFAULT` expression
-    /// is evaluated above the source instead, so the source would compare the defaults of the type with
-    /// the threshold and could drop the rows that belong to the top-K. Exclude such columns and their
-    /// subcolumns, the same way `StorageMemory::supportedPrewhereColumns` does for `PREWHERE`.
+    /// expression these are exactly the values the query sees. For a column with a `DEFAULT` expression
+    /// the values agree only as long as nothing evaluates the expression above the source; do not rely
+    /// on that and exclude such columns and their subcolumns, the same way
+    /// `StorageMemory::supportedPrewhereColumns` does for `PREWHERE`.
     return !storage_snapshot->metadata->getColumns().hasDefault(column->getNameInStorage());
 }
 
