@@ -88,6 +88,13 @@ std::optional<size_t> tryGetPlaceholder(const IQueryTreeNode & node)
 
 struct PlaceholderCollector
 {
+    explicit PlaceholderCollector(const IsHigherOrderFunction & is_higher_order_function_)
+        : is_higher_order_function(is_higher_order_function_)
+    {
+    }
+
+    const IsHigherOrderFunction & is_higher_order_function;
+
     /// Numbers of the numbered placeholders that occur free anywhere in the expression.
     std::set<size_t> numbered;
     /// Free occurrences of the anonymous placeholder `_` anywhere in the expression.
@@ -135,6 +142,20 @@ struct PlaceholderCollector
                 /// Placeholders inside a nested composition belong to its own operands.
                 if (isFunctionComposition(*node))
                     return;
+
+                /// Placeholders in the lambda position of a nested higher-order function call
+                /// belong to that call: it lifts them to its own lambda when it is resolved, so
+                /// `arrayMap(arrayMap(_ + 1, _1), x)` is `arrayMap(_1 -> arrayMap(_ + 1, _1), x)`.
+                /// The other arguments of the nested call are scanned as usual.
+                const auto & function_node = node->as<FunctionNode &>();
+                const auto & arguments = function_node.getArguments().getNodes();
+                if (arguments.size() >= 2 && arguments[0]->getNodeType() != QueryTreeNodeType::LAMBDA
+                    && is_higher_order_function(function_node.getFunctionName()))
+                {
+                    for (size_t i = 1; i < arguments.size(); ++i)
+                        collect(arguments[i], bound_names);
+                    return;
+                }
                 break;
             }
             case QueryTreeNodeType::QUERY:
@@ -484,7 +505,8 @@ void substituteIdentifier(QueryTreeNodePtr & node, const String & name, const Qu
 QueryTreeNodePtr normalizeOperandToLambda(
     const QueryTreeNodePtr & operand,
     bool is_left_operand,
-    const ResolveIdentifierOperand & resolve_identifier_operand)
+    const ResolveIdentifierOperand & resolve_identifier_operand,
+    const IsHigherOrderFunction & is_higher_order_function)
 {
     switch (operand->getNodeType())
     {
@@ -494,12 +516,12 @@ QueryTreeNodePtr normalizeOperandToLambda(
         {
             const auto & function_operand = operand->as<FunctionNode &>();
             if (isFunctionComposition(*operand))
-                return fuseCompositionToLambda(function_operand, resolve_identifier_operand);
+                return fuseCompositionToLambda(function_operand, resolve_identifier_operand, is_higher_order_function);
 
-            if (collectFreePlaceholderNames(operand).empty())
+            if (collectFreePlaceholderNames(operand, is_higher_order_function).empty())
                 throwInvalidOperand(operand);
 
-            return liftPlaceholdersToLambda(operand);
+            return liftPlaceholdersToLambda(operand, is_higher_order_function);
         }
         case QueryTreeNodeType::IDENTIFIER:
         {
@@ -520,7 +542,7 @@ QueryTreeNodePtr normalizeOperandToLambda(
             /// A bare placeholder is the identity function: `_1 | plus(_, 1)` is the same as
             /// `(x -> x) | plus(_, 1)`.
             if (tryGetPlaceholder(*operand))
-                return liftPlaceholdersToLambda(operand);
+                return liftPlaceholdersToLambda(operand, is_higher_order_function);
 
             throwInvalidOperand(operand);
         }
@@ -537,9 +559,9 @@ bool isFunctionComposition(const IQueryTreeNode & node)
     return function_node && function_node->isOperator() && function_node->getFunctionName() == function_composition_name;
 }
 
-NameSet collectFreePlaceholderNames(const QueryTreeNodePtr & node)
+NameSet collectFreePlaceholderNames(const QueryTreeNodePtr & node, const IsHigherOrderFunction & is_higher_order_function)
 {
-    PlaceholderCollector collector;
+    PlaceholderCollector collector(is_higher_order_function);
     NameSet bound_names;
     collector.collect(node, bound_names);
 
@@ -551,9 +573,9 @@ NameSet collectFreePlaceholderNames(const QueryTreeNodePtr & node)
     return result;
 }
 
-QueryTreeNodePtr liftPlaceholdersToLambda(const QueryTreeNodePtr & node)
+QueryTreeNodePtr liftPlaceholdersToLambda(const QueryTreeNodePtr & node, const IsHigherOrderFunction & is_higher_order_function)
 {
-    PlaceholderCollector collector;
+    PlaceholderCollector collector(is_higher_order_function);
     NameSet bound_names;
     collector.collect(node, bound_names);
 
@@ -628,7 +650,10 @@ QueryTreeNodePtr liftPlaceholdersToLambda(const QueryTreeNodePtr & node)
     return lambda;
 }
 
-QueryTreeNodePtr fuseCompositionToLambda(const FunctionNode & compose_node, const ResolveIdentifierOperand & resolve_identifier_operand)
+QueryTreeNodePtr fuseCompositionToLambda(
+    const FunctionNode & compose_node,
+    const ResolveIdentifierOperand & resolve_identifier_operand,
+    const IsHigherOrderFunction & is_higher_order_function)
 {
     if (!compose_node.getParameters().getNodes().empty() || compose_node.isWindowFunction()
         || compose_node.getNullsAction() != NullsAction::EMPTY)
@@ -642,8 +667,8 @@ QueryTreeNodePtr fuseCompositionToLambda(const FunctionNode & compose_node, cons
             "The function composition operator `|` takes exactly 2 operands, got {}: {}",
             operands.size(), compose_node.formatASTForErrorMessage());
 
-    auto left = normalizeOperandToLambda(operands[0], true /*is_left_operand*/, resolve_identifier_operand);
-    auto right = normalizeOperandToLambda(operands[1], false /*is_left_operand*/, resolve_identifier_operand);
+    auto left = normalizeOperandToLambda(operands[0], true /*is_left_operand*/, resolve_identifier_operand, is_higher_order_function);
+    auto right = normalizeOperandToLambda(operands[1], false /*is_left_operand*/, resolve_identifier_operand, is_higher_order_function);
 
     auto & left_lambda = left->as<LambdaNode &>();
     auto & right_lambda = right->as<LambdaNode &>();

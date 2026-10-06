@@ -42,14 +42,21 @@ bool isFunctionComposition(const IQueryTreeNode & node);
   * standard lambda machinery (typing, captures, execution) applies unchanged.
   */
 
+/** Whether the function with the given name is a higher-order function, i.e. takes a lambda
+  * as its first argument. Placeholders in the lambda position of a nested call to such a
+  * function belong to that call, not to the enclosing expression.
+  */
+using IsHigherOrderFunction = std::function<bool(const String & function_name)>;
+
 /** Collect the names of placeholder identifiers (`_` or `_N`) that occur free in an expression,
   * i.e. are not bound by an enclosing lambda inside the expression. The scan does not descend
   * into subqueries (placeholders are not supported there) and does not descend into nested
-  * composition nodes (their placeholders belong to their own operands).
+  * composition nodes (their placeholders belong to their own operands), nor into the lambda
+  * position of a nested higher-order function call (it lifts its placeholders on its own).
   *
   * A numbered placeholder is `_` followed by a positive integer without leading zeros.
   */
-NameSet collectFreePlaceholderNames(const QueryTreeNodePtr & node);
+NameSet collectFreePlaceholderNames(const QueryTreeNodePtr & node, const IsHigherOrderFunction & is_higher_order_function);
 
 /** Lift a function call with placeholder arguments to an unresolved lambda.
   *
@@ -72,7 +79,7 @@ NameSet collectFreePlaceholderNames(const QueryTreeNodePtr & node);
   *
   * Mixing anonymous and numbered placeholders in one expression is an error.
   */
-QueryTreeNodePtr liftPlaceholdersToLambda(const QueryTreeNodePtr & node);
+QueryTreeNodePtr liftPlaceholdersToLambda(const QueryTreeNodePtr & node, const IsHigherOrderFunction & is_higher_order_function);
 
 /** Resolve an identifier operand of a composition to an unresolved lambda, or return nullptr
   * when the name does not denote a function. `required_arity` is set for the right operand
@@ -93,6 +100,9 @@ using ResolveIdentifierOperand = std::function<QueryTreeNodePtr(const Identifier
   * The lambda arguments of `f` are renamed to names that occur in neither operand, so a column
   * referenced from the body of `g` can never be captured by an argument of `f` accidentally.
   */
-QueryTreeNodePtr fuseCompositionToLambda(const FunctionNode & compose_node, const ResolveIdentifierOperand & resolve_identifier_operand);
+QueryTreeNodePtr fuseCompositionToLambda(
+    const FunctionNode & compose_node,
+    const ResolveIdentifierOperand & resolve_identifier_operand,
+    const IsHigherOrderFunction & is_higher_order_function);
 
 }

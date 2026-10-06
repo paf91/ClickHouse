@@ -2258,6 +2258,12 @@ ProjectionNames QueryAnalyzer::resolveFunction(QueryTreeNodePtr & node, Identifi
     {
         auto & argument_nodes = function_node_ptr->getArguments().getNodes();
 
+        IsHigherOrderFunction is_higher_order_function = [&](const String & name)
+        {
+            auto resolver = FunctionFactory::instance().tryGet(name, scope.context);
+            return resolver && resolver->isHigherOrderFunction();
+        };
+
         /// Resolves an identifier operand of a composition: a lambda bound to the name in an
         /// enclosing scope (WITH (x -> x + 1) AS f SELECT arrayMap(f | f, ...)) or the name of
         /// a registered function, for which (x1, ..., xn) -> name(x1, ..., xn) is synthesized.
@@ -2316,7 +2322,7 @@ ProjectionNames QueryAnalyzer::resolveFunction(QueryTreeNodePtr & node, Identifi
         for (auto & argument_node : argument_nodes)
         {
             if (isFunctionComposition(*argument_node))
-                argument_node = fuseCompositionToLambda(argument_node->as<FunctionNode &>(), resolve_identifier_operand);
+                argument_node = fuseCompositionToLambda(argument_node->as<FunctionNode &>(), resolve_identifier_operand, is_higher_order_function);
         }
 
         /// Free placeholders in the lambda position of a higher-order function lift the
@@ -2333,10 +2339,9 @@ ProjectionNames QueryAnalyzer::resolveFunction(QueryTreeNodePtr & node, Identifi
         /// lift activates on is an error without it, so no previously valid query changes meaning.
         if (argument_nodes.size() >= 2 && argument_nodes[0]->getNodeType() != QueryTreeNodeType::LAMBDA)
         {
-            auto parent_resolver = FunctionFactory::instance().tryGet(function_name, scope.context);
-            if (parent_resolver && parent_resolver->isHigherOrderFunction())
+            if (is_higher_order_function(function_name))
             {
-                auto placeholder_names = collectFreePlaceholderNames(argument_nodes[0]);
+                auto placeholder_names = collectFreePlaceholderNames(argument_nodes[0], is_higher_order_function);
 
                 /// A name bound in the query keeps priority, whether it is bound as an
                 /// expression (a column or an alias) or as a function (a lambda bound with
@@ -2353,7 +2358,7 @@ ProjectionNames QueryAnalyzer::resolveFunction(QueryTreeNodePtr & node, Identifi
                 }
 
                 if (!placeholder_names.empty() && !any_placeholder_resolves)
-                    argument_nodes[0] = liftPlaceholdersToLambda(argument_nodes[0]);
+                    argument_nodes[0] = liftPlaceholdersToLambda(argument_nodes[0], is_higher_order_function);
             }
         }
     }
