@@ -5,8 +5,11 @@ Each backend measures an entry the way it stores it: the in-memory cache by the 
 the serialized entry (header, access metadata, `Native` framing, compression). The two differ in both directions, so the limit must be
 enforced against the serialized size on disk, not against the in-memory weight.
 
-This needs an integration test because the limit is a server setting, and `clickhouse-local` (used by the stateless tests of the query
-cache on disk) hardcodes it to 0.
+This needs an integration test because the in-memory weight of an entry is read from `system.query_cache`, and `clickhouse-local` (used
+by the stateless tests of the query cache on disk) has no in-memory query cache.
+
+Every test sets the limit it needs itself (the limit is reloaded with `SYSTEM RELOAD CONFIG`, no restart is needed), so the tests do not
+depend on each other or on their order.
 """
 
 import pytest
@@ -33,9 +36,6 @@ SETTINGS_BOTH_BACKENDS = (
 
 CONFIG_PATH = "/etc/clickhouse-server/config.d/query_cache_on_disk.xml"
 
-# The limit currently written in the config, see `set_max_entry_size_in_bytes`.
-current_max_entry_size_in_bytes = 1
-
 
 @pytest.fixture(scope="module")
 def started_cluster():
@@ -55,8 +55,20 @@ def get_event(name):
     )
 
 
+def set_max_entry_size_in_bytes(limit):
+    """Sets `query_cache.max_entry_size_in_bytes` to the given value, whatever the current value is."""
+    # `replace_in_config` runs `sed`, so the pattern matches any current value.
+    node.replace_in_config(
+        CONFIG_PATH,
+        "<max_entry_size_in_bytes>[0-9]*</max_entry_size_in_bytes>",
+        f"<max_entry_size_in_bytes>{limit}</max_entry_size_in_bytes>",
+    )
+    node.query("SYSTEM RELOAD CONFIG")
+
+
 def test_oversized_result_is_not_stored_on_disk(started_cluster):
-    # The limit is 1 byte here, so even this tiny result (a `ColumnConst`, which is stored in its compact representation) exceeds it.
+    # The limit is 1 byte, so even this tiny result (a `ColumnConst`, which is stored in its compact representation) exceeds it.
+    set_max_entry_size_in_bytes(1)
     query = f"SELECT 1 FROM numbers(1000) SETTINGS {SETTINGS}"
 
     written_before = get_event("QueryCacheOnDiskWrittenBytes")
@@ -67,17 +79,6 @@ def test_oversized_result_is_not_stored_on_disk(started_cluster):
     hits_before = get_event("QueryCacheOnDiskHits")
     node.query(query)
     assert get_event("QueryCacheOnDiskHits") == hits_before
-
-
-def set_max_entry_size_in_bytes(limit):
-    global current_max_entry_size_in_bytes
-    node.replace_in_config(
-        CONFIG_PATH,
-        f"<max_entry_size_in_bytes>{current_max_entry_size_in_bytes}</max_entry_size_in_bytes>",
-        f"<max_entry_size_in_bytes>{limit}</max_entry_size_in_bytes>",
-    )
-    current_max_entry_size_in_bytes = limit
-    node.restart_clickhouse()
 
 
 def measure_entry_sizes(query, tag, query_settings=""):
@@ -128,6 +129,7 @@ def test_limit_applies_to_the_serialized_size(started_cluster):
     # A single-row `Const` result: its in-memory weight is one padded allocation, while the serialized entry additionally carries
     # the fixed header, the access metadata and the compression framing, so the serialized entry is the larger one. The sizes are
     # measured at runtime instead of being hardcoded, since both depend on allocator and codec details.
+    set_max_entry_size_in_bytes(1073741824)  # both backends must accept the entry to measure it
     query = "SELECT 1"
     in_memory_weight, serialized_size = measure_entry_sizes(query, "const_measure")
     assert in_memory_weight < serialized_size
