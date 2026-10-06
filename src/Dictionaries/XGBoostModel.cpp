@@ -63,7 +63,7 @@ void XGBoostModel::throwIfTypeIsInvalid(const ColumnWithTypeAndName & col)
 {
     auto type = col.type;
     WhichDataType which(type->getTypeId());
-    if (!which.isNativeNumber() || which.isEnum())
+    if (!which.isNativeNumber())
     {
         throw Exception(
             ErrorCodes::BAD_ARGUMENTS,

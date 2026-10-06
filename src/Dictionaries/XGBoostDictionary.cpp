@@ -151,7 +151,7 @@ void registerDictionaryXGBoost(DictionaryFactory & factory)
         for (const auto & key_attribute : *dict_struct.key)
         {
             const WhichDataType which(key_attribute.type);
-            if (!which.isNativeNumber() || which.isEnum())
+            if (!which.isNativeNumber())
                 throw Exception(
                     ErrorCodes::BAD_ARGUMENTS,
                     "XGBoost dictionary feature key '{}' must be a native numeric type, got {}",
