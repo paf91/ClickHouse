@@ -74,7 +74,7 @@ probe "CREATE DICTIONARY u03 (_id String, v String) PRIMARY KEY _id SOURCE(MONGO
 probe "CREATE TABLE u04 (x String) ENGINE = MongoDB('mongodb://u?tlsCertificateKeyFilePassword=OPTSECRET20A:OPTSECRET20B&OPTSECRET20C@127.0.0.1:27017/db', 'c')"
 probe "CREATE DICTIONARY u05 (_id String, v String) PRIMARY KEY _id SOURCE(MONGODB(HOST '127.0.0.1' PORT 27017 USER 'usr' PASSWORD 'OPTSECRET21' DB 'db' COLLECTION 'c')) LAYOUT(COMPLEX_KEY_DIRECT())"
 
-$CLICKHOUSE_CLIENT -m -q "
+$CLICKHOUSE_CLIENT --send_logs_level=error -m -q "
 -- Controls, shown as written: options without a secret, a computed oid_columns, a collection name, and a
 -- named oid_columns after five positionals.
 CREATE TABLE c01 (x String) ENGINE = MongoDB('mongodb://127.0.0.1:27017/db?tls=true&appName=keep', 'c');
