@@ -336,9 +336,18 @@ IsStorageTouched isStorageTouchedByMutations(
     io.pipeline.setProgressCallback(check_operation_is_not_cancelled);
     /// Read progress is reported only by sources, so also poll the check while the pipeline works without reading.
     executor.setCancelCallback(
-        [&check_operation_is_not_cancelled]
+        [&executor, &check_operation_is_not_cancelled]
         {
-            check_operation_is_not_cancelled(Progress{});
+            try
+            {
+                check_operation_is_not_cancelled(Progress{});
+            }
+            catch (...)
+            {
+                /// Stop and join the pipeline first: `cancel` rethrows its own exception, which the destructor would log.
+                executor.cancel();
+                throw;
+            }
             return false;
         },
         std::max(UInt64(100), context->getSettingsRef()[Setting::interactive_delay] / 1000));
