@@ -95,7 +95,8 @@ public:
 };
 
 /// Whether the node is `CAST`, `_CAST`, `toNullable` or `toLowCardinality` whose conversion never changes
-/// the value and never throws: `LowCardinality` added or dropped and `Nullable` added, at any depth of `Array`.
+/// a non-NULL value: `LowCardinality` or `Nullable` added or dropped, at any depth of `Array`.
+/// Dropping `Nullable` throws on NULL, but an index may skip such granules and the query will not throw.
 bool isLosslessConversionFunction(const ActionsDAG::Node & node);
 
 /// Strips lossless conversions (see above) from the node. Indexes are analyzed on the expression under them.

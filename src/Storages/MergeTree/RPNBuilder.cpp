@@ -381,22 +381,13 @@ RPNBuilderTreeNode RPNBuilderFunctionTreeNode::getArgumentAt(size_t index) const
 namespace
 {
 
-/// Whether converting a value of type `from` to type `to` never changes it and never throws.
-/// `Nullable` cannot be dropped, because it may throw on NULL.
+/// Whether converting a value of type `from` to type `to` never changes a non-NULL value.
+/// Dropping `Nullable` throws on NULL. Such a query may not throw if the index skips the granules
+/// with NULL or the text index is read directly instead of the column, which is accepted.
 bool isLosslessConversion(const DataTypePtr & from, const DataTypePtr & to)
 {
-    auto from_type = removeLowCardinality(from);
-    auto to_type = removeLowCardinality(to);
-
-    if (to_type->isNullable())
-    {
-        from_type = removeNullable(from_type);
-        to_type = removeNullable(to_type);
-    }
-    else if (from_type->isNullable())
-    {
-        return false;
-    }
+    auto from_type = removeLowCardinalityAndNullable(from);
+    auto to_type = removeLowCardinalityAndNullable(to);
 
     if (from_type->equals(*to_type))
         return true;
