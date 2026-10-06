@@ -283,11 +283,15 @@ public:
                 throw Exception(ErrorCodes::SIZES_OF_ARRAYS_DONT_MATCH, "Arrays passed to {} aggregate function have different sizes", getName());
         }
 
+        /// An empty array adds nothing and needs no nested states.
+        if (begin == end)
+            return;
+
         AggregateFunctionForEachData & state = ensureAggregateData(place, end - begin, *arena);
-        /// For 0 or 1 elements the direct call is cheaper than the batch call.
+        /// For a single element the direct call is cheaper than the batch call.
         if (end - begin >= 2)
             nested_func->addBatchConsecutivePlaces(begin, end, state.array_of_aggregate_datas, nested_size_of_data, nested.data(), arena);
-        else if (end != begin)
+        else
             nested_func->add(state.array_of_aggregate_datas, nested.data(), begin, arena);
     }
 
@@ -326,10 +330,13 @@ public:
         size_t begin = offsets[row - 1];
         size_t end = offsets[row];
         assertArraySizesMatch(trailing_offsets, row, begin, end);
+        if (begin == end)
+            return;
+
         AggregateFunctionForEachData & state = ensureAggregateData(place, end - begin, *arena);
         if (end - begin >= 2)
             nested_func->addBatchConsecutivePlaces(begin, end, state.array_of_aggregate_datas, nested_size_of_data, nested, arena);
-        else if (end != begin)
+        else
             nested_func->add(state.array_of_aggregate_datas, nested, begin, arena);
     }
 
