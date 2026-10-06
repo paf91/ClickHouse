@@ -5,6 +5,12 @@ SELECT COLUMNS('a') APPLY lambda(tuple(x), x * 10) - 1 FROM (SELECT 2 AS a);
 SELECT t.* APPLY lambda(tuple(x), x * 10) + 1 FROM (SELECT 2 AS a) AS t;
 SELECT * EXCEPT b REPLACE (a + 1 AS a) APPLY lambda(tuple(x), x * 10) > 15 FROM (SELECT 1 AS a, 2 AS b);
 SELECT * APPLY (lambda(tuple(x), toString(x))) > '0' FROM (SELECT 1 AS a);
+-- A view stores `APPLY (lambda(...))` without the brackets and parses it back on ATTACH.
+CREATE VIEW v_apply AS SELECT * APPLY (lambda(tuple(x), toString(x))) > '0' AS r FROM (SELECT 1 AS a);
+DETACH VIEW v_apply;
+ATTACH TABLE v_apply;
+SELECT * FROM v_apply;
+DROP VIEW v_apply;
 SELECT * APPLY lambda(x, y) > 1; -- { clientError SYNTAX_ERROR }
 
 -- In a codec the operator is formatted as a function call, so nothing follows the `APPLY` text there.
