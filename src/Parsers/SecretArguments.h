@@ -83,6 +83,13 @@ struct SecretArgumentsResult
     {
         return count != 0 || !nested_maps.empty() || !replaced_arguments.empty() || !masked_arguments.empty();
     }
+
+    /// Whether the argument at raw index `n` is hidden: by the span, individually or by a partial
+    /// replacement. The nested maps are not positional: their entries are matched by name.
+    bool isSecretArgument(size_t n) const
+    {
+        return (n >= start && n - start < count) || masked_arguments.contains(n) || replaced_arguments.contains(n);
+    }
 };
 
 /// Knows what is secret in the arguments of every table function, engine, backup locator and dictionary source.
