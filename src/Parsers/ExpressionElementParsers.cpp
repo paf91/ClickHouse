@@ -2207,8 +2207,7 @@ bool ParserColumnsTransformers::parseImpl(Pos & pos, ASTPtr & node, Expected & e
             auto * func = lambda->as<ASTFunction>();
             if (!func || func->name != "lambda")
             {
-                /// ParserExpression also takes an operator after `lambda(...)`, as in `APPLY lambda(tuple(x), f(x)) > 1`;
-                /// the call alone is the lambda then, as when nothing follows it.
+                /// ParserExpression also takes an operator after `lambda(...)`, as in `APPLY lambda(tuple(x), f(x)) > 1`.
                 func = nullptr;
                 pos = opos;
                 ASTPtr name;
