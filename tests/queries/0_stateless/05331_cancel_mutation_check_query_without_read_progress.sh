@@ -10,11 +10,12 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 $CLICKHOUSE_CLIENT -q "DROP TABLE IF EXISTS t_cancel_check_query"
 
-# Three partitions give three part tasks of one mutation, which share one set: one builds it, the others wait for it.
+# One part, so the mutation has a single part task. `KILL MUTATION` cancels only the part tasks that have already
+# started, and with a busy background pool the task of another part may start after it and run uncancelled.
 $CLICKHOUSE_CLIENT -q "
-    CREATE TABLE t_cancel_check_query (id UInt64, p UInt64) ENGINE = MergeTree PARTITION BY p ORDER BY id
+    CREATE TABLE t_cancel_check_query (id UInt64) ENGINE = MergeTree ORDER BY id
     SETTINGS number_of_free_entries_in_pool_to_execute_mutation = 0;
-    INSERT INTO t_cancel_check_query VALUES (0, 0), (1, 1), (2, 2);"
+    INSERT INTO t_cancel_check_query VALUES (0), (1), (2);"
 
 # `ignore` keeps the set out of key and PREWHERE analysis, so the check query's own pipeline builds it.
 # The cross join emits all of its output after its two sources have finished reading, and `sleep(1)` per output block
