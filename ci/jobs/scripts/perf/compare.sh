@@ -419,7 +419,7 @@ function run_tests
     then
         # Run only explicitly specified tests, if any.
         # shellcheck disable=SC2010
-        test_files=($(ls "$test_prefix" | rg "$CHPC_TEST_GREP" | xargs -I{} -n1 readlink -f "$test_prefix/{}"))
+        test_files=($(ls "$test_prefix" | rg '\.xml$' | rg "$CHPC_TEST_GREP" | xargs -I{} -n1 readlink -f "$test_prefix/{}"))
 # TODO: remove
 #    elif [ "$PR_TO_TEST" -ne 0 ] \
 #        && [ "$(wc -l < changed-test-definitions.txt)" -gt 0 ] \
