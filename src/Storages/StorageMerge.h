@@ -205,6 +205,14 @@ public:
     bool canReadInReverseOrder();
     const InputOrderInfoPtr & getInputOrder() const { return order_info; }
 
+    /// Whether the child plans have been created (`filterTablesAndCreateChildrenPlans`).
+    bool hasChildPlans() const { return child_plans.has_value(); }
+    /// Drops the child plans, so that they are created again when they are needed next. For a first-pass
+    /// optimization which probes the children before the filters are applied to this step (`applyFilters`):
+    /// children created then would miss the filter on `_database` and `_table` (`getSelectedTables`), and
+    /// they are created only once. Nothing may hold the child plans when this is called.
+    void resetChildPlans();
+
     void applyFilters(ActionDAGNodes added_filter_nodes) override;
 
     QueryPlanRawPtrs getChildPlans(bool /*for_explain*/) override;

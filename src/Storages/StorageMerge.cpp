@@ -2530,6 +2530,14 @@ bool ReadFromMerge::canReadInReverseOrder()
     return true;
 }
 
+void ReadFromMerge::resetChildPlans()
+{
+    chassert(!order_info);
+    child_plans.reset();
+    selected_tables.clear();
+    expandable_reads.reset();
+}
+
 bool ReadFromMerge::requestReadingInOrder(InputOrderInfoPtr order_info_, size_t query_limit)
 {
     filterTablesAndCreateChildrenPlans();

@@ -18,6 +18,7 @@
 #include <Storages/StorageInMemoryMetadata.h>
 #include <Storages/StorageMerge.h>
 #include <Common/typeid_cast.h>
+#include <base/scope_guard.h>
 
 #include <algorithm>
 
@@ -427,6 +428,29 @@ size_t tryTopKThroughJoin(QueryPlan::Node * parent_node, QueryPlan::Nodes & node
         /// Look for the read the same way pass 2 does: it descends only through some steps (expressions,
         /// filters, preliminary `DISTINCT`, ...), so a read below any other step, e.g. a final `DISTINCT`
         /// of a subquery, is not reached by it, and deferring there would silently disable both optimizations.
+        ///
+        /// Looking for the read and probing a `Merge` read create its child plans, while the filters are applied to
+        /// the read only in the second pass: children created now would read the tables that a filter on `_table`
+        /// excludes, because they are created only once. So drop the child plans this probe creates; they are created
+        /// again when they are needed. The probe asks a superset of the tables the second pass sees, so its verdict
+        /// stays conservative.
+        std::vector<ReadFromMerge *> merges_without_child_plans;
+        {
+            std::vector<QueryPlan::Node *> stack{preserved_input_node};
+            while (!stack.empty())
+            {
+                auto * current = stack.back();
+                stack.pop_back();
+                if (auto * merge = typeid_cast<ReadFromMerge *>(current->step.get()); merge && !merge->hasChildPlans())
+                    merges_without_child_plans.push_back(merge);
+                stack.insert(stack.end(), current->children.begin(), current->children.end());
+            }
+        }
+        SCOPE_EXIT(
+            for (auto * merge : merges_without_child_plans)
+                merge->resetChildPlans();
+        );
+
         QueryPlan::Node * reading_node = findReadingStepForReadInOrder(*preserved_input_node, settings.read_in_order_through_join);
         IQueryPlanStep * reading_step = reading_node ? reading_node->step.get() : nullptr;
 
