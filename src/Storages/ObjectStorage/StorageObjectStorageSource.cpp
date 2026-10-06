@@ -1010,8 +1010,10 @@ Chunk StorageObjectStorageSource::generate()
         /// from the rows of all files the query reads: a row group can end up without a returned row
         /// only because the threshold had excluded it. The key covers just the predicate, so such an
         /// entry would make a later plain read, or one with another `LIMIT` or direction, skip rows.
-        /// A file the filter was not applied to (see `createReader`) is read as without TopN.
-        else if (format_filter_info->condition_hash && !reader.isTopKFilterApplied())
+        /// A file the filter was not applied to (see `createReader`; the reader also declines it for a
+        /// file that does not store the sort column) is read as without TopN.
+        else if (format_filter_info->condition_hash
+            && !(reader.getInputFormat() && reader.getInputFormat()->isTopKFilterApplied()))
         {
             const auto & object_info = reader.getObjectInfo();
             const auto query_condition_cache_key = makeQueryConditionCacheKey(*object_info, configuration->isDataLakeConfiguration());
@@ -1270,8 +1272,6 @@ StorageObjectStorageSource::ReaderHolder StorageObjectStorageSource::createReade
     std::unique_ptr<ReadBuffer> read_buf;
 
     Names row_lineage_columns;
-    /// Whether the reader of this file applies TopN dynamic filtering, see `generate`.
-    bool top_k_filter_applied = false;
 
     auto try_get_num_rows_from_cache = [&]() -> std::optional<size_t>
     {
@@ -1537,8 +1537,6 @@ StorageObjectStorageSource::ReaderHolder StorageObjectStorageSource::createReade
             filter_info_with_rows->rows_to_read = object_info->rows_to_read;
             filter_info = filter_info_with_rows;
         }
-
-        top_k_filter_applied = filter_info && filter_info->top_k_filter;
 
         /// When PREWHERE / row-level filter is stripped from `format_filter_info` (i.e. the
         /// actual file format doesn't support PREWHERE), the format reader will not produce
@@ -1816,7 +1814,7 @@ StorageObjectStorageSource::ReaderHolder StorageObjectStorageSource::createReade
     ProfileEvents::increment(ProfileEvents::EngineFileLikeReadFiles);
 
     return ReaderHolder(
-        object_info, std::move(read_buf), std::move(source), std::move(pipeline), std::move(current_reader), top_k_filter_applied);
+        object_info, std::move(read_buf), std::move(source), std::move(pipeline), std::move(current_reader));
 }
 
 std::future<StorageObjectStorageSource::ReaderHolder> StorageObjectStorageSource::createReaderAsync()
@@ -2375,14 +2373,12 @@ StorageObjectStorageSource::ReaderHolder::ReaderHolder(
     std::unique_ptr<ReadBuffer> read_buf_,
     std::shared_ptr<ISource> source_,
     std::unique_ptr<QueryPipeline> pipeline_,
-    std::unique_ptr<PullingPipelineExecutor> reader_,
-    bool top_k_filter_applied_)
+    std::unique_ptr<PullingPipelineExecutor> reader_)
     : object_info(std::move(object_info_))
     , read_buf(std::move(read_buf_))
     , source(std::move(source_))
     , pipeline(std::move(pipeline_))
     , reader(std::move(reader_))
-    , top_k_filter_applied(top_k_filter_applied_)
 {
 }
 
@@ -2396,7 +2392,6 @@ StorageObjectStorageSource::ReaderHolder::operator=(ReaderHolder && other) noexc
     source = std::move(other.source);
     read_buf = std::move(other.read_buf);
     object_info = std::move(other.object_info);
-    top_k_filter_applied = other.top_k_filter_applied;
     return *this;
 }
 
