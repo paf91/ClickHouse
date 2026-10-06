@@ -1366,8 +1366,8 @@ void StorageMergeTree::waitForMutation(Int64 version, const String & mutation_id
 
     if (shutdown_called && !mutation_status->is_done)
         throw Exception(ErrorCodes::UNFINISHED,
-                        "Mutation {} is not finished because table shutdown was called. "
-                        "It will be done after table restart.", mutation_id);
+                        "Mutation {} is not finished because the table was shut down. "
+                        "It continues when the table is attached again, unless the table was dropped.", mutation_id);
 
     LOG_INFO(log, "Mutation {} done", mutation_id);
 }
