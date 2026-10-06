@@ -1078,6 +1078,9 @@ void SchemaConverter::processPrimitiveColumn(
     auto allow_int_hash_filters = [&](size_t decoded_bits, bool decoded_signed, size_t physical_bits) -> bool
     {
         chassert(out_inferred_type);
+        /// A `Bool` may read any nonzero stored value as `true`, which hashes as 1.
+        if (isBool(type_hint ? type_hint : out_inferred_type))
+            return false;
         const auto requested = getRequestedIntegerSpace(type_hint ? *type_hint : *out_inferred_type);
         if (!requested)
             return false;

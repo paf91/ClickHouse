@@ -105,6 +105,17 @@ select count() from file(currentDatabase() || '_05241_u32.parquet', Parquet, 'x 
 select count() from file(currentDatabase() || '_05241_fs4.parquet', Parquet, 'x String') where x = 'ab'
     settings input_format_parquet_filter_push_down = 0, input_format_parquet_page_filter_push_down = 0;
 
+-- A Bool hint over an integer column holding 2: through LowCardinality the cast reads it as true, and the
+-- plain type keeps 2, which `in (true)` matches. The constant true hashes as 1 either way.
+insert into function file(currentDatabase() || '_05241_u8two.parquet', Parquet, 'x UInt8')
+    select toUInt8(2) as x from numbers(10);
+select count() from file(currentDatabase() || '_05241_u8two.parquet', Parquet, 'x LowCardinality(Bool)')
+    where x = true
+    settings allow_suspicious_low_cardinality_types = 1,
+             input_format_parquet_filter_push_down = 0, input_format_parquet_page_filter_push_down = 0;
+select count() from file(currentDatabase() || '_05241_u8two.parquet', Parquet, 'x Bool') where x in (true)
+    settings input_format_parquet_filter_push_down = 0, input_format_parquet_page_filter_push_down = 0;
+
 -- Part 2: pruning that must survive, one control per clause of the predicate. Each fixture has four row
 -- groups with the match in the last one.
 
