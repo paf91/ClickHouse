@@ -48,6 +48,28 @@ PruningFrame makeFrame(QueryPlan::Node & node, std::vector<size_t> unneeded_outp
     return frame;
 }
 
+/// Whether `new_header` has the columns of `old_header` that are not at `dropped_positions` first, in their order.
+/// Columns appended after them are allowed, such as the dummy column a join adds.
+bool keepsRemainingColumnsFirst(const Block & old_header, const std::vector<size_t> & dropped_positions, const Block & new_header)
+{
+    size_t new_position = 0;
+    size_t next_dropped = 0;
+    for (size_t position = 0; position < old_header.columns(); ++position)
+    {
+        if (next_dropped < dropped_positions.size() && dropped_positions[next_dropped] == position)
+        {
+            ++next_dropped;
+            continue;
+        }
+
+        if (new_position == new_header.columns() || new_header.getByPosition(new_position).name != old_header.getByPosition(position).name)
+            return false;
+        ++new_position;
+    }
+
+    return next_dropped == dropped_positions.size();
+}
+
 /// Prunes the frame's step once its children are done, and says what it dropped.
 IQueryPlanStep::PrunedInput pruneStep(PruningFrame & frame, bool & changed)
 {
@@ -67,8 +89,12 @@ IQueryPlanStep::PrunedInput pruneStep(PruningFrame & frame, bool & changed)
         return IQueryPlanStep::PrunedInput::unchanged(step.getOutputHeader());
     }
 
+    const auto old_output_header = step.getOutputHeader();
     auto result = step.removeUnusedColumns(frame.unneeded_outputs, frame.children);
     changed = result.step_changed;
+
+    /// The step above relies on this to match the columns of the new header with the old ones.
+    chassert(keepsRemainingColumnsFirst(*old_output_header, result.dropped_output_positions, *step.getOutputHeader()));
     return {std::move(result.dropped_output_positions), step.getOutputHeader()};
 }
 

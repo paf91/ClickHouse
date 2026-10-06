@@ -9,6 +9,7 @@
 #include <Core/Defines.h>
 #include <IO/Operators.h>
 #include <Common/JSONBuilder.h>
+#include <unordered_set>
 
 namespace DB
 {
@@ -46,11 +47,13 @@ IQueryPlanStep::UnneededInputPositions LimitStep::getUnneededColumns(const std::
     auto unneeded = unneeded_output_positions;
     if (with_ties)
     {
+        /// `LimitTransform` compares the first column of each name in `description`, so only that copy stays.
         const auto & header = *input_headers.front();
-        std::erase_if(unneeded, [&](size_t position)
-        {
-            return std::ranges::any_of(description, [&](const auto & column) { return column.column_name == header.getByPosition(position).name; });
-        });
+        std::unordered_set<size_t> compared_positions;
+        for (const auto & column : description)
+            compared_positions.insert(header.getPositionByName(column.column_name));
+
+        std::erase_if(unneeded, [&](size_t position) { return compared_positions.contains(position); });
     }
 
     return {std::move(unneeded)};

@@ -5,7 +5,6 @@
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/FilterStep.h>
 #include <Processors/QueryPlan/Optimizations/Optimizations.h>
-#include <Processors/QueryPlan/Optimizations/actionsDAGUtils.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 #include <Processors/QueryPlan/SortingStep.h>
 #include <Processors/QueryPlan/LimitStep.h>
@@ -222,7 +221,7 @@ static void addRequiredInputDependenciesIntoNodesSet(const ActionsDAG & dag, std
     std::unordered_set<const ActionsDAG::Node *> visited;
     struct Frame
     {
-        const ActionsDAG::Node * node;
+        const ActionsDAG::Node * node = nullptr;
         size_t next_child = 0;
     };
     std::stack<Frame> stack;

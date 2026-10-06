@@ -1,10 +1,8 @@
 #include <Processors/QueryPlan/FilterStep.h>
-#include <Processors/QueryPlan/Optimizations/actionsDAGUtils.h>
 
 #include <limits>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <stack>
 #include <DataTypes/DataTypeFactory.h>
 #include <DataTypes/DataTypeLowCardinality.h>
@@ -14,6 +12,7 @@
 #include <IO/Operators.h>
 #include <Interpreters/ActionsDAG.h>
 #include <Interpreters/ExpressionActions.h>
+#include <Processors/QueryPlan/Optimizations/actionsDAGUtils.h>
 #include <Processors/QueryPlan/QueryPlanFormat.h>
 #include <Processors/QueryPlan/QueryPlanStepRegistry.h>
 #include <Processors/QueryPlan/Serialization.h>
@@ -88,50 +87,15 @@ FilterStep::UnneededColumnsPlan FilterStep::analyzeUnneededColumns(
     /// Map positions from the final (post-erase) header to the pre-erase header. The mapping depends on
     /// the incoming value of the flag, not on the value the pruning settles on. An erased filter column is not
     /// in the final header, so no position maps to it.
-    auto map_to_pre_erase_pos = [filter_col_pre_erase_pos, remove_filter_column](size_t pos) -> size_t
-    {
-        if (!remove_filter_column)
-            return pos;
-        return pos >= filter_col_pre_erase_pos ? pos + 1 : pos;
-    };
-
-    /// Map positions from post-erase to pre-erase layout, then split into DAG vs pass-through.
     std::vector<size_t> pre_erase_positions;
     pre_erase_positions.reserve(unneeded_output_positions.size());
     for (size_t pos : unneeded_output_positions)
-        pre_erase_positions.push_back(map_to_pre_erase_pos(pos));
+        pre_erase_positions.push_back(remove_filter_column && pos >= filter_col_pre_erase_pos ? pos + 1 : pos);
 
-    auto [unneeded_dag_indices, unneeded_passthrough_indices] = dag.splitOutputPositions(pre_erase_positions);
-
-    /// One entry per column of the input header: the input reading it, or nothing when it passes by.
-    /// The caller's pass-through indices ascend, and so do the pass-through columns, so one walk over
-    /// the header splits them into the columns to keep and the columns to drop.
-    const auto header_columns = mapHeaderColumnsToInputs(dag.getInputs(), input_header);
-
-    plan.input_columns.resize(header_columns.size());
-    size_t passthrough_index = 0;
-    size_t next_unneeded_passthrough = 0;
-    for (size_t position = 0; position < header_columns.size(); ++position)
-    {
-        if (!header_columns.passesThrough(position))
-            continue;
-
-        if (next_unneeded_passthrough < unneeded_passthrough_indices.size()
-            && unneeded_passthrough_indices[next_unneeded_passthrough] == passthrough_index)
-        {
-            ++next_unneeded_passthrough;
-            plan.input_columns[position] = InputColumnUsage::PassesThroughDropped;
-        }
-        else
-            plan.input_columns[position] = InputColumnUsage::PassesThroughNeeded;
-
-        ++passthrough_index;
-    }
-
-    if (next_unneeded_passthrough != unneeded_passthrough_indices.size())
-        throw Exception(
-            ErrorCodes::LOGICAL_ERROR, "Unneeded output position {} is out of range for pass-through inputs",
-            unneeded_passthrough_indices[next_unneeded_passthrough]);
+    /// The positions ascend, so the unneeded DAG outputs are a prefix of them, and the rest are pass-through columns.
+    const size_t first_unneeded_passthrough
+        = std::ranges::lower_bound(pre_erase_positions, old_dag_outputs_size) - pre_erase_positions.begin();
+    std::vector<size_t> unneeded_dag_indices(pre_erase_positions.begin(), pre_erase_positions.begin() + first_unneeded_passthrough);
 
     /// Nobody reads the filter column any more, so it can be removed from the header.
     if (!plan.remove_filter_column && std::ranges::binary_search(unneeded_dag_indices, filter_col_pre_erase_pos))
@@ -155,9 +119,10 @@ FilterStep::UnneededColumnsPlan FilterStep::analyzeUnneededColumns(
         {
             folded_dag = dag.clone();
             folded_dag->foldFilterPredicateThroughMaterialize(filter_col_pre_erase_pos);
-            /// The fold only ever replaces the filter output by a constant.
-            plan.fold_filter_predicate = folded_dag->getOutputs()[filter_col_pre_erase_pos]->type == ActionsDAG::ActionType::COLUMN
-                && old_outputs[filter_col_pre_erase_pos]->type != ActionsDAG::ActionType::COLUMN;
+            /// The fold only ever replaces the filter output by a constant. The predicate has a `materialize`
+            /// below it, so it was not a constant before.
+            chassert(old_outputs[filter_col_pre_erase_pos]->type != ActionsDAG::ActionType::COLUMN);
+            plan.fold_filter_predicate = folded_dag->getOutputs()[filter_col_pre_erase_pos]->type == ActionsDAG::ActionType::COLUMN;
             if (!plan.fold_filter_predicate)
                 folded_dag.reset();
         }
@@ -183,14 +148,39 @@ FilterStep::UnneededColumnsPlan FilterStep::analyzeUnneededColumns(
     const auto is_folded_constant = [](const ActionsDAG::Node * node) { return node->column && !node->children.empty(); };
     const auto surviving_nodes = findReachableNodes(roots, is_folded_constant);
 
-    /// Every input reads a header position of its own, so the column it reads is needed exactly when the
-    /// input survives. A clone keeps the inputs in their order.
-    const auto & inputs = analyzed_dag.getInputs();
+    /// One entry per column of the input header: the input reading it, or nothing when it passes by.
+    /// A clone keeps the inputs in their order, so the folded DAG reads the same header positions.
+    const auto header_columns = mapHeaderColumnsToInputs(analyzed_dag.getInputs(), input_header);
+    plan.input_columns.resize(header_columns.size());
+
+    /// The pass-through columns follow the DAG outputs in the pre-erase header, in their order, so one walk over
+    /// the input header pairs them up with the unneeded positions.
+    size_t passthrough_position = old_dag_outputs_size;
+    size_t next_unneeded_passthrough = first_unneeded_passthrough;
     for (size_t position = 0; position < header_columns.size(); ++position)
+    {
         if (!header_columns.passesThrough(position))
-            plan.input_columns[position] = surviving_nodes.contains(inputs[header_columns.read_by[position]])
-                ? InputColumnUsage::ReadNeeded
-                : InputColumnUsage::ReadDropped;
+        {
+            /// Every input reads a header position of its own, so the column it reads is needed exactly when
+            /// the input survives.
+            const auto * input = analyzed_dag.getInputs()[header_columns.read_by[position]];
+            plan.input_columns[position] = surviving_nodes.contains(input) ? InputColumnUsage::ReadNeeded : InputColumnUsage::ReadDropped;
+            continue;
+        }
+
+        const bool is_unneeded = next_unneeded_passthrough < pre_erase_positions.size()
+            && pre_erase_positions[next_unneeded_passthrough] == passthrough_position;
+        if (is_unneeded)
+            ++next_unneeded_passthrough;
+
+        plan.input_columns[position] = is_unneeded ? InputColumnUsage::PassesThroughDropped : InputColumnUsage::PassesThroughNeeded;
+        ++passthrough_position;
+    }
+
+    if (next_unneeded_passthrough != pre_erase_positions.size())
+        throw Exception(
+            ErrorCodes::LOGICAL_ERROR, "Unneeded output position {} is out of range for pass-through inputs",
+            pre_erase_positions[next_unneeded_passthrough]);
 
     return plan;
 }

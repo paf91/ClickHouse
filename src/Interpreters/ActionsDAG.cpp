@@ -1846,22 +1846,6 @@ ActionsDAG::MatchedInputPositions ActionsDAG::matchInputPositionsToHeader(const 
     return matchInputNodesToHeader(inputs, header);
 }
 
-ActionsDAG::SplitOutputPositions ActionsDAG::splitOutputPositions(const std::vector<size_t> & output_positions) const
-{
-    SplitOutputPositions result;
-    const size_t num_dag_outputs = outputs.size();
-
-    for (size_t pos : output_positions)
-    {
-        if (pos < num_dag_outputs)
-            result.dag_indices.push_back(pos);
-        else
-            result.passthrough_indices.push_back(pos - num_dag_outputs);
-    }
-
-    return result;
-}
-
 ColumnsWithTypeAndName ActionsDAG::evaluatePartialResult(
     IntermediateExecutionResult & node_to_column,
     const NodeRawConstPtrs & outputs,

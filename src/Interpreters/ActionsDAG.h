@@ -376,18 +376,6 @@ public:
     /// Same as above, but with an explicit list of input nodes instead of using the DAG's inputs.
     static MatchedInputPositions matchInputNodesToHeader(const NodeRawConstPtrs & input_nodes, const Block & header);
 
-    /// Split output positions into DAG output indices and pass-through indices.
-    /// The output header is structured as [DAG outputs..., pass-through inputs...].
-    /// Positions below getOutputs().size() are DAG output indices;
-    /// positions at or above are pass-through indices (with the DAG output count subtracted),
-    /// can be used to index into the list of pass-through inputs from matchInputPositionsToHeader.
-    struct SplitOutputPositions
-    {
-        std::vector<size_t> dag_indices;
-        std::vector<size_t> passthrough_indices;
-    };
-    SplitOutputPositions splitOutputPositions(const std::vector<size_t> & output_positions) const;
-
     using IntermediateExecutionResult = std::unordered_map<const Node *, ColumnWithTypeAndName>;
     static ColumnsWithTypeAndName evaluatePartialResult(
         IntermediateExecutionResult & node_to_column,
