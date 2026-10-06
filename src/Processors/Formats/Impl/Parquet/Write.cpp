@@ -628,25 +628,48 @@ struct ConverterJSON
     {
     }
 
-    const parquet::ByteArray * getBatch(size_t offset, size_t count)
+    size_t batch_offset = 0;
+
+    /// The values are serialized one at a time, so that a batch can be cut by bytes before all of
+    /// its values are materialized: `startBatch` prepares up to `count` values, `valueSize` serializes
+    /// the values up to the `i`-th, and `finishBatch` serializes the rest of the first `count` values.
+    void startBatch(size_t offset, size_t count)
     {
+        batch_offset = offset;
         buf.resize(count);
         stash.clear();
+        /// The strings must not move: `buf` points into them.
         stash.reserve(count);
+    }
 
+    size_t valueSize(size_t i)
+    {
+        materializeUpTo(i + 1);
+        return buf[i].len;
+    }
+
+    const parquet::ByteArray * finishBatch(size_t count)
+    {
+        materializeUpTo(count);
+        return buf.data();
+    }
+
+private:
+    void materializeUpTo(size_t count)
+    {
+        chassert(count <= buf.size());
         auto serialization = data_type->getDefaultSerialization();
 
-        for (size_t i = 0; i < count; ++i)
+        for (size_t i = stash.size(); i < count; ++i)
         {
             WriteBufferFromOwnString wb;
-            serialization->serializeTextJSON(column, offset + i, wb, format_settings);
+            serialization->serializeTextJSON(column, batch_offset + i, wb, format_settings);
 
             stash.emplace_back(std::move(wb.str()));
             const String & s = stash.back();
 
             buf[i] = parquet::ByteArray(static_cast<UInt32>(s.size()), reinterpret_cast<const uint8_t *>(s.data()));
         }
-        return buf.data();
     }
 };
 
@@ -1442,10 +1465,23 @@ void writeColumnImpl(
             BatchSize batch_size;
             if constexpr (std::is_same_v<ParquetDType, parquet::ByteArrayType>)
             {
-                converted = converter.getBatch(next_data_offset, data_count);
-                batch_size = limit_batch_by_bytes(
-                    next_def_offset, def_count, data_count, sizeof(uint32_t),
-                    [&](size_t i) { return static_cast<size_t>(converted[i].len); });
+                if constexpr (requires { converter.startBatch(next_data_offset, data_count); })
+                {
+                    /// The converter serializes values, so only the values that make it into the
+                    /// batch are serialized.
+                    converter.startBatch(next_data_offset, data_count);
+                    batch_size = limit_batch_by_bytes(
+                        next_def_offset, def_count, data_count, sizeof(uint32_t),
+                        [&](size_t i) { return converter.valueSize(i); });
+                    converted = converter.finishBatch(data_count);
+                }
+                else
+                {
+                    converted = converter.getBatch(next_data_offset, data_count);
+                    batch_size = limit_batch_by_bytes(
+                        next_def_offset, def_count, data_count, sizeof(uint32_t),
+                        [&](size_t i) { return static_cast<size_t>(converted[i].len); });
+                }
             }
             else if constexpr (std::is_same_v<ParquetDType, parquet::FLBAType>)
             {
