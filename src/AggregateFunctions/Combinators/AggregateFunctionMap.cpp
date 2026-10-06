@@ -173,6 +173,11 @@ public:
         return nested_func->getDefaultVersion();
     }
 
+    DataTypePtr getStateType() const override
+    {
+        return this->getStateTypeWithVersionOf(*nested_func);
+    }
+
     AggregateFunctionMap(AggregateFunctionPtr nested, const DataTypes & types)
         : Base(types, nested->getParameters(), std::make_shared<DataTypeMap>(DataTypes{getKeyType(types, nested), nested->getResultType()}))
         , nested_func(nested), arguments_num(types.size())
@@ -353,7 +358,7 @@ public:
         destroyImpl<true>(place);
     }
 
-    void serialize(ConstAggregateDataPtr __restrict place, WriteBuffer & buf, std::optional<size_t> /* version */) const override
+    void serialize(ConstAggregateDataPtr __restrict place, WriteBuffer & buf, std::optional<size_t> version) const override
     {
         auto & merged_maps = this->data(place).merged_maps;
         writeVarUInt(merged_maps.size(), buf);
@@ -361,11 +366,14 @@ public:
         for (const auto & elem : merged_maps)
         {
             this->data(place).writeKey(elem.first, buf);
-            nested_func->serialize(elem.second, buf);
+            /// `isVersioned` and `getDefaultVersion` forward to the nested function, so the version
+            /// is in the nested function's terms already; dropping it would silently downgrade
+            /// every per-key state to the format of the nested function's default version.
+            nested_func->serialize(elem.second, buf, version);
         }
     }
 
-    void deserialize(AggregateDataPtr __restrict place, ReadBuffer & buf, std::optional<size_t> /* version */, Arena * arena) const override
+    void deserialize(AggregateDataPtr __restrict place, ReadBuffer & buf, std::optional<size_t> version, Arena * arena) const override
     {
         auto & merged_maps = this->data(place).merged_maps;
         UInt64 size = 0;
@@ -376,7 +384,6 @@ public:
             KeyType key{};
 
             this->data(place).readKey(key, buf);
-
             /// Take the slot before creating the state. `emplace` on a key that is already present
             /// does not insert, so creating first would abandon the fresh state: nothing would
             /// reference it and `destroyImpl` walks only `merged_maps`. `serialize` writes each key
@@ -412,7 +419,7 @@ public:
                 throw;
             }
 
-            nested_func->deserialize(it->second, buf, std::nullopt, arena);
+            nested_func->deserialize(it->second, buf, version, arena);
         }
     }
 
