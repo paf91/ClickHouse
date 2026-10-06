@@ -16,7 +16,6 @@
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Storages/StorageDistributed.h>
-#include <Storages/StorageProxy.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Storages/removeGroupingFunctionSpecializations.h>
 #include <TableFunctions/TableFunctionFactory.h>
