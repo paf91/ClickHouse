@@ -853,6 +853,29 @@ Pipe IcebergMetadata::alterPartition(
     if (command.part || command.detach)
         throw Exception(ErrorCodes::NOT_IMPLEMENTED, "{} is not supported by Iceberg", command.typeToString());
 
+    if (catalog)
+    {
+        const auto catalog_type = catalog->getCatalogType();
+        switch (catalog_type)
+        {
+            case DatabaseDataLakeCatalogType::ICEBERG_REST:
+            case DatabaseDataLakeCatalogType::ICEBERG_ONELAKE:
+            case DatabaseDataLakeCatalogType::ICEBERG_BIGLAKE:
+            case DatabaseDataLakeCatalogType::ICEBERG_DELTA_SHARING:
+            case DatabaseDataLakeCatalogType::ICEBERG_HORIZON:
+            case DatabaseDataLakeCatalogType::S3_TABLES:
+            case DatabaseDataLakeCatalogType::UNITY:
+                break;
+            case DatabaseDataLakeCatalogType::ICEBERG_HIVE: /// doesn't support writes
+                throw DB::Exception(ErrorCodes::NOT_IMPLEMENTED, "DROP PARTITION doesn't support {} catalog", catalog_type);
+            case DatabaseDataLakeCatalogType::GLUE: /// blocked by https://github.com/ClickHouse/ClickHouse/issues/112102
+                throw DB::Exception(ErrorCodes::NOT_IMPLEMENTED, "DROP PARTITION doesn't support {} catalog", catalog_type);
+            case DatabaseDataLakeCatalogType::NONE:
+            case DatabaseDataLakeCatalogType::PAIMON_REST:
+                throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected catalog type {}", catalog_type);
+        }
+    }
+
     alterPartitionDropImpl(command, context, std::move(catalog), std::move(storage_id));
     persistent_components.invalidateMetadataCache();
     return {};
