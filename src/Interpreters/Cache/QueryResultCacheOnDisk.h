@@ -68,6 +68,7 @@ private:
         UInt64 total_size = 0; /// entire entry size in bytes, including this header
         UInt64 created_at = 0; /// seconds since epoch
         UInt64 expires_at = 0; /// seconds since epoch
+        UInt64 server_build_fingerprint = 0; /// identifies the server build which wrote the entry, an entry of another build is unusable
         UInt128 checksum = 0; /// SipHash-128 of the preceding fixed header bytes and of everything after the fixed header
 
         bool isStale() const;
@@ -82,7 +83,7 @@ private:
     };
 
     /// Parses and validates the fixed header. Returns std::nullopt if the data does not look like an entry of the on-disk query
-    /// result cache (wrong magic), or the entry was written in an incompatible format or by a newer server.
+    /// result cache (wrong magic), or the entry was written in an incompatible format or by another server build.
     static std::optional<FixedHeader> parseFixedHeader(ReadBuffer & in);
 
     /// Reads everything after the fixed header and verifies it against the checksum in the header. Returns std::nullopt if the

@@ -27,13 +27,13 @@ echo "-- Compute the result and write it to disk"
 ${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "${query}; ${events_query};"
 
 echo "-- Corrupt the body of the entry: it must be handled as a cheap miss"
-# The bytes right after the 56-byte fixed header hold the access metadata. Overwriting them with 0xFF breaks the body
+# The bytes right after the 64-byte fixed header hold the access metadata. Overwriting them with 0xFF breaks the body
 # checksum in the fixed header (and would make the serialized role count decode to a huge number). See also 05153, which
 # corrupts the fixed header itself.
 find "${CACHE_DIR}" -type f -name '0_*' | while read -r file
 do
     printf '\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff' \
-        | dd of="${file}" bs=1 seek=56 conv=notrunc status=none
+        | dd of="${file}" bs=1 seek=64 conv=notrunc status=none
 done
 ${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "${query}; ${events_query};"
 
@@ -43,7 +43,7 @@ ${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "${query}; ${events_q
 echo "-- Truncated payload (the result chunks are cut off) is also a cheap miss"
 find "${CACHE_DIR}" -type f -name '0_*' | while read -r file
 do
-    truncate -s 60 "${file}"
+    truncate -s 68 "${file}"
 done
 ${CLICKHOUSE_LOCAL} --config-file "${CONFIG_FILE}" --query "${query}" 2>/dev/null
 

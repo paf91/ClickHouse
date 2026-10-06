@@ -24,8 +24,8 @@ settings="use_query_cache = true, query_cache_on_disk_cache_name = 'query_result
 query="SELECT sum(number) FROM numbers(1000) SETTINGS ${settings}"
 events_query="SELECT event FROM system.events WHERE event LIKE 'QueryCacheOnDisk%Misses' OR event LIKE 'QueryCacheOnDisk%Hits' ORDER BY event"
 
-# The fixed header is 56 bytes: magic[8], format_version (UInt32), protocol_revision (UInt32), total_size (UInt64) at
-# offset 16, created_at (UInt64) at offset 24, expires_at (UInt64) at offset 32, checksum (UInt128) at offset 40.
+# The fixed header is 64 bytes: magic[8], format_version (UInt32), protocol_revision (UInt32), total_size (UInt64) at
+# offset 16, created_at (UInt64) at offset 24, expires_at (UInt64) at offset 32, the server build fingerprint (UInt64) at offset 40, checksum (UInt128) at offset 48.
 corrupt_header_field() # $1 = offset of the UInt64 field, $2 = the 8 replacement bytes
 {
     find "${CACHE_DIR}" -type f -name '0_*' | while read -r file

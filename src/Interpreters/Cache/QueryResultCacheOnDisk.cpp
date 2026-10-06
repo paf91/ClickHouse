@@ -23,6 +23,7 @@
 #include <Common/Exception.h>
 #include <Common/ProfileEvents.h>
 #include <Common/SipHash.h>
+#include <Common/config_version.h>
 #include <Common/formatReadable.h>
 #include <Common/transformEndianness.h>
 #include <Common/logger_useful.h>
@@ -59,7 +60,7 @@ namespace ErrorCodes
 namespace
 {
 
-/// On-disk entry layout, version 5:
+/// On-disk entry layout, version 6:
 ///
 ///     Fixed header (FIXED_HEADER_SIZE bytes):
 ///         char[8]  magic "QRCache1"
@@ -68,6 +69,7 @@ namespace
 ///         UInt64   total entry size in bytes, including the fixed header
 ///         UInt64   created_at, seconds since epoch
 ///         UInt64   expires_at, seconds since epoch
+///         UInt64   fingerprint of the server build which wrote the entry (see `getServerBuildFingerprint`)
 ///         UInt128  SipHash-128 of the preceding fixed header bytes and of everything after the fixed header. The freshness
 ///                  fields are authenticated as well: a corruption of `expires_at` or `total_size` alone would otherwise
 ///                  silently change how long the entry is served, without ever failing the integrity check.
@@ -92,9 +94,9 @@ namespace
 ///         Per column of the header: UInt8 is_const, then a single-column Native block (the data column of a Const column with
 ///         one row, the column itself with `number of rows` rows otherwise)
 constexpr char ENTRY_MAGIC[8] = {'Q', 'R', 'C', 'a', 'c', 'h', 'e', '1'};
-constexpr UInt32 ENTRY_FORMAT_VERSION = 5;
+constexpr UInt32 ENTRY_FORMAT_VERSION = 6;
 constexpr size_t FIXED_HEADER_SIZE
-    = sizeof(ENTRY_MAGIC) + sizeof(UInt32) + sizeof(UInt32) + sizeof(UInt64) + sizeof(UInt64) + sizeof(UInt64) + sizeof(UInt128);
+    = sizeof(ENTRY_MAGIC) + sizeof(UInt32) + sizeof(UInt32) + sizeof(UInt64) + sizeof(UInt64) + sizeof(UInt64) + sizeof(UInt64) + sizeof(UInt128);
 constexpr size_t TOTAL_SIZE_OFFSET_IN_FIXED_HEADER = sizeof(ENTRY_MAGIC) + sizeof(UInt32) + sizeof(UInt32);
 constexpr size_t CHECKSUM_OFFSET_IN_FIXED_HEADER = FIXED_HEADER_SIZE - sizeof(UInt128);
 
@@ -104,6 +106,23 @@ constexpr size_t CHECKSUM_OFFSET_IN_FIXED_HEADER = FIXED_HEADER_SIZE - sizeof(UI
 /// from its lowest bits, both of which must keep varying. The remaining 96 bits of hash are plenty to keep the entries apart. A key
 /// of other data carries the marker by chance with probability 2^-32; such a key is still recognized as foreign by its content.
 constexpr UInt32 KEY_MARKER = 0x51524343;
+
+/// The entries survive restarts and can be shared between servers, but a result is only valid for the server build which computed
+/// it: a newer or older build may compute a different result for the same query (fixes of functions or of the planner, changed
+/// defaults), even when neither the TCP protocol revision nor the entry format changes. So every entry records the build which wrote
+/// it, and an entry of another build is treated like an entry of an incompatible format: it is never served, and it is overwritten
+/// on the next write.
+UInt64 getServerBuildFingerprint()
+{
+    static const UInt64 fingerprint = []
+    {
+        SipHash hash;
+        hash.update(std::string_view(VERSION_DESCRIBE));
+        hash.update(std::string_view(VERSION_GITHASH));
+        return hash.get64();
+    }();
+    return fingerprint;
+}
 
 bool hasKeyMarker(const FileCacheKey & cache_key)
 {
@@ -306,10 +325,12 @@ std::optional<QueryResultCacheOnDisk::FixedHeader> QueryResultCacheOnDisk::parse
     readBinaryLittleEndian(header.total_size, in);
     readBinaryLittleEndian(header.created_at, in);
     readBinaryLittleEndian(header.expires_at, in);
+    readBinaryLittleEndian(header.server_build_fingerprint, in);
     readBinaryLittleEndian(header.checksum, in);
 
     if (header.format_version != ENTRY_FORMAT_VERSION
         || header.protocol_revision > DBMS_TCP_PROTOCOL_VERSION
+        || header.server_build_fingerprint != getServerBuildFingerprint()
         || header.total_size < FIXED_HEADER_SIZE)
         return std::nullopt;
 
@@ -442,6 +463,7 @@ void QueryResultCacheOnDisk::write(const QueryResultCache::Key & key, const Quer
         writeBinaryLittleEndian(static_cast<UInt64>(0), out); /// total size, patched below
         writeBinaryLittleEndian(static_cast<UInt64>(std::chrono::system_clock::to_time_t(key.created_at)), out);
         writeBinaryLittleEndian(static_cast<UInt64>(std::chrono::system_clock::to_time_t(key.expires_at)), out);
+        writeBinaryLittleEndian(getServerBuildFingerprint(), out);
         writeBinaryLittleEndian(UInt128(0), out); /// checksum, patched below
 
         writeBinaryLittleEndian(static_cast<UInt8>(key.is_shared), out);

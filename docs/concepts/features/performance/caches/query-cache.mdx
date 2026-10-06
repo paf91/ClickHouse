@@ -251,7 +251,8 @@ be marked accessible by other users (i.e. shared) by supplying setting
 
 By default, the query cache keeps its entries in memory. Additionally, query results can be cached on disk, backed by a
 [filesystem cache](/concepts/features/configuration/server-config/storing-data#using-local-cache). Compared to the in-memory query cache, the query cache on
-disk provides more space and survives server restarts.
+disk provides more space and survives server restarts. An entry is only served by the same server build which wrote it: after an
+upgrade or a downgrade, the entries written by the previous build are cache misses, and they are overwritten or evicted eventually.
 
 To use the query cache on disk, first configure a filesystem cache in the `filesystem_caches` section of the server configuration:
 
