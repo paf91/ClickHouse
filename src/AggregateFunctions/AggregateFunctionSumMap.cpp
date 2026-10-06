@@ -35,10 +35,29 @@ namespace ErrorCodes
 namespace
 {
 
+/// Orders exactly like `Field::operator<`, comparing integer keys without calling it.
+struct FieldLess
+{
+    bool operator()(const Field & lhs, const Field & rhs) const
+    {
+        UInt64 lhs_uint = 0;
+        UInt64 rhs_uint = 0;
+        if (lhs.tryGet(lhs_uint) && rhs.tryGet(rhs_uint))
+            return lhs_uint < rhs_uint;
+
+        Int64 lhs_int = 0;
+        Int64 rhs_int = 0;
+        if (lhs.tryGet(lhs_int) && rhs.tryGet(rhs_int))
+            return lhs_int < rhs_int;
+
+        return lhs < rhs;
+    }
+};
+
 struct AggregateFunctionMapData
 {
     // Map needs to be ordered to maintain function properties
-    MapWithMemoryTracking<Field, Array> merged_maps;
+    MapWithMemoryTracking<Field, Array, FieldLess> merged_maps;
 };
 
 /** Aggregate function, that takes at least two arguments: keys and values, and as a result, builds a tuple of at least 2 arrays -
@@ -524,7 +543,7 @@ private:
     using Self = AggregateFunctionSumMapFiltered<overflow, tuple_argument>;
     using Base = AggregateFunctionMapBase<Self, FieldVisitorSum, overflow, tuple_argument, true>;
 
-    using ContainerT = SetWithMemoryTracking<Field>;
+    using ContainerT = SetWithMemoryTracking<Field, FieldLess>;
     ContainerT keys_to_keep;
 
 public:
