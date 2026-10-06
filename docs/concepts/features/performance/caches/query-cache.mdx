@@ -84,7 +84,8 @@ cache as a whole: with the query cache on disk enabled (see below), a query that
 one "QueryCacheHits", and a query that misses in both backends counts as one "QueryCacheMisses". Field `query_cache_usage`
 in system table [system.query_log](/reference/system-tables/query_log) shows for each executed query whether the query result was written into or
 read from the query cache. Metrics `QueryCacheEntries` and `QueryCacheBytes` in system table
-[system.metrics](/reference/system-tables/metrics) show how many entries / bytes the query cache currently contains.
+[system.metrics](/reference/system-tables/metrics) show how many entries / bytes the in-memory query cache currently contains. They do
+not account for the entries of the [query cache on disk](#query-cache-on-disk), which currently has no occupancy metrics.
 
 The query cache exists once per ClickHouse server process. However, cache results are by default not shared between users. This can be
 changed (see below) but doing so is not recommended for security reasons.
@@ -313,7 +314,8 @@ filesystem cache has already evicted the beginning of an entry, the remainder of
 evicts it or the same query result is written again, but it is never served. An entry
 which is still being written is left in place as well. Statement `SYSTEM DROP FILESYSTEM CACHE '<name>'` removes them together
 with everything else in the filesystem cache. System table
-[system.query_cache](/reference/system-tables/query_cache) shows only the entries of the in-memory query cache. The number of query
+[system.query_cache](/reference/system-tables/query_cache) and metrics `QueryCacheEntries` and `QueryCacheBytes` show only the
+entries of the in-memory query cache. The number of query
 cache hits and misses on disk are shown as events "QueryCacheOnDiskHits" and "QueryCacheOnDiskMisses" in system table
 [system.events](/reference/system-tables/events). These are the breakdown of the on-disk backend alone, whereas "QueryCacheHits" and
 "QueryCacheMisses" stay the counters of the query cache as a whole, and "QueryCacheAgeSeconds" accounts for hits of both backends. The
