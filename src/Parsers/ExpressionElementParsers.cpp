@@ -2216,6 +2216,10 @@ bool ParserColumnsTransformers::parseImpl(Pos & pos, ASTPtr & node, Expected & e
                 if (ParserIdentifier().parse(after_name, name, expected) && getIdentifierName(name) == "lambda"
                     && after_name->type == TokenType::OpeningRoundBracket && ParserFunction().parse(pos, lambda, expected))
                     func = lambda->as<ASTFunction>();
+
+                /// Only the plain call: a lambda drops parameters, `RESPECT NULLS`/`IGNORE NULLS` and `OVER`.
+                if (func && (func->parameters || func->getNullsAction() != NullsAction::EMPTY || func->isWindowFunction()))
+                    func = nullptr;
             }
 
             if (func && func->name == "lambda")
