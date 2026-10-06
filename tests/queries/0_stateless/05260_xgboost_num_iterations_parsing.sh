@@ -25,7 +25,7 @@ do
     if [ "${value}" = "2147483647" ]; then
         extra="not_a_training_param 1"
     fi
-    $CLICKHOUSE_CLIENT --enable_xgboost 1 --multiquery "
+    $CLICKHOUSE_CLIENT --enable_xgboost=1 --multiquery "
     DROP DICTIONARY IF EXISTS model_05260;
     CREATE DICTIONARY model_05260 (x1 Float64, x2 Float64, y Float64)
     PRIMARY KEY (x1, x2) SOURCE(CLICKHOUSE(TABLE 'training_05260'))
