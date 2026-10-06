@@ -1174,8 +1174,9 @@ because the rows with non-matching values are guaranteed to be filtered out by `
 
 The filter is disabled adaptively at runtime if it turns out to be non-selective.
 
-Also allows the `WHERE` to `PREWHERE` optimization to move such conditions even when they use all queried columns
-(normally that is pointless, but with this setting the scan itself becomes cheaper).
+Also allows the `WHERE` to `PREWHERE` optimization to move substring search conditions (`LIKE`, `position`, `startsWith`, `endsWith`)
+even when they use all queried columns (normally that is pointless, but with this setting the scan itself becomes cheaper).
+Equality with a constant string is not moved for this reason: it is still applied during the scan when it is already in `PREWHERE`.
 
 Supported for reading from `MergeTree` tables and from the `Parquet` format.
 
