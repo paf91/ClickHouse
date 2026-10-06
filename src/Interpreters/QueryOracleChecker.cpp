@@ -182,6 +182,9 @@ const std::unordered_set<String> non_deterministic_functions = {
     "groupArrayIntersect",
     "groupArrayMovingSum", "groupArrayMovingAvg",
     "groupArraySorted", "groupArrayLast",
+    "groupArraySample", "groupFormat", "hierarchicalKMeans", "MVTEncode",
+    /// Events with equal timestamps are matched in arrival order.
+    "sequenceMatch", "sequenceCount", "sequenceMatchEvents",
     /// `argMin`/`argMax`/`groupConcat` are order-dependent on ties: the
     /// `State`/`Merge`, DQP and subquery-rewrite paths can legitimately
     /// pick a different "arg" value or concatenation order than direct
@@ -2243,6 +2246,12 @@ bool QueryOracleChecker::checkTLPAggregate(const ASTSelectQuery & select, const 
                 const auto * agg_func = aggregate_ast->as<ASTFunction>();
                 String alias = agg_to_alias[agg_func];
                 auto merge_func = makeASTFunction(agg_func->name + "Merge", make_intrusive<ASTIdentifier>(alias));
+                /// A `-Merge` function takes its parameters from its own call, not from the state.
+                if (agg_func->parameters)
+                {
+                    merge_func->parameters = agg_func->parameters->clone();
+                    merge_func->children.push_back(merge_func->parameters);
+                }
                 outer_select_list->children.push_back(std::move(merge_func));
                 is_aggregate = true;
                 break;
