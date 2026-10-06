@@ -647,7 +647,7 @@ private:
             if (index_header.columns() != 1 || used_index_columns.contains(index_header.begin()->name))
                 continue;
 
-            auto search_query = text_index_condition.createTextSearchQuery(canonical_node);
+            auto search_query = text_index_condition.createTextSearchQuery(canonical_node, /*allow_drop_nullable=*/ true);
             if (!search_query)
                 continue;
 
@@ -661,9 +661,12 @@ private:
 
             /// Use direct read only when enabled and the entry is direct-read-eligible (has `index`) and has no
             /// patched parts. Otherwise just inject the tokenizer/preprocessor/postprocessor (no virtual column),
-            /// same as None mode.
+            /// same as None mode. Direct read replaces or short-circuits the predicate, so it must not look through
+            /// a `CAST` that drops `Nullable`: `NOT hasToken(CAST(s, 'String'), 'a')` would return the NULL row
+            /// instead of throwing.
             if (!direct_read_from_text_index || !info.index || info.has_patched_parts
-                || search_query->getDirectReadMode() == TextIndexDirectReadMode::None)
+                || search_query->getDirectReadMode() == TextIndexDirectReadMode::None
+                || !text_index_condition.createTextSearchQuery(canonical_node, /*allow_drop_nullable=*/ false))
             {
                 selected_conditions.emplace_back(search_query, index_name, String{}, &info, is_index_analyzed);
                 used_index_columns.insert(index_header.begin()->name);

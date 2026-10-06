@@ -17,3 +17,7 @@ Granules: 1/4
 5
 -- the granule with NULL is skipped, so the query does not throw
 5
+-- the text index is not read directly instead of a cast that throws on NULL
+0
+5
+1

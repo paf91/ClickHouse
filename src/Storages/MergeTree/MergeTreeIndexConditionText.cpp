@@ -248,7 +248,7 @@ MergeTreeIndexConditionText::MergeTreeIndexConditionText(
         context_,
         [&](const RPNBuilderTreeNode & node, RPNElement & out)
         {
-            return this->traverseAtomNode(node, out);
+            return this->traverseAtomNode(node, out, /*allow_drop_nullable=*/ true);
         }).extractRPN());
 
     NameSet all_search_tokens_set;
@@ -418,12 +418,12 @@ TextIndexDirectReadMode MergeTreeIndexConditionText::getDirectReadMode(const Str
     return TextIndexDirectReadMode::None;
 }
 
-TextSearchQueryPtr MergeTreeIndexConditionText::createTextSearchQuery(const ActionsDAG::Node & node) const
+TextSearchQueryPtr MergeTreeIndexConditionText::createTextSearchQuery(const ActionsDAG::Node & node, bool allow_drop_nullable) const
 {
     RPNElement rpn_element;
     RPNBuilderTreeNode rpn_node(&node, getContext());
 
-    if (!traverseAtomNode(rpn_node, rpn_element))
+    if (!traverseAtomNode(rpn_node, rpn_element, allow_drop_nullable))
         return nullptr;
 
     if (rpn_element.text_search_queries.size() != 1)
@@ -720,7 +720,7 @@ bool MergeTreeIndexConditionText::hasSearchPatterns() const
     return std::ranges::any_of(all_search_queries, [](const auto & query) { return !query.second->getPatterns().empty(); });
 }
 
-bool MergeTreeIndexConditionText::traverseAtomNode(const RPNBuilderTreeNode & node, RPNElement & out) const
+bool MergeTreeIndexConditionText::traverseAtomNode(const RPNBuilderTreeNode & node, RPNElement & out, bool allow_drop_nullable) const
 {
     {
         Field const_value;
@@ -792,7 +792,7 @@ bool MergeTreeIndexConditionText::traverseAtomNode(const RPNBuilderTreeNode & no
                 String rewritten = likePatternWithCustomEscapeToLikePattern(
                     pattern_field.safeGet<String>(), escape_str[0]);
                 Field rewritten_field(std::move(rewritten));
-                if (traverseFunctionNode(function, lhs_argument, pattern_type, rewritten_field, out))
+                if (traverseFunctionNode(function, lhs_argument, pattern_type, rewritten_field, out, allow_drop_nullable))
                     return true;
             }
             return false;
@@ -819,7 +819,7 @@ bool MergeTreeIndexConditionText::traverseAtomNode(const RPNBuilderTreeNode & no
 
         if ((function_name == "in" || function_name == "globalIn"
              || function_name == "nullIn" || function_name == "globalNullIn")
-            && tryPrepareSetForTextSearch(lhs_argument, rhs_argument, function_name, out))
+            && tryPrepareSetForTextSearch(lhs_argument, rhs_argument, function_name, out, allow_drop_nullable))
         {
             out.function = RPNElement::FUNCTION_HAS_ANY_ELEMENTS;
             return true;
@@ -831,12 +831,12 @@ bool MergeTreeIndexConditionText::traverseAtomNode(const RPNBuilderTreeNode & no
 
             if (rhs_argument.tryGetConstant(const_value, const_type))
             {
-                if (traverseFunctionNode(function, lhs_argument, const_type, const_value, out))
+                if (traverseFunctionNode(function, lhs_argument, const_type, const_value, out, allow_drop_nullable))
                     return true;
             }
             else if (lhs_argument.tryGetConstant(const_value, const_type) && function_name == "equals")
             {
-                if (traverseFunctionNode(function, rhs_argument, const_type, const_value, out))
+                if (traverseFunctionNode(function, rhs_argument, const_type, const_value, out, allow_drop_nullable))
                     return true;
             }
         }
@@ -1216,13 +1216,14 @@ bool MergeTreeIndexConditionText::traverseFunctionNode(
     const RPNBuilderTreeNode & argument_node,
     DataTypePtr value_type,
     Field value_field,
-    RPNElement & out) const
+    RPNElement & out,
+    bool allow_drop_nullable) const
 {
     const String function_name = function_node.getFunctionName();
     auto direct_read_mode = getDirectReadMode(function_name);
 
     /// The index knows the expression under the conversion, e.g. `m.key_<key>` in `equals(_CAST(m.key_<key>, 'String'), 'value')`.
-    const auto index_column_node = unwrapLosslessConversion(argument_node);
+    const auto index_column_node = unwrapLosslessConversion(argument_node, allow_drop_nullable);
 
     /// The builders below tokenize a string needle or expect an index on `mapKeys` / `mapValues` / a JSON
     /// path. Partition hard, so none of them can emit a token in the pair format.
@@ -2207,7 +2208,8 @@ bool MergeTreeIndexConditionText::tryPrepareSetForTextSearch(
     const RPNBuilderTreeNode & lhs,
     const RPNBuilderTreeNode & rhs,
     const String & function_name,
-    RPNElement & out) const
+    RPNElement & out,
+    bool allow_drop_nullable) const
 {
     std::optional<size_t> set_key_position;
 
@@ -2216,7 +2218,7 @@ bool MergeTreeIndexConditionText::tryPrepareSetForTextSearch(
 
     auto has_index = [&](const RPNBuilderTreeNode & argument)
     {
-        const auto node = unwrapLosslessConversion(argument);
+        const auto node = unwrapLosslessConversion(argument, allow_drop_nullable);
         if (hasIndexForMapElementValue(node))
         {
             has_index_for_map_element_value = true;
