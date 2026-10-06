@@ -55,3 +55,25 @@ ALTER TABLE t_many_aliases ADD COLUMN c2 UInt64 ALIAS c1 + m['k2'];
 INSERT INTO t_many_aliases VALUES (1, {'k1': 1, 'k2': 2});
 SELECT c2, c0 FROM t_many_aliases;
 DROP TABLE t_many_aliases;
+
+-- A matcher does not analyze an ALIAS column removed by `EXCEPT` or substituted by `REPLACE`.
+-- The dictionary of the ALIAS expression is dropped, so the analysis of this column fails.
+DROP TABLE IF EXISTS t_alias_dict;
+DROP DICTIONARY IF EXISTS d_alias_dict;
+DROP TABLE IF EXISTS t_alias_dict_src;
+CREATE TABLE t_alias_dict_src (id UInt64, v String) ENGINE = Memory;
+CREATE DICTIONARY d_alias_dict (id UInt64, v String) PRIMARY KEY id SOURCE(CLICKHOUSE(TABLE 't_alias_dict_src')) LAYOUT(FLAT()) LIFETIME(0);
+CREATE TABLE t_alias_dict (id UInt64, x UInt64, al String ALIAS dictGet('d_alias_dict', 'v', id)) ENGINE = MergeTree ORDER BY id;
+INSERT INTO t_alias_dict VALUES (1, 10);
+DROP DICTIONARY d_alias_dict SETTINGS check_table_dependencies = 0;
+
+SET asterisk_include_alias_columns = 1;
+SELECT * EXCEPT (al) FROM t_alias_dict;
+SELECT * EXCEPT STRICT (al) FROM t_alias_dict;
+SELECT * REPLACE ('r' AS al) FROM t_alias_dict;
+SELECT COLUMNS('^(id|al)$') EXCEPT (al) FROM t_alias_dict;
+SELECT * FROM t_alias_dict; -- { serverError BAD_ARGUMENTS }
+SELECT * APPLY toString EXCEPT (al) FROM t_alias_dict; -- { serverError BAD_ARGUMENTS }
+
+DROP TABLE t_alias_dict;
+DROP TABLE t_alias_dict_src;
