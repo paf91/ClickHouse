@@ -3423,9 +3423,26 @@ DataPartsVector StorageMergeTree::renameAndCommitEmptyParts(MutableDataPartsVect
                 }
             }
             if (!not_removed_parts.empty())
-                LOG_ERROR(log, "Cannot remove the rolled back empty parts {}. They stay on disk and will be loaded as covering"
+            {
+                /// Put the warning into the error returned to the client as well, because only a manual detach fixes it.
+                String warning = fmt::format("Cannot remove the rolled back empty parts {}. They stay on disk and will be loaded as covering"
                     " parts after a restart, which can make the table fail to load. Detach them manually.",
                     fmt::join(not_removed_parts, ", "));
+                LOG_ERROR(log, "{}", warning);
+                try
+                {
+                    throw;
+                }
+                catch (Exception & e)
+                {
+                    e.addMessage(warning);
+                    throw;
+                }
+                catch (...)
+                {
+                    throw Exception(getCurrentExceptionCode(), "{}. {}", getCurrentExceptionMessage(false), warning);
+                }
+            }
         }
         throw;
     }
