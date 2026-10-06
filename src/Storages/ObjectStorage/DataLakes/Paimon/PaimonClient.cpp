@@ -302,19 +302,25 @@ std::optional<Int64> PaimonTableClient::getEarliestSnapshotId()
         Int64 hinted_version = -1;
         const auto * end = hint_version_string.data() + hint_version_string.size();
         auto [ptr, ec] = std::from_chars(hint_version_string.data(), end, hinted_version);
+
+        /// Malformed content (e.g. a partially overwritten hint) only makes the hint unusable,
+        /// like a stale one: it is not an error, because the directory listing below decides.
+        /// Errors reading the storage are not caught here - without the storage nothing decides.
         if (ec != std::errc() || ptr != end || hinted_version <= 0 || hinted_version == std::numeric_limits<Int64>::max())
         {
-            throw Exception(
-                ErrorCodes::CANNOT_PARSE_NUMBER, "The Paimon snapshot hint file content: {} is invalid.", hint_version_string);
+            LOG_WARNING(log, "The Paimon EARLIEST hint file content '{}' is invalid, falling back to snapshot listing",
+                hint_version_string);
         }
-
-        StoredObject hinted_object(snapshot_dir / (PAIMON_SNAPSHOT_PREFIX + std::to_string(hinted_version)));
-        StoredObject previous_object(snapshot_dir / (PAIMON_SNAPSHOT_PREFIX + std::to_string(hinted_version - 1)));
-        if (object_storage->exists(hinted_object) && !object_storage->exists(previous_object))
-            return hinted_version;
+        else
+        {
+            StoredObject hinted_object(snapshot_dir / (PAIMON_SNAPSHOT_PREFIX + std::to_string(hinted_version)));
+            StoredObject previous_object(snapshot_dir / (PAIMON_SNAPSHOT_PREFIX + std::to_string(hinted_version - 1)));
+            if (object_storage->exists(hinted_object) && !object_storage->exists(previous_object))
+                return hinted_version;
+        }
     }
 
-    /// The hint is missing or stale - the snapshot directory is the source of truth.
+    /// The hint is missing, malformed or stale - the snapshot directory is the source of truth.
     auto snapshot_files = listFiles(
         *object_storage,
         table_location,
