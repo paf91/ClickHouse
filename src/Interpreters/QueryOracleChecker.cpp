@@ -184,12 +184,12 @@ const std::unordered_set<String> non_deterministic_functions = {
     "groupArraySorted", "groupArrayLast",
     "groupArraySample", "groupFormat", "hierarchicalKMeans", "MVTEncode",
     /// Events with equal timestamps are matched in arrival order.
-    "sequenceMatch", "sequenceCount", "sequenceMatchEvents",
+    "sequenceMatch", "sequenceCount", "sequenceMatchEvents", "sequenceNextNode",
     /// `argMin`/`argMax`/`groupConcat` are order-dependent on ties: the
     /// `State`/`Merge`, DQP and subquery-rewrite paths can legitimately
     /// pick a different "arg" value or concatenation order than direct
     /// evaluation, so exact row equality is wrong here.
-    "argMin", "argMax", "groupConcat",
+    "argMin", "argMax", "argAndMin", "argAndMax", "groupConcat",
     /// Approximate/formatting-dependent aggregates.
     "entropy", "exponentialMovingAverage", "exponentialTimeDecayedAvg",
     "simpleLinearRegression", "sparkBar", "histogram",
