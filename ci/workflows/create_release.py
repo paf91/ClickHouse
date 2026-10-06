@@ -8,7 +8,8 @@ robot_token_secret = Secret.Config(
 )
 
 release_job = Job.Config(
-    name="CreateRelease",
+    # Differs from the workflow name: both results share one S3 key otherwise
+    name="Create Release",
     runs_on=["self-hosted", "amd-release-maker"],
     command="PYTHONPATH=. python3 ./ci/jobs/release_job.py",
     timeout=2 * 3600,

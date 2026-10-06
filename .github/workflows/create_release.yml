@@ -106,10 +106,10 @@ jobs:
           . ./ci/tmp/praktika_setup_env.sh
           PYTHONUNBUFFERED=1 python3 -m praktika run 'Config Workflow' --workflow "CreateRelease" --ci --timestamp
 
-  createrelease:
+  create_release:
     runs-on: [self-hosted, amd-release-maker]
     needs: [config_workflow]
-    name: "CreateRelease"
+    name: "Create Release"
     outputs:
       data: ${{ steps.run.outputs.DATA }}
       pipeline_status: ${{ steps.run.outputs.pipeline_status || 'undefined' }}
@@ -143,4 +143,4 @@ jobs:
         id: run
         run: |
           . ./ci/tmp/praktika_setup_env.sh
-          PYTHONUNBUFFERED=1 python3 -m praktika run 'CreateRelease' --workflow "CreateRelease" --ci --timestamp
+          PYTHONUNBUFFERED=1 python3 -m praktika run 'Create Release' --workflow "CreateRelease" --ci --timestamp
