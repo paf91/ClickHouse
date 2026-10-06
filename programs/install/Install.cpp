@@ -975,21 +975,16 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
             else
             {
                 /// The first XML users config is a relative path only if it does not exist in the config directory.
-                /// For the stock `users.xml` (or its YAML counterparts `users.yaml` and `users.yml`) it is created there below,
+                /// For the stock `users.xml` it is created there below, as `clickhouse install` always did,
                 /// and then the server resolves the path to it the same way as above, as it checks the config directory first.
-                /// This keeps the stock layouts working.
-                /// Any other relative path may intentionally point to a file in the working directory of the server,
-                /// and creating it in the config directory would silently switch the server to the new file.
+                /// This keeps the stock layout working.
+                /// Any other relative path (including `users.yaml` and `users.yml`) may intentionally point to a file
+                /// in the working directory of the server, and creating it in the config directory would silently switch
+                /// the server to the new file.
                 if (users_config_files.front().is_relative())
                 {
                     const fs::path first_users_config = users_config_files.front().lexically_normal();
-                    /// The extension is compared case-insensitively, like `ConfigProcessor::parseConfig` does.
-                    std::string first_users_config_extension = first_users_config.extension().string();
-                    toLowerASCII(first_users_config_extension);
-                    const bool is_stock_users_config = !first_users_config.has_parent_path() && first_users_config.stem() == "users"
-                        && (first_users_config_extension == ".xml" || first_users_config_extension == ".yaml"
-                            || first_users_config_extension == ".yml");
-                    if (is_stock_users_config)
+                    if (first_users_config == "users.xml")
                         users_config_files.front() = (config_dir / first_users_config).lexically_normal();
                     else
                         unresolved_users_config_file = users_config_files.front();
