@@ -94,6 +94,10 @@ select count() from file(currentDatabase() || '_05241_u32big.parquet', Parquet, 
 select count() from file(currentDatabase() || '_05241_i32ts.parquet', Parquet, 'x Date32')
     where x = toDate32(toDateTime(2000000000))
     settings input_format_parquet_filter_push_down = 0, input_format_parquet_page_filter_push_down = 0;
+-- The same column read as Time, which clamps a value that wide at 999:59:59.
+select count() from file(currentDatabase() || '_05241_i32ts.parquet', Parquet, 'x Time')
+    where x = CAST(2000000000, 'Time')
+    settings input_format_parquet_filter_push_down = 0, input_format_parquet_page_filter_push_down = 0;
 
 -- The Nullable wrapper must not hide the narrowing underneath it.
 select count() from file(currentDatabase() || '_05241_u32.parquet', Parquet, 'x Nullable(UInt16)')
@@ -256,6 +260,28 @@ select count() from file(currentDatabase() || '_05241_c_i8.parquet', Parquet, 'x
 select count() from file(currentDatabase() || '_05241_c_i8.parquet', Parquet, 'x Date32')
     where x = toDate32(100)
     settings log_comment = 'hfilter_b_11_i8_date32', input_format_parquet_filter_push_down = 0,
+             input_format_parquet_page_filter_push_down = 0, input_format_parquet_bloom_filter_push_down = 1,
+             input_format_parquet_dictionary_filter_push_down = 0;
+
+-- Time keeps a value of at most 16 bits as it is, and an Interval is a 64-bit integer.
+select count() from file(currentDatabase() || '_05241_c_u8.parquet', Parquet, 'x Time')
+    where x = CAST(200, 'Time')
+    settings log_comment = 'hfilter_d_19_u8_time', input_format_parquet_filter_push_down = 0,
+             input_format_parquet_page_filter_push_down = 0, input_format_parquet_bloom_filter_push_down = 0,
+             input_format_parquet_dictionary_filter_push_down = 1048576;
+select count() from file(currentDatabase() || '_05241_c_u8.parquet', Parquet, 'x Time')
+    where x = CAST(200, 'Time')
+    settings log_comment = 'hfilter_b_19_u8_time', input_format_parquet_filter_push_down = 0,
+             input_format_parquet_page_filter_push_down = 0, input_format_parquet_bloom_filter_push_down = 1,
+             input_format_parquet_dictionary_filter_push_down = 0;
+select count() from file(currentDatabase() || '_05241_c_i64.parquet', Parquet, 'x IntervalSecond')
+    where x = toIntervalSecond(3500)
+    settings log_comment = 'hfilter_d_20_i64_interval', input_format_parquet_filter_push_down = 0,
+             input_format_parquet_page_filter_push_down = 0, input_format_parquet_bloom_filter_push_down = 0,
+             input_format_parquet_dictionary_filter_push_down = 1048576;
+select count() from file(currentDatabase() || '_05241_c_i64.parquet', Parquet, 'x IntervalSecond')
+    where x = toIntervalSecond(3500)
+    settings log_comment = 'hfilter_b_20_i64_interval', input_format_parquet_filter_push_down = 0,
              input_format_parquet_page_filter_push_down = 0, input_format_parquet_bloom_filter_push_down = 1,
              input_format_parquet_dictionary_filter_push_down = 0;
 

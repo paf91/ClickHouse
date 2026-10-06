@@ -938,9 +938,10 @@ struct RequestedIntegerSpace
 {
     size_t bits;
     bool is_signed;
-    /// Converting into `Date`/`Date32`/`DateTime`/`Enum*`/`IPv4` clamps or rescales instead of wrapping modulo 2^bits.
+    /// Converting into `Date`/`Date32`/`DateTime`/`Enum*`/`IPv4`/`Time` clamps or rescales instead of wrapping modulo 2^bits.
     bool is_native_integer;
     /// The integer -> date CAST reads a value fitting in 16 bits as a day number, and a wider one as a Unix timestamp.
+    /// The one to `Time` keeps a 16-bit value and clamps a wider one at 999:59:59.
     bool source_must_fit_in_16_bits;
 };
 
@@ -957,8 +958,11 @@ std::optional<RequestedIntegerSpace> getRequestedIntegerSpace(const IDataType & 
         return RequestedIntegerSpace{16, true, false, false};
     if (which.isDate())
         return RequestedIntegerSpace{16, false, false, true};
-    if (which.isDate32())
+    if (which.isDate32() || which.isTime())
         return RequestedIntegerSpace{32, true, false, true};
+    /// The integer CAST to an `Interval*` is a plain conversion to its `Int64`.
+    if (which.isInterval())
+        return RequestedIntegerSpace{64, true, true, false};
     /// No constant of any other type reaches `tryHashInt`'s `Int64`/`UInt64`/`IPv4` `Field` cases.
     return {};
 }
