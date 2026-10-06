@@ -1,4 +1,4 @@
--- Checks `automatic_parallel_replicas_max_replicated_read_ratio`: a candidate that wins the cost
+-- Checks `automatic_parallel_replicas_max_duplicated_read_ratio`: a candidate that wins the cost
 -- model's time comparison is still declined when too much of the reading is repeated by every
 -- replica. Only the coordinated read is split; the build side below is read in full on every
 -- replica, so distributing this query would multiply that work without making the query faster.
@@ -43,7 +43,7 @@ FORMAT Null SETTINGS log_comment = 'ratio_gate_2_at_default';
 
 -- Taken with the gate disabled, which is what makes the row above meaningful: the candidate is
 -- otherwise worth taking, so the default ratio is the only reason it was declined.
-SET automatic_parallel_replicas_max_replicated_read_ratio = 1;
+SET automatic_parallel_replicas_max_duplicated_read_ratio = 1;
 SELECT sum(p.id + b.id) FROM probe_side AS p INNER JOIN build_side AS b ON p.id = b.id
 FORMAT Null SETTINGS log_comment = 'ratio_gate_3_disabled';
 

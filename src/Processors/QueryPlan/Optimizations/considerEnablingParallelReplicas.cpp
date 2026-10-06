@@ -187,7 +187,7 @@ QueryPlan::Node * findTopNodeOfReplicasPlan(QueryPlan::Node * plan_with_parallel
 /// to estimate whether parallel replicas will be beneficial for the query or not. For that, we need to estimate how much data
 /// replicas will send to the initiator. To do that, we found the node that will be at the top of replicas plan (e.g. Aggregating step in the example above),
 /// and ask it collect statistics on the number of bytes it'd send to the initiator if we executed the query with parallel replicas.
-std::pair<const QueryPlan::Node *, size_t> findCorrespondingNodeInSingleNodePlan(
+std::pair<QueryPlan::Node *, size_t> findCorrespondingNodeInSingleNodePlan(
     const QueryPlan::Node & final_node_in_replica_plan,
     QueryPlan::Node & parallel_replicas_plan_root,
     QueryPlan::Node & single_replica_plan_root)
@@ -204,7 +204,7 @@ std::pair<const QueryPlan::Node *, size_t> findCorrespondingNodeInSingleNodePlan
         /// chain shares. A wrapper above it measures something else: an `Aggregating` with a rename over
         /// it is such a chain, and the aggregation records the partial states the replicas ship where
         /// the rename above it already sees finalized values.
-        const QueryPlan::Node * matched_node = nullptr;
+        QueryPlan::Node * matched_node = nullptr;
         Stack traversal_stack;
         const auto key_of = [&](const QueryPlan::Node & node) -> std::optional<UInt64>
         {
@@ -223,7 +223,7 @@ std::pair<const QueryPlan::Node *, size_t> findCorrespondingNodeInSingleNodePlan
 
         if (matched_node)
         {
-            const QueryPlan::Node * above = nullptr;
+            QueryPlan::Node * above = nullptr;
             while (matched_node->children.size() == 1 && key_of(*matched_node->children.front()) == it->second)
             {
                 above = matched_node;
@@ -380,25 +380,21 @@ ReadFromMergeTree * findReadingStep(
     return nullptr;
 }
 
-/// Every read of a subtree, lazy halves included, for a plan we only navigate - the steps it returns are
-/// still mutable, because a node's constness does not reach through its `shared_ptr` to the step. Needed
-/// because the single-node plan is reached through a `const` node. Unlike `collectReadingSteps` it also
-/// returns `LazilyReadFromMergeTree`: a lazy half reads as much as the step it belongs to, often more, and
-/// under parallel replicas every replica performs it.
-std::vector<IQueryPlanStep *> collectReadStepsOfConstPlan(const QueryPlan::Node & root)
+/// Unlike `collectReadingSteps` it also returns `LazilyReadFromMergeTree`: a lazy half reads as much as the
+/// step it belongs to, often more, and under parallel replicas every replica performs it.
+std::vector<IQueryPlanStep *> collectReadSteps(QueryPlan::Node & root)
 {
+    Stack stack;
     std::vector<IQueryPlanStep *> read_steps;
-    std::vector<const QueryPlan::Node *> stack{&root};
-    while (!stack.empty())
-    {
-        const auto * node = stack.back();
-        stack.pop_back();
-        auto * step = node->step.get();
-        if (typeid_cast<ReadFromMergeTree *>(step) || typeid_cast<LazilyReadFromMergeTree *>(step))
-            read_steps.push_back(step);
-        for (const auto * child : node->children)
-            stack.push_back(child);
-    }
+    traverseQueryPlan(
+        stack,
+        root,
+        [&](auto & frame_node)
+        {
+            auto * step = frame_node.step.get();
+            if (typeid_cast<ReadFromMergeTree *>(step) || typeid_cast<LazilyReadFromMergeTree *>(step))
+                read_steps.push_back(step);
+        });
     return read_steps;
 }
 
@@ -895,24 +891,24 @@ void considerEnablingParallelReplicas(
             /// cannot see it, because the term cancels on both sides. Decline a query that would spend
             /// more of the cluster on reading than the setting allows, however the time comparison turned
             /// out. The ratio is deliberately independent of `num_replicas`: it asks what share of the
-            /// reading is replicated, not how much work that adds up to, so adding replicas does not by
+            /// reading is duplicated, not how much work that adds up to, so adding replicas does not by
             /// itself make the query less likely to be distributed.
-            const auto total_read_bytes = stats->input_bytes + stats->replicated_bytes;
-            const double replicated_read_ratio
-                = total_read_bytes ? static_cast<double>(stats->replicated_bytes) / static_cast<double>(total_read_bytes) : 0.0;
+            const auto total_read_bytes = stats->input_bytes + stats->duplicated_bytes;
+            const double duplicated_read_ratio
+                = total_read_bytes ? static_cast<double>(stats->duplicated_bytes) / static_cast<double>(total_read_bytes) : 0.0;
             if (local_plan_cost_estimation > replicas_plan_cost_estimation
-                && replicated_read_ratio
-                    > static_cast<double>(optimization_settings.automatic_parallel_replicas_max_replicated_read_ratio))
+                && duplicated_read_ratio
+                    > static_cast<double>(optimization_settings.automatic_parallel_replicas_max_duplicated_read_ratio))
             {
                 LOG_DEBUG(
                     getLogger("optimizeTree"),
-                    "Parallel replicas are not used: {} of the {} bytes read are read by every replica "
-                    "({} replicated against {} coordinated), above the allowed ratio of {}",
-                    replicated_read_ratio,
+                    "Parallel replicas are not used: {}x of the {} bytes read are read by every replica "
+                    "({} duplicated against {} coordinated), above the allowed ratio of {}",
+                    duplicated_read_ratio,
                     total_read_bytes,
-                    stats->replicated_bytes,
+                    stats->duplicated_bytes,
                     stats->input_bytes,
-                    optimization_settings.automatic_parallel_replicas_max_replicated_read_ratio);
+                    optimization_settings.automatic_parallel_replicas_max_duplicated_read_ratio);
                 return;
             }
 
@@ -1018,14 +1014,8 @@ void considerEnablingParallelReplicas(
         if (lazy_reading_step)
             lazy_reading_step->setRuntimeDataflowStatisticsCacheUpdater(updater);
 
-        /// Every other read of the subtree is read in full by each replica. Record those into the
-        /// replicated-bytes bucket of the same entry, so the next execution of this shape can weigh what
-        /// distributing the query would cost the cluster beyond the coordinated read.
-        /// Only the single-node plan is instrumented: reaching here means the candidate was declined, so
-        /// the parallel-replicas plan built to price it is discarded and never reads anything. Walking it
-        /// too would also mark its *clone* of the coordinated read, whose bytes are not replicated work at all.
-        auto replicated_reads_updater = std::make_shared<RuntimeDataflowStatisticsCacheUpdater>(statistics_block, /*replicated=*/ true);
-        for (auto * read_step : collectReadStepsOfConstPlan(*corresponding_node_in_single_replica_plan))
+        auto duplicated_reads_updater = std::make_shared<RuntimeDataflowStatisticsCacheUpdater>(statistics_block, /*duplicated=*/ true);
+        for (auto * read_step : collectReadSteps(*corresponding_node_in_single_replica_plan))
         {
             /// The coordinated read and its own lazy half are set up above, and their bytes are `input_bytes`.
             if (read_step == corresponding_node_in_single_replica_plan->step.get() || read_step == source_reading_step
@@ -1033,7 +1023,7 @@ void considerEnablingParallelReplicas(
                 continue;
             if (!read_step->supportsDataflowStatisticsCollection())
                 continue;
-            read_step->setRuntimeDataflowStatisticsCacheUpdater(replicated_reads_updater);
+            read_step->setRuntimeDataflowStatisticsCacheUpdater(duplicated_reads_updater);
         }
     }
 }

@@ -31,14 +31,14 @@ struct AggregatedDataVariants;
 
 struct RuntimeDataflowStatistics
 {
-    /// The read parallel replicas would coordinate: they split it, so the cost model divides it by their
-    /// number.
+    /// The read parallel replicas would coordinate: they split it, so the cost model divides it by the
+    /// number of replicas.
     size_t input_bytes = 0;
     /// Every other read of the same subtree. Parallel replicas do not split these - each replica runs the
     /// whole subtree, so each reads all of them. They cost the same wall-clock time either way, which is
     /// why they are kept apart from `input_bytes` rather than added to it, but they cost the cluster
     /// `num_replicas` times as much work, which is what the amplification gate weighs.
-    size_t replicated_bytes = 0;
+    size_t duplicated_bytes = 0;
     size_t output_bytes = 0;
     size_t total_rows_to_read = 0;
 };
@@ -142,9 +142,9 @@ struct RuntimeDataflowStatisticsBlock
 
     std::atomic_bool unsupported_case{false};
 
-    std::array<Statistics, 2> input_bytes_statistics;
-    std::array<Statistics, 2> replicated_bytes_statistics;
-    std::array<Statistics, 3> output_bytes_statistics;
+    std::array<Statistics, MaxInputType> input_bytes_statistics;
+    std::array<Statistics, MaxInputType> duplicated_bytes_statistics;
+    std::array<Statistics, MaxOutputType> output_bytes_statistics;
 };
 
 class RuntimeDataflowStatisticsCacheUpdater
@@ -155,11 +155,11 @@ class RuntimeDataflowStatisticsCacheUpdater
     using OutputStatisticsType = RuntimeDataflowStatisticsBlock::OutputStatisticsType;
 
 public:
-    /// `replicated` is set on the updater given to the reads parallel replicas would not split: each replica
-    /// performs them in full, so their bytes go to `replicated_bytes` rather than to `input_bytes`.
-    explicit RuntimeDataflowStatisticsCacheUpdater(std::shared_ptr<RuntimeDataflowStatisticsBlock> block_, bool replicated_ = false)
+    /// `duplicated` is set on the updater given to the reads parallel replicas would not split: each replica
+    /// performs them in full, so their bytes go to `duplicated_bytes` rather than to `input_bytes`.
+    explicit RuntimeDataflowStatisticsCacheUpdater(std::shared_ptr<RuntimeDataflowStatisticsBlock> block_, bool duplicated_ = false)
         : block(std::move(block_))
-        , replicated(replicated_)
+        , duplicated(duplicated_)
     {
     }
 
@@ -215,7 +215,7 @@ private:
     recordColumns(Statistics & statistics, size_t num_rows, const ColumnsWithTypeAndName & cols, std::optional<size_t> full_bytes = {});
 
     const std::shared_ptr<RuntimeDataflowStatisticsBlock> block;
-    const bool replicated;
+    const bool duplicated;
 };
 
 using RuntimeDataflowStatisticsCacheUpdaterPtr = std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>;
