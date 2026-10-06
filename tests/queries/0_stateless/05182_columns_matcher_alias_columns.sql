@@ -29,4 +29,10 @@ SELECT arraySum([t.COLUMNS('^metric_') APPLY sum]) FROM t_columns_matcher AS t;
 -- All the three columns are matched: ordinary, materialized and alias.
 SELECT length([COLUMNS('^metric_')]) FROM t_columns_matcher;
 
+-- Both planners give the same result when the settings are enabled.
+SELECT arraySum([COLUMNS('^metric_') APPLY sum]) FROM t_columns_matcher SETTINGS enable_analyzer = 0;
+SELECT arraySum([COLUMNS('^metric_') APPLY sum]) FROM t_columns_matcher SETTINGS enable_analyzer = 1;
+SELECT arraySum([t.COLUMNS('^metric_') APPLY sum]) FROM t_columns_matcher AS t SETTINGS enable_analyzer = 0;
+SELECT arraySum([t.COLUMNS('^metric_') APPLY sum]) FROM t_columns_matcher AS t SETTINGS enable_analyzer = 1;
+
 DROP TABLE t_columns_matcher;
