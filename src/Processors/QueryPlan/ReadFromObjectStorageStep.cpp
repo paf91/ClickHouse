@@ -102,6 +102,12 @@ bool ReadFromObjectStorageStep::supportsTopKDynamicFilter(const ColumnWithTypeAn
     if (!boost::iequals(configuration->format, "Parquet"))
         return false;
 
+    /// With a structure of only Hive partition columns the format reads them from the file, while the
+    /// query takes their values from the path, so the reader would compare other values than the
+    /// ones the threshold is made from.
+    if (info.formatReadsHivePartitionColumns())
+        return false;
+
     /// The output header is broader than what the format reads: Hive partition columns (from the
     /// path) and virtual columns (`_path`, `_file`, `_row_id`, ...) are added after the format has
     /// produced its chunk, so the reader could never compare them against the threshold.
