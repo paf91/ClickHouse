@@ -20,22 +20,27 @@ $CLICKHOUSE_CLIENT -q "
 # `ignore` keeps the set out of key and PREWHERE analysis, so the check query's own pipeline builds it.
 # The cross join emits all of its output after its two sources have finished reading, and `sleep(1)` per output block
 # makes that take minutes.
-$CLICKHOUSE_CLIENT -q "
-    ALTER TABLE t_cancel_check_query DELETE WHERE ignore(id IN (
-        SELECT a.number + b.number + sleep(1) FROM numbers(2000) AS a, numbers(5000) AS b
-    )) SETTINGS mutations_sync = 0"
+start_mutation()
+{
+    $CLICKHOUSE_CLIENT -q "
+        ALTER TABLE t_cancel_check_query DELETE WHERE ignore(id IN (
+            SELECT a.number + b.number + sleep(1) FROM numbers(2000) AS a, numbers(5000) AS b
+        )) SETTINGS mutations_sync = 0"
 
-# Wait until the mutation has been running for a couple of seconds, i.e. it is inside the check query and not merely
-# queued. Fail hard on timeout, or `KILL MUTATION` below would cancel a queued mutation and the test would be vacuous.
-i=0
-while [ "$($CLICKHOUSE_CLIENT -q "SELECT count() FROM system.merges WHERE database = currentDatabase() AND table = 't_cancel_check_query' AND is_mutation AND elapsed > 2")" -lt 1 ]; do
-    sleep 0.3
-    i=$((i + 1))
-    if [ "$i" -gt 200 ]; then
-        echo "Mutation did not start in time" >&2
-        exit 1
-    fi
-done
+    # Wait until the mutation has been running for a couple of seconds, i.e. it is inside the check query and not merely
+    # queued. Fail hard on timeout, or the cancellation below would hit a queued mutation and the test would be vacuous.
+    local i=0
+    while [ "$($CLICKHOUSE_CLIENT -q "SELECT count() FROM system.merges WHERE database = currentDatabase() AND table = 't_cancel_check_query' AND is_mutation AND elapsed > 2")" -lt 1 ]; do
+        sleep 0.3
+        i=$((i + 1))
+        if [ "$i" -gt 200 ]; then
+            echo "Mutation did not start in time" >&2
+            exit 1
+        fi
+    done
+}
+
+start_mutation
 
 $CLICKHOUSE_CLIENT -q "KILL MUTATION WHERE database = currentDatabase() AND table = 't_cancel_check_query' FORMAT Null"
 
@@ -52,4 +57,15 @@ done
 
 $CLICKHOUSE_CLIENT -q "SELECT count() FROM system.merges WHERE database = currentDatabase() AND table = 't_cancel_check_query'"
 $CLICKHOUSE_CLIENT -q "SELECT count() FROM t_cancel_check_query"
+
+# `REPLACE PARTITION` stops the mutations of its own partition only, then waits for the running ones (and gives up with
+# `TIMEOUT_EXCEEDED` after 120 seconds).
+$CLICKHOUSE_CLIENT -q "
+    CREATE TABLE t_cancel_check_query_src AS t_cancel_check_query;
+    INSERT INTO t_cancel_check_query_src VALUES (10), (11);"
+start_mutation
+$CLICKHOUSE_CLIENT -q "ALTER TABLE t_cancel_check_query REPLACE PARTITION tuple() FROM t_cancel_check_query_src"
+$CLICKHOUSE_CLIENT -q "SELECT count() FROM t_cancel_check_query"
+
 $CLICKHOUSE_CLIENT -q "DROP TABLE t_cancel_check_query"
+$CLICKHOUSE_CLIENT -q "DROP TABLE t_cancel_check_query_src"
