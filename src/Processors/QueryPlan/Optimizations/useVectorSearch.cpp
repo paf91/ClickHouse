@@ -466,7 +466,7 @@ bool optimizeVectorSearchWithVectorIndexSecondPass(QueryPlan::Node & /*root*/, S
         /// such as `length(vec)` needs the physical vector column even though `vec` is not an
         /// output node of the DAG.
         auto pruned_projection_expression = expression.clone();
-        pruned_projection_expression.removeUnusedResult(sort_column);
+        pruned_projection_expression.removeFromOutputs(sort_column);
         pruned_projection_expression.removeUnusedActions();
 
         for (const auto * input : pruned_projection_expression.getInputs())
