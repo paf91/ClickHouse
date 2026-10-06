@@ -28,4 +28,11 @@ SELECT quantilesExactWeightedInterpolated(0.1, 0.9)(v, w) FROM oracle_tlp_agg_pa
 SELECT quantilesExactWeightedInterpolated(0.1, 0.9)(v, w) FROM oracle_tlp_agg_params WHERE v > 10;
 SELECT quantilesExactWeightedInterpolated(0.1, 0.9)(v, w) FROM oracle_tlp_agg_params WHERE v > 10;
 
+-- `*` in a parameter expands to other columns in the rewritten outer query, so the oracle must skip it.
+SELECT quantilesExactWeightedInterpolated(0.1, * APPLY isNull)(v, w) FROM oracle_tlp_agg_params WHERE v > 10;
+SELECT quantilesExactWeightedInterpolated(0.1, * APPLY isNull)(v, w) FROM oracle_tlp_agg_params WHERE v > 10;
+SELECT quantilesExactWeightedInterpolated(0.1, * APPLY isNull)(v, w) FROM oracle_tlp_agg_params WHERE v > 10;
+SELECT quantilesExactWeightedInterpolated(0.1, * APPLY isNull)(v, w) FROM oracle_tlp_agg_params WHERE v > 10;
+SELECT quantilesExactWeightedInterpolated(0.1, * APPLY isNull)(v, w) FROM oracle_tlp_agg_params WHERE v > 10;
+
 DROP TABLE oracle_tlp_agg_params;

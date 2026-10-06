@@ -715,6 +715,19 @@ bool hasNestedThreadSettings(const ASTPtr & ast, const ASTPtr & top_level_settin
     return false;
 }
 
+/// True if `ast` is built only from literals and function calls, so it means the same in any query.
+bool isScopeFreeExpression(const ASTPtr & ast)
+{
+    if (ast->as<ASTLiteral>())
+        return true;
+    if (!ast->as<ASTFunction>() && !ast->as<ASTExpressionList>())
+        return false;
+    for (const auto & child : ast->children)
+        if (!isScopeFreeExpression(child))
+            return false;
+    return true;
+}
+
 /// True if `clause` defines an alias that is referenced anywhere else in the
 /// SELECT. ClickHouse aliases are visible query-wide, so an oracle rewrite
 /// that removes or replaces such a clause (TLP's reference query drops WHERE
@@ -2260,6 +2273,9 @@ bool QueryOracleChecker::checkTLPAggregate(const ASTSelectQuery & select, const 
                 /// A `-Merge` function takes its parameters from its own call, not from the state.
                 if (agg_func->parameters)
                 {
+                    /// The outer query reads other columns, where an identifier or an asterisk means something else.
+                    if (!isScopeFreeExpression(agg_func->parameters))
+                        return false;
                     merge_func->parameters = agg_func->parameters->clone();
                     merge_func->children.push_back(merge_func->parameters);
                 }
