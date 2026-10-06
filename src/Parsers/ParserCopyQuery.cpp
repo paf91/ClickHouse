@@ -38,6 +38,18 @@ namespace ErrorCodes
 extern const int BAD_ARGUMENTS;
 }
 
+namespace
+{
+
+/// `psql` and libpq clients terminate the statement with `;`, which `parseQuery` accepts after the
+/// parsed query, so it ends the command here as well.
+bool isEndOfStatement(IParser::Pos & pos)
+{
+    return pos->isEnd() || pos->type == TokenType::Semicolon;
+}
+
+}
+
 bool ParserCopyQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ParserIdentifier s_ident;
@@ -104,7 +116,7 @@ bool ParserCopyQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
             return false;
         }
 
-        if (pos->isEnd())
+        if (isEndOfStatement(pos))
             return true;
 
         return parseOptions(pos, copy_element, expected);
@@ -127,7 +139,7 @@ bool ParserCopyQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         return false;
     }
 
-    if (pos->isEnd())
+    if (isEndOfStatement(pos))
         return true;
 
     return parseOptions(pos, copy_element, expected);
@@ -328,7 +340,7 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
         /// Transferring the data in the default format because the rest of the command was not
         /// understood would hand the client rows it cannot parse, or store rows parsed the wrong way,
         /// so say that it was not understood instead.
-        if (!pos->isEnd())
+        if (!isEndOfStatement(pos))
             throw Exception(
                 ErrorCodes::BAD_ARGUMENTS, "Unknown part of the postgresql copy command: {}", String(pos->begin, pos->end));
     };
@@ -361,7 +373,7 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
         /// WITH [BINARY] [CSV [HEADER]] [DELIMITER [AS] 'c'] [NULL [AS] 's'] [QUOTE [AS] 'c'].
         /// `WITH FORMAT csv` is not PostgreSQL syntax at all, but this protocol has accepted it from
         /// the beginning, so it is parsed here too.
-        while (!pos->isEnd())
+        while (!isEndOfStatement(pos))
         {
             if (!parseOption(pos, expected, node, data_shape_options))
                 return false;
