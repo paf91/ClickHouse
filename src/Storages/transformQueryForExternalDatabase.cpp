@@ -289,6 +289,86 @@ bool fieldContainsArrayOrMap(const Field & field)
     }
 }
 
+bool fieldContainsNull(const Field & field)
+{
+    checkStackSize();
+
+    if (field.isNull())
+        return true;
+    if (field.getType() == Field::Types::Tuple)
+        for (const auto & element : field.safeGet<Tuple>())
+            if (fieldContainsNull(element))
+                return true;
+    return false;
+}
+
+bool astContainsNullLiteral(const ASTPtr & node)
+{
+    checkStackSize();
+
+    if (const auto * literal = node->as<ASTLiteral>())
+        return fieldContainsNull(literal->value);
+    for (const auto & child : node->children)
+        if (astContainsNullLiteral(child))
+            return true;
+    return false;
+}
+
+/// ClickHouse leaves the `NULL` members of an `IN` set (and the rows with a `NULL` element of a multi-column set) out of
+/// the set, while the three-valued logic does not. Returns false if the set has no `NULL`-free form to push down.
+bool removeNullMembersFromINSet(ASTFunction & function)
+{
+    auto & arguments = function.arguments->children;
+    auto & rhs = arguments[1];
+
+    const auto * rhs_literal = rhs->as<ASTLiteral>();
+    if (!rhs_literal)
+        return !astContainsNullLiteral(rhs);
+
+    if (!fieldContainsNull(rhs_literal->value))
+        return true;
+
+    bool multi_column = false;
+    const auto * lhs_function = arguments[0]->as<ASTFunction>();
+    if (lhs_function && (lhs_function->name == "tuple" || lhs_function->name.empty()))
+    {
+        if (lhs_function->name.empty() || !lhs_function->arguments || lhs_function->arguments->children.size() < 2)
+            return false;
+        multi_column = true;
+    }
+
+    if (rhs_literal->value.getType() != Field::Types::Tuple)
+        return false;
+
+    const auto & members = rhs_literal->value.safeGet<Tuple>();
+    if (multi_column && !members.empty() && members[0].getType() != Field::Types::Tuple)
+        return false;
+
+    Tuple kept;
+    for (const auto & member : members)
+    {
+        bool skip = false;
+        if (!multi_column)
+            skip = member.isNull();
+        else if (member.getType() == Field::Types::Tuple)
+            for (const auto & element : member.safeGet<Tuple>())
+                skip |= element.isNull();
+
+        if (skip)
+            continue;
+        if (fieldContainsNull(member))
+            return false;
+        kept.push_back(member);
+    }
+
+    if (kept.empty())
+        return false;
+
+    Field new_set = kept.size() == 1 ? Field(kept.front()) : Field(std::move(kept));
+    rhs = make_intrusive<ASTLiteral>(std::move(new_set));
+    return true;
+}
+
 /// Returns true if the field can only be written back in ClickHouse-specific syntax that an
 /// external database cannot parse: an `Array` / `Map` at any depth, or a tuple with fewer than
 /// two elements (which has no plain parenthesized form and can only be written as `tuple(...)`).
@@ -559,6 +639,9 @@ bool isCompatible(
         /// If the right hand side of IN is a table identifier (example: x IN table), then it's not compatible.
         if ((name == "in" || name == "notIn")
             && (function->arguments->children.size() != 2 || function->arguments->children[1]->as<ASTTableIdentifier>()))
+            return false;
+
+        if ((name == "in" || name == "notIn") && !removeNullMembersFromINSet(*function))
             return false;
 
         auto & arguments = function->arguments->children;
