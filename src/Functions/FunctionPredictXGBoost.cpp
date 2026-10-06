@@ -7,13 +7,13 @@
 
 #include <Access/Common/AccessFlags.h>
 #include <Columns/ColumnConst.h>
-#include <Columns/ColumnMap.h>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnsNumber.h>
 #include <Core/Block.h>
 #include <Core/Field.h>
 #include <Core/Settings.h>
 #include <DataTypes/DataTypeMap.h>
+#include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/IDataType.h>
 #include <Dictionaries/XGBoostDictionary.h>
@@ -79,6 +79,13 @@ public:
     size_t getNumberOfArguments() const override { return 0; }
     ColumnNumbers getArgumentsThatAreAlwaysConstant() const override { return {0}; }
 
+    /// With all features constant, the model is evaluated once instead of once per row.
+    bool useDefaultImplementationForConstants() const override { return true; }
+
+    /// A NULL feature is passed to XGBoost as a missing value (NaN), which the model handles the way it was
+    /// trained to, instead of turning the prediction into NULL. So the result is always `Float64`.
+    bool useDefaultImplementationForNulls() const override { return false; }
+
     /// A dictionary can be reloaded (retrained) under the same name.
     bool isDeterministic() const override { return false; }
     bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo &) const override { return true; }
@@ -102,11 +109,12 @@ public:
         if (feature_end < 2)
             throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, "Function '{}' expects at least one feature argument", getName());
 
+        /// A feature may be `Nullable`, and a bare `NULL` (`Nullable(Nothing)`) is a missing value as well.
         for (size_t i = 1; i < feature_end; ++i)
-            if (!isNumber(arguments[i].type))
+            if (const auto feature_type = removeNullable(arguments[i].type); !isNumber(feature_type) && !isNothing(feature_type))
                 throw Exception(
                     ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT,
-                    "Feature argument {} of function '{}' must be numeric, got {}",
+                    "Feature argument {} of function '{}' must be numeric or Nullable numeric, got {}",
                     i,
                     getName(),
                     arguments[i].type->getName());
@@ -122,6 +130,11 @@ public:
                     "Prediction parameters of function '{}' must be a Map(String, <integer>), got {}",
                     getName(),
                     arguments.back().type->getName());
+
+            /// Checked here rather than in `executeImpl`: when every argument is constant, the default implementation
+            /// for constants unwraps them, so `executeImpl` cannot tell a constant Map from a one-row column.
+            if (!arguments.back().column || !isColumnConst(*arguments.back().column))
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Argument 'params' of function '{}' must be a constant Map", getName());
         }
 
         const String dictionary_name = getConstString(arguments[0], "dictionary name");
@@ -206,14 +219,10 @@ private:
     }
 
     /// Reads the trailing `params` Map into the structured prediction parameters (name -> integer) the model
-    /// consumes directly.
+    /// consumes directly. `getReturnTypeImpl` has checked that the Map is constant, so its first row is its value.
     static PredictParameters buildPredictParams(const ColumnWithTypeAndName & arg)
     {
-        const auto * col = checkAndGetColumnConst<ColumnMap>(arg.column.get());
-        if (!col)
-            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Argument 'params' of function '{}' must be a constant Map", name);
-
-        const Field field = (*col)[0];
+        const Field field = (*arg.column)[0];
         const Map & entries = field.safeGet<Map>();
 
         PredictParameters params;
@@ -283,7 +292,10 @@ REGISTER_FUNCTION(PredictXGBoost)
             "[XGBOOST dictionary layout](/sql-reference/statements/create/dictionary/layouts/xgboost) for how to create it "
             "and the training parameters it accepts.",
             {"String"}},
-           {"featureN", "Numeric feature values, positionally in the dictionary's key order.", {"(U)Int*", "Float*"}},
+           {"featureN",
+            "Numeric feature values, positionally in the dictionary's key order. A NULL feature is passed to the model as a "
+            "missing value, which XGBoost handles the way it was trained to, so the prediction is never NULL.",
+            {"(U)Int*", "Float*", "Nullable((U)Int*)", "Nullable(Float*)"}},
            {"params",
             "Optional constant Map of XGBoost prediction parameters, from parameter name to an integer value, e.g. "
             "`map('type', 0, 'iteration_end', 0)`. Every accepted parameter is an integer or a boolean, so fractional "

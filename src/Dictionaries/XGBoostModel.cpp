@@ -6,6 +6,7 @@
 #include <DataTypes/IDataType.h>
 #include <IO/ReadHelpers.h>
 
+#include <Columns/ColumnNullable.h>
 #include <Columns/ColumnsNumber.h>
 #include <Columns/IColumn.h>
 #include <Core/Block.h>
@@ -186,10 +187,26 @@ ColumnPtr XGBoostModel::predict(const Block & batch, const PredictParameters & p
     if (rows == 0)
         return ColumnFloat64::create();
 
+    /// A `Nullable` feature is read through its nested column, and a NULL becomes NaN, the missing-value
+    /// marker the matrix is created with below.
     VectorWithMemoryTracking<const IColumn *> feature_cols;
+    VectorWithMemoryTracking<const NullMap *> null_maps;
     feature_cols.reserve(n_features);
+    null_maps.reserve(n_features);
     for (const auto & name : feature_columns)
-        feature_cols.push_back(batch.getByName(name).column.get());
+    {
+        const IColumn * column = batch.getByName(name).column.get();
+        if (const auto * nullable = typeid_cast<const ColumnNullable *>(column))
+        {
+            feature_cols.push_back(&nullable->getNestedColumn());
+            null_maps.push_back(&nullable->getNullMapData());
+        }
+        else
+        {
+            feature_cols.push_back(column);
+            null_maps.push_back(nullptr);
+        }
+    }
 
     VectorWithMemoryTracking<float> features;
 
@@ -198,7 +215,12 @@ ColumnPtr XGBoostModel::predict(const Block & batch, const PredictParameters & p
     for (std::size_t r = 0; r < rows; ++r)
     {
         for (std::size_t c = 0; c < n_features; ++c)
-            features.push_back(static_cast<float>(feature_cols[c]->getFloat64(r)));
+        {
+            if (null_maps[c] && (*null_maps[c])[r])
+                features.push_back(std::numeric_limits<float>::quiet_NaN());
+            else
+                features.push_back(static_cast<float>(feature_cols[c]->getFloat64(r)));
+        }
     }
 
     DMatrixHandle predict_dmatrix{nullptr};
