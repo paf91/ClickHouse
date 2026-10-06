@@ -320,6 +320,18 @@ static bool isKnownWithoutDefaultUserDiskAccessStorage(const fs::path & director
     return true;
 }
 
+/// The merge directory of a users config that is applied last: `ConfigProcessor::getConfigMergeFiles` merges the files
+/// from both `<name>.d` and `conf.d` sorted by their full paths, so all files of one directory precede all files of the other.
+static fs::path getLastConfigMergeDir(const fs::path & config_path)
+{
+    fs::path own_merge_dir = fs::path(config_path).replace_extension("d");
+    fs::path conf_d = fs::path(config_path).replace_filename("conf.d");
+    /// Compare with a trailing separator, like the paths of the files inside.
+    if ((conf_d / "").string() > (own_merge_dir / "").string())
+        return conf_d;
+    return own_merge_dir;
+}
+
 static void createGroup(const String & group_name)
 {
     if (!group_name.empty())
@@ -1017,9 +1029,10 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
         /// The XML users config that defines the effective default user, and the directory for its tweaks,
         /// where the password for the default user is written to. It is the first XML users config unless the default user
         /// is removed from it and defined in a later one: overriding it in the first one would create a new default user there,
-        /// which would shadow the later definition entirely.
+        /// which would shadow the later definition entirely. The tweaks directory is the merge directory that is applied last,
+        /// so the password written there overrides the authentication from other merged files.
         fs::path default_user_config_file = users_config_file;
-        fs::path default_user_users_d = users_d;
+        fs::path default_user_users_d = getLastConfigMergeDir(users_config_file);
 
         if (!has_users_xml_config)
         {
@@ -1095,7 +1108,7 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
                 if (i != 0)
                 {
                     default_user_config_file = users_config_path;
-                    default_user_users_d = fs::path(users_config_path).replace_extension("d");
+                    default_user_users_d = getLastConfigMergeDir(users_config_path);
                     fmt::print("The default user is defined in {}.\n", default_user_config_file.string());
                 }
                 break;
