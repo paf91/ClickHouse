@@ -25,6 +25,9 @@ SET merge_tree_min_bytes_per_task_for_remote_reading = 4096;
 -- The estimated read depends on the compression of the parts, which randomized settings change, and
 -- can fall below the per-replica floor; that gate would then decline the candidate on its own.
 SET automatic_parallel_replicas_min_bytes_per_replica = 0;
+-- Distributed, every replica reads the whole build side, which takes the query to about the test
+-- profile's `max_rows_to_read`.
+SET max_rows_to_read = 0;
 -- Keep the build side on the right and unfiltered: the join order optimizer would otherwise swap the
 -- sides, and a runtime filter would prune the probe side - either changes which read is coordinated.
 SET query_plan_join_swap_table = 0, enable_join_runtime_filters = 0,
