@@ -2859,8 +2859,7 @@ private:
     bool sampling = true;
 };
 
-/// Calls `func(key, mapped)` for every cell in the order of `forEachValue`; if `skip_key_prefetch`, without its key prefetch.
-/// A table whose keys are never prefetched keeps `forEachValue` as the only call of `func`, so that it stays inlined.
+/// Visits cells in `forEachValue` order. Tables that never prefetch keys only call `forEachValue`, so `func` stays inlined.
 template <typename Table, typename Func>
 void forEachValueSkippingKeyPrefetchIf(Table & table, bool skip_key_prefetch, Func && func)
 {
