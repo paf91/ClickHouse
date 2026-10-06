@@ -1,5 +1,6 @@
 #include <utility>
 #include <Processors/Transforms/SquashingTransform.h>
+#include <Columns/IColumn.h>
 #include <Interpreters/Squashing.h>
 #include <Processors/Chunk.h>
 
@@ -63,21 +64,70 @@ void SquashingTransform::work()
     }
 }
 
+namespace
+{
+
+/// `Chunk::bytes` with constant columns at their materialized size, as `Squashing::squash` materializes them.
+size_t squashedBytes(const Chunk & chunk)
+{
+    size_t bytes = 0;
+    for (const auto & column : chunk.getColumns())
+        bytes += isColumnConst(*column) ? column->byteSizeAt(0) * column->size() : column->byteSize();
+    return bytes;
+}
+
+}
+
 SimpleSquashingChunksTransform::SimpleSquashingChunksTransform(
-    SharedHeader header, size_t min_block_size_rows, size_t min_block_size_bytes)
+    SharedHeader header, size_t min_block_size_rows, size_t min_block_size_bytes,
+    size_t max_block_size_rows_, size_t max_block_size_bytes_)
     : IInflatingTransform(header, header)
     , squashing(header, min_block_size_rows, min_block_size_bytes)
+    , max_block_size_rows(max_block_size_rows_)
+    , max_block_size_bytes(max_block_size_bytes_)
 {
 }
 
 void SimpleSquashingChunksTransform::consume(Chunk chunk)
 {
+    const size_t chunk_bytes = max_block_size_bytes ? squashedBytes(chunk) : 0;
+    const size_t buffered_rows = squashing.getRows();
+    if (buffered_rows
+        && ((max_block_size_rows && buffered_rows + chunk.getNumRows() > max_block_size_rows)
+            || (max_block_size_bytes && buffered_bytes + chunk_bytes > max_block_size_bytes)))
+    {
+        flushed_chunk = Squashing::squash(squashing.flush(), getOutputPort().getSharedHeader());
+        buffered_bytes = 0;
+    }
+
+    if (chunk.getNumRows())
+        buffered_bytes += chunk_bytes;
     squashing.add(std::move(chunk));
 }
 
 Chunk SimpleSquashingChunksTransform::generate()
 {
-    squashed_chunk = Squashing::squash(squashing.generate(), getOutputPort().getSharedHeader());
+    if (flushed_chunk)
+    {
+        Chunk result;
+        result.swap(flushed_chunk);
+        return result;
+    }
+
+    Chunk to_squash = squashing.generate();
+    if (max_block_size_bytes)
+    {
+        if (auto info = to_squash.getChunkInfos().get<ChunksToSquash>())
+        {
+            for (const auto & part : info->data)
+            {
+                const size_t part_bytes = squashedBytes(part.chunk);
+                chassert(buffered_bytes >= part_bytes);
+                buffered_bytes -= part_bytes;
+            }
+        }
+    }
+    squashed_chunk = Squashing::squash(std::move(to_squash), getOutputPort().getSharedHeader());
 
     if (squashed_chunk.empty())
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Can't generate chunk in SimpleSquashingChunksTransform");
@@ -89,11 +139,12 @@ Chunk SimpleSquashingChunksTransform::generate()
 
 bool SimpleSquashingChunksTransform::canGenerate()
 {
-    return squashing.canGenerate();
+    return static_cast<bool>(flushed_chunk) || squashing.canGenerate();
 }
 
 Chunk SimpleSquashingChunksTransform::getRemaining()
 {
+    chassert(!flushed_chunk);
     return Squashing::squash(squashing.flush(), getOutputPort().getSharedHeader());
 }
 
