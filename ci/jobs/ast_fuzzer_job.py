@@ -63,16 +63,13 @@ def _log_tail(path: Path, max_lines: int = 50, max_bytes: int = 65536) -> str:
 SERVER_MLE_SIGNATURE = r"Received from.*(?:MEMORY_LIMIT_EXCEEDED|memory limit exceeded)"
 
 # The client returns its exception code and the OS keeps the low byte. BuzzHouse findings
-# throw `BUZZHOUSE_ORACLE` (1022 -> 254); `BUZZHOUSE` (739 -> 227) is a fuzzer or config error.
+# throw `BUZZHOUSE_ORACLE` (1022 -> 254); fuzzer errors are generic client failures.
 BUZZHOUSE_ORACLE_ERROR_CODE = 1022
 BUZZHOUSE_ORACLE_EXIT_CODE = BUZZHOUSE_ORACLE_ERROR_CODE & 0xFF
-BUZZHOUSE_EXCEPTION_EXIT_CODE = 739 & 0xFF
 
-# The AST fuzzer client calls `_exit(49)` after its oracle finds a wrong result, while the
-# peer server comparison throws `AST_FUZZER_ORACLE_MISMATCH` (906 -> 138)
-AST_FUZZER_ORACLE_EXIT_CODE = 49
-AST_FUZZER_ORACLE_THROW_ERROR_CODE = 906
-AST_FUZZER_ORACLE_THROW_EXIT_CODE = AST_FUZZER_ORACLE_THROW_ERROR_CODE & 0xFF
+# On an AST fuzzer oracle mismatch (server-side oracle or peer server comparison) the client prints
+# the `AST FUZZER ORACLE MISMATCH` block and exits with `AST_FUZZER_ORACLE_MISMATCH` (906 -> 138)
+AST_FUZZER_ORACLE_EXIT_CODE = 906 & 0xFF
 
 
 def _last_exception(fuzzer_log: Path, error_code: int, error_name: str) -> str:
@@ -529,27 +526,12 @@ def run_fuzz_job(check_name: str):
             status=Result.Status.FAIL,
         )
         info.append(f"BuzzHouse oracle failure: {oracle_error}")
-    elif (
-        buzzhouse
-        and fuzzer_exit_code == BUZZHOUSE_EXCEPTION_EXIT_CODE
-        and (error_info := _last_exception(fuzzer_log, 739, "BUZZHOUSE"))
-    ):
-        # The fuzzer itself failed, e.g. on its configuration; findings have their own code.
-        # Other codes ending in 227 fall through to the generic client failure
-        status = Result.Status.ERROR
-        info.append(f"ERROR: {error_info}")
-    elif oracle_error := (
-        fuzzer_exit_code == AST_FUZZER_ORACLE_EXIT_CODE
-        and not buzzhouse
-        and Shell.get_output(f"rg --text -A 30 'AST FUZZER ORACLE MISMATCH' {fuzzer_log}")
-    ) or (
-        fuzzer_exit_code == AST_FUZZER_ORACLE_THROW_EXIT_CODE
-        and _last_exception(
-            fuzzer_log, AST_FUZZER_ORACLE_THROW_ERROR_CODE, "AST_FUZZER_ORACLE_MISMATCH"
+    elif fuzzer_exit_code == AST_FUZZER_ORACLE_EXIT_CODE and (
+        oracle_error := Shell.get_output(
+            f"rg --text -A 30 'AST FUZZER ORACLE MISMATCH' {fuzzer_log}"
         )
     ):
-        # The `_exit(49)` marker block (with the reproducer) tells this apart from a client
-        # `LOGICAL_ERROR`, also 49; the peer server comparison throws instead
+        # The marker block (with the reproducer) tells this apart from other codes ending in 138
         finding = Result(
             name="AST fuzzer oracle mismatch",
             info=oracle_error,

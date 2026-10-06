@@ -63,6 +63,25 @@ using ErrorCode = int;
 extern std::string_view getName(ErrorCode error_code);
 }
 
+/// An AST fuzzer oracle mismatch is a finding: print the reproducer to stderr (fuzzer.log in CI) and exit at once
+/// with the low byte of `AST_FUZZER_ORACLE_MISMATCH`, so the run fails fast instead of ending as a clean timeout
+[[noreturn]] static void exitOnOracleMismatch(const String & query, const String & details)
+{
+    fmt::print(
+        stderr,
+        "\n\n"
+        "=== AST FUZZER ORACLE MISMATCH (fatal) ===\n"
+        "Client-side query (a server-side oracle may have mutated it further):\n"
+        "  {}\n"
+        "{}\n"
+        "==========================================\n",
+        query,
+        details);
+    (void)std::fflush(stderr);
+    (void)std::fflush(stdout);
+    _exit(ErrorCodes::AST_FUZZER_ORACLE_MISMATCH & 0xFF);
+}
+
 bool Client::tryToReconnect(const uint32_t max_reconnection_attempts, const uint32_t time_to_sleep_between_reconnects)
 {
     chassert(max_reconnection_attempts);
@@ -140,34 +159,13 @@ bool Client::processASTFuzzerStep(const String & query_to_execute, const ASTPtr 
         return true;
     }
     /// The server-side AST fuzzer oracle reports a wrong-result bug by throwing
-    /// `AST_FUZZER_ORACLE_MISMATCH`. Treat this as fatal: print the reproducer
-    /// to stderr (so it lands in fuzzer.log for CI) and terminate the client
-    /// immediately, so the CI run fails fast with logs attached instead of
-    /// running for the full FUZZ_TIME_LIMIT and being classified as a clean
-    /// timeout.
-    ///
-    /// We deliberately do NOT use `LOGICAL_ERROR` for oracle mismatches: in
-    /// sanitizer / debug builds `LOGICAL_ERROR` triggers `abortOnFailedAssertion`
-    /// from inside the `Exception` constructor, which crashes the server before
-    /// the message can even propagate back here.
+    /// `AST_FUZZER_ORACLE_MISMATCH`. We deliberately do NOT use `LOGICAL_ERROR` for
+    /// oracle mismatches: in sanitizer / debug builds `LOGICAL_ERROR` triggers
+    /// `abortOnFailedAssertion` from inside the `Exception` constructor, which
+    /// crashes the server before the message can even propagate back here.
     if (have_error
         && exception->code() == ErrorCodes::AST_FUZZER_ORACLE_MISMATCH)
-    {
-        fmt::print(
-            stderr,
-            "\n\n"
-            "=== AST FUZZER ORACLE MISMATCH (fatal) ===\n"
-            "Client-side seed query (the server may have mutated it further):\n"
-            "  {}\n"
-            "Server-side oracle reproducer (includes the actual fuzzed query):\n"
-            "{}\n"
-            "==========================================\n",
-            parsed_query->formatForErrorMessage(),
-            exception->message());
-        (void)std::fflush(stderr);
-        (void)std::fflush(stdout);
-        _exit(49);
-    }
+        exitOnOracleMismatch(parsed_query->formatForErrorMessage(), exception->message());
     if (have_error)
     {
         fmt::print(stderr, "Error on processing query '{}': {}\n", parsed_query->formatForErrorMessage(), exception->message());
@@ -461,7 +459,7 @@ bool Client::processWithASTFuzzer(std::string_view full_query)
         }
         if (can_compare && fuzz_config->compare_success_results && peer_success != !have_error)
         {
-            throw DB::Exception(DB::ErrorCodes::AST_FUZZER_ORACLE_MISMATCH, "AST Fuzzer: The peer server got a different success result");
+            exitOnOracleMismatch(query_to_execute, "AST Fuzzer: The peer server got a different success result");
         }
         if (measure_performance)
         {
