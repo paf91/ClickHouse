@@ -96,6 +96,20 @@ def _last_exception(fuzzer_log: Path, error_code: int, error_name: str) -> str:
             candidates = [block for block in candidates if len(block) < 100]
     return found
 
+
+def _oracle_mismatch_block(fuzzer_log: Path, max_lines: int = 500) -> str:
+    """The client's `AST FUZZER ORACLE MISMATCH` block, from the marker through its closing `====` line.
+    The reproduction settings come last in it, so a fixed line count would cut them first."""
+    block: list[str] = []
+    with open(fuzzer_log, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not block and "AST FUZZER ORACLE MISMATCH" not in line:
+                continue
+            block.append(line.rstrip("\n"))
+            if (len(block) > 1 and line.startswith("=" * 10)) or len(block) >= max_lines:
+                break
+    return "\n".join(block)
+
 # A client-origin 241 line: "Code: 241" with NO "Received from" on the same line.
 # clickhouse-client raises 241 for its own --max_memory_usage_in_client cap (see
 # tests/queries/0_stateless/02003_memory_limit_in_client.sh) and prints it as
@@ -527,9 +541,7 @@ def run_fuzz_job(check_name: str):
         )
         info.append(f"BuzzHouse oracle failure: {oracle_error}")
     elif fuzzer_exit_code == AST_FUZZER_ORACLE_EXIT_CODE and (
-        oracle_error := Shell.get_output(
-            f"rg --text -A 30 'AST FUZZER ORACLE MISMATCH' {fuzzer_log}"
-        )
+        oracle_error := _oracle_mismatch_block(fuzzer_log)
     ):
         # The marker block (with the reproducer) tells this apart from other codes ending in 138
         finding = Result(
