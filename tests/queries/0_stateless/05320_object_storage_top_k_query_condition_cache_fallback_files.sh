@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Tags: no-fasttest
+# Tags: no-fasttest, no-parallel
 # - no-fasttest: needs Iceberg (USE_AVRO)
+# - no-parallel: other tests drop the query condition cache, which would remove the entries checked here
 
 # TopN dynamic filtering is not applied to the files of an Iceberg table sorted by an identity partition
 # column (the partition value comes from the manifest, not from the file). Such files are read as without
