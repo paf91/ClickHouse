@@ -513,6 +513,13 @@ public:
         bool date_time_overflow_behavior_ignore_);
 
 private:
+    /// `applyMonotonicFunctionsChainToRange` without the handling of an endpoint the chain cannot compute.
+    static std::optional<Range> applyMonotonicFunctionsChainToRangeImpl(
+        Range key_range,
+        const MonotonicFunctionsChain & functions,
+        DataTypePtr current_type,
+        bool single_point);
+
     /// Whether any atom reads a `Nullable` key column whose analysed range may hold a NULL value.
     /// A NULL satisfies neither a comparison nor its negation, which the two-valued range algebra of
     /// `checkInHyperrectangle` cannot express, so it costs the analysis its `can_be_false` claim.

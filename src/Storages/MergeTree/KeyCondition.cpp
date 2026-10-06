@@ -79,6 +79,7 @@ namespace Setting
 namespace ErrorCodes
 {
 extern const int BAD_ARGUMENTS;
+extern const int DECIMAL_OVERFLOW;
 extern const int LOGICAL_ERROR;
 }
 
@@ -1866,9 +1867,25 @@ static FieldRef applyFunction(const FunctionBasePtr & func, const DataTypePtr & 
         }
         /// Invariant: every function receives the argument type it was built for, so the cached result
         /// keeps this function's own result type and representation.
-        field.columns->emplace_back(ColumnWithTypeAndName {nullptr, func->getResultType(), result_name});
-        (*columns)[result_idx].column
-            = func->execute(args, (*columns)[result_idx].type, args.front().column->size(), /* dry_run = */ false);
+        ColumnPtr result_column;
+        try
+        {
+            result_column = func->execute(args, func->getResultType(), args.front().column->size(), /* dry_run = */ false);
+        }
+        catch (const Exception & e)
+        {
+            /// A value of the column the function cannot compute (see `applyMonotonicFunctionsChainToRange`)
+            /// is cached as a missing result, so the calls for the other marks do not evaluate the whole
+            /// column again.
+            if (e.code() == ErrorCodes::DECIMAL_OVERFLOW)
+                field.columns->emplace_back(ColumnWithTypeAndName{nullptr, func->getResultType(), result_name});
+            throw;
+        }
+        field.columns->emplace_back(ColumnWithTypeAndName{std::move(result_column), func->getResultType(), result_name});
+    }
+    else if (!(*columns)[result_idx].column)
+    {
+        throw Exception(ErrorCodes::DECIMAL_OVERFLOW, "Decimal math overflow in function {} applied to the index", func->getName());
     }
 
     return {field.columns, field.row_idx, result_idx};
@@ -6231,6 +6248,30 @@ std::optional<Range> KeyCondition::applyMonotonicFunctionsChainToRange(
     /// stripped type here rather than in each caller: several of them pass the key column's raw type.
     current_type = recursiveRemoveLowCardinality(current_type);
 
+    /// Arithmetic with a `Decimal` result runs in the native width of the result and raises `DECIMAL_OVERFLOW`
+    /// for an operand that does not fit into it (`a + toDecimal32(1, 0)` at `a = 3000000000`). Both the
+    /// monotonicity probe and the application of the function below evaluate it at the endpoints of the
+    /// range, which may lie far outside of what the query reads, as another condition can restrict it to a
+    /// safe slice of the key. An endpoint the function cannot compute only means that this range cannot be
+    /// analyzed, as for a non-monotonic function, so it must not fail the query.
+    try
+    {
+        return applyMonotonicFunctionsChainToRangeImpl(std::move(key_range), functions, std::move(current_type), single_point);
+    }
+    catch (const Exception & e)
+    {
+        if (e.code() != ErrorCodes::DECIMAL_OVERFLOW)
+            throw;
+        return {};
+    }
+}
+
+std::optional<Range> KeyCondition::applyMonotonicFunctionsChainToRangeImpl(
+    Range key_range,
+    const MonotonicFunctionsChain & functions,
+    DataTypePtr current_type,
+    bool single_point)
+{
     for (const auto & func : functions)
     {
         /// We check the monotonicity of each function on a specific range.
