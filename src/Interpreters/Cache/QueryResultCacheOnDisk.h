@@ -38,8 +38,10 @@ public:
 
     /// Removes the entries of the on-disk query result cache (all of them, or only those with the given `query_cache_tag`) from the
     /// filesystem cache named by setting `query_cache_on_disk_cache_name`, leaving all other data of the filesystem cache in place.
-    /// Does nothing if the setting is empty. Used by `SYSTEM DROP QUERY CACHE [TAG]`. The entries are found by scanning the keys of
-    /// the filesystem cache, so the cost is proportional to the number of keys in it.
+    /// Does nothing if the setting is empty. Used by `SYSTEM DROP QUERY CACHE [TAG]`. The entries are found by walking the in-memory
+    /// metadata of the whole filesystem cache (whose cost is proportional to the number of file segments in it, without disk IO) and
+    /// reading the headers of the keys which carry the marker of the on-disk query result cache (whose cost is proportional to the
+    /// number of entries). A filesystem cache dedicated to query results keeps the former cheap.
     static void clear(const Settings & settings, const std::optional<String> & tag);
 
     bool readsEnabled() const { return enable_reads; }

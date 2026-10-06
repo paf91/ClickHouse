@@ -98,6 +98,18 @@ constexpr size_t FIXED_HEADER_SIZE
 constexpr size_t TOTAL_SIZE_OFFSET_IN_FIXED_HEADER = sizeof(ENTRY_MAGIC) + sizeof(UInt32) + sizeof(UInt32);
 constexpr size_t CHECKSUM_OFFSET_IN_FIXED_HEADER = FIXED_HEADER_SIZE - sizeof(UInt128);
 
+/// Bits 64..95 of every key of the on-disk query result cache hold this marker ("QRCC"), so that the entries can be told apart from
+/// the other keys of the filesystem cache by the key alone, without reading anything from disk (see `clear`). The marker sits in the
+/// middle of the key on purpose: the filesystem cache derives the directory of a key from its topmost bits and the metadata bucket
+/// from its lowest bits, both of which must keep varying. The remaining 96 bits of hash are plenty to keep the entries apart. A key
+/// of other data carries the marker by chance with probability 2^-32; such a key is still recognized as foreign by its content.
+constexpr UInt32 KEY_MARKER = 0x51524343;
+
+bool hasKeyMarker(const FileCacheKey & cache_key)
+{
+    return static_cast<UInt32>(cache_key.key.items[UInt128::_impl::big(0)]) == KEY_MARKER;
+}
+
 /// The key of a shared entry depends on the query only, so that every user can find it. The key of a non-shared entry additionally
 /// depends on the access context, so that the entry of one user (or of one role set of the same user) neither shadows nor can be
 /// overwritten by the entry of another one. Note that the in-memory query result cache instead keeps a single entry per query and
@@ -122,7 +134,11 @@ FileCacheKey makeFileCacheKey(const QueryResultCache::Key & key, bool is_shared)
         for (const auto & role : key.current_user_roles)
             hash.update(role.toUnderType());
     }
-    return FileCacheKey::fromKey(hash.get128());
+
+    UInt128 key_hash = hash.get128();
+    auto & high64 = key_hash.items[UInt128::_impl::big(0)];
+    high64 = (high64 & 0xFFFFFFFF00000000ULL) | KEY_MARKER;
+    return FileCacheKey::fromKey(key_hash);
 }
 
 /// A buffer reading the concatenation of the segments' local files, i.e. the byte range [0, sum of segment sizes) of the entry.
@@ -561,15 +577,20 @@ void QueryResultCacheOnDisk::clear(const Settings & settings, const std::optiona
 
     const auto & user_id = FileCache::getCommonOrigin().user_id;
 
-    /// The entries are ordinary keys of the filesystem cache, so find them by content: every key whose first segment is downloaded
-    /// is a candidate, and only the keys which start with the magic of an entry are removed. Collect the candidates first, the
-    /// filesystem cache must not be accessed from inside `iterate`. The remainder of an entry whose first segment was already evicted
-    /// cannot be recognized (the keys carry no marker of their owner), so it stays until it is evicted as well or the entry is written
-    /// again (see `probeExistingEntry`). It is never served: a reader requires the whole entry starting from the header.
+    /// The entries are ordinary keys of the filesystem cache, which may hold millions of segments of other data (e.g. of MergeTree
+    /// parts on object storage). Finding the entries walks the in-memory metadata of the whole filesystem cache once, under its
+    /// locks, but reads from disk only for keys which carry the marker of the on-disk query result cache (see `makeFileCacheKey`), so
+    /// the disk IO is proportional to the number of entries and not to the size of the filesystem cache. Every marked key whose first
+    /// segment is downloaded is a candidate, and only the candidates which start with the magic of an entry are removed. Collect the
+    /// candidates first, the filesystem cache must not be accessed from inside `iterate`. The remainder of an entry whose first segment
+    /// was already evicted is left alone: it stays until it is evicted as well or the entry is written again (see `probeExistingEntry`),
+    /// and it is never served, because a reader requires the whole entry starting from the header.
     std::unordered_set<FileCacheKey> candidates;
+    size_t num_segments_scanned = 0;
     file_cache->iterate([&](const FileSegmentInfo & info)
     {
-        if (info.range_left == 0 && info.state == FileSegment::State::DOWNLOADED)
+        ++num_segments_scanned;
+        if (info.range_left == 0 && info.state == FileSegment::State::DOWNLOADED && hasKeyMarker(info.key))
             candidates.insert(info.key);
     }, user_id);
 
@@ -619,8 +640,9 @@ void QueryResultCacheOnDisk::clear(const Settings & settings, const std::optiona
         }
     }
 
-    LOG_DEBUG(getLogger("QueryResultCacheOnDisk"), "Removed {} entries from the on-disk query result cache in filesystem cache {}{}",
-        num_removed, backQuote(cache_name), tag ? fmt::format(" with tag {}", quoteString(*tag)) : "");
+    LOG_DEBUG(getLogger("QueryResultCacheOnDisk"),
+        "Removed {} entries from the on-disk query result cache in filesystem cache {}{} (scanned the metadata of {} file segments, read the headers of {} candidates)",
+        num_removed, backQuote(cache_name), tag ? fmt::format(" with tag {}", quoteString(*tag)) : "", num_segments_scanned, candidates.size());
 }
 
 QueryResultCacheReader QueryResultCacheOnDisk::createReader(const QueryResultCache::Key & key) const
