@@ -41,12 +41,12 @@ FROM
 -- full and the answer is the same as the bruteforce one.
 SELECT 'the same answer with the index';
 WITH [1.0, 0.0] AS reference_vec
-SELECT groupArray(id)
+SELECT arraySort(groupArray(id))
 FROM
 (
     SELECT id
     FROM tab
-    ORDER BY L2Distance(vec, reference_vec), id
+    ORDER BY L2Distance(vec, reference_vec)
     LIMIT 3
     SETTINGS vector_search_with_rescoring = 1,
              parallel_replicas_local_plan = 1,
