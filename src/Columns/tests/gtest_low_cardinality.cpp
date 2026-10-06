@@ -185,6 +185,8 @@ std::vector<Field> makeSourceValues(const std::vector<Field> & keys, UInt64 seed
 /// as a range of the same rows that is long enough for the range path.
 void checkShortRangeMatchesRangePath(const IColumn & source, const std::function<MutableColumnPtr()> & make_destination)
 {
+    const auto & source_lc = assert_cast<const ColumnLowCardinality &>(source);
+    const auto & source_keys = *source_lc.getDictionary().getNestedNotNullableColumn();
     constexpr size_t long_length = 600;
     for (size_t start : {0, 1, 7, 300})
     {
@@ -206,6 +208,16 @@ void checkShortRangeMatchesRangePath(const IColumn & source, const std::function
                 ASSERT_EQ(short_lc.isNullAt(row), long_lc.isNullAt(row));
                 if (!short_lc.isNullAt(row))
                     ASSERT_EQ(short_lc.getDataAt(row), long_lc.getDataAt(row));
+
+                /// Both paths apply the same NULL and default rules, so check those against the source too.
+                const size_t source_row = start + row - offset;
+                const auto & dictionary = short_lc.getDictionary();
+                const size_t default_index = dictionary.getNestedTypeDefaultValueIndex();
+                if (source.isNullAt(source_row))
+                    ASSERT_EQ(short_lc.getIndexes().getUInt(row), dictionary.getNullValueIndex());
+                else if (dictionary.getNestedNotNullableColumn()->compareAt(
+                             default_index, source_lc.getIndexes().getUInt(source_row), source_keys, 1) == 0)
+                    ASSERT_EQ(short_lc.getIndexes().getUInt(row), default_index);
             }
 
             const auto & short_keys = *short_lc.getDictionary().getNestedNotNullableColumn();

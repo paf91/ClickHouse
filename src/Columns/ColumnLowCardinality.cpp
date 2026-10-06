@@ -263,7 +263,6 @@ void ColumnLowCardinality::doInsertRangeFrom(const IColumn & src, size_t start, 
     {
         compactIfSharedDictionary();
 
-        /// Short ranges are translated row by row with the same NULL, default and NaN rules as `uniqueInsertRangeFrom`.
         if (length <= max_rows_to_translate_individually)
         {
             const IColumn & src_indexes = low_cardinality_src->getIndexes();
@@ -271,32 +270,10 @@ void ColumnLowCardinality::doInsertRangeFrom(const IColumn & src, size_t start, 
                 throw Exception(ErrorCodes::PARAMETER_OUT_OF_BOUND, "Parameters start = {}, length = {} are out of bound in "
                     "ColumnLowCardinality::insertRangeFrom method (size() = {}).", start, length, src_indexes.size());
 
-            const IColumnUnique & src_dictionary = low_cardinality_src->getDictionary();
-            const IColumn & src_keys = *src_dictionary.getNestedNotNullableColumn();
-            const std::optional<size_t> src_null_index
-                = src_dictionary.nestedColumnIsNullable() ? std::optional<size_t>(src_dictionary.getNullValueIndex()) : std::nullopt;
-            IColumnUnique & dst_dictionary = getDictionary();
-            const IColumn & dst_keys = *dst_dictionary.getNestedNotNullableColumn();
-            const size_t dst_default_index = dst_dictionary.getNestedTypeDefaultValueIndex();
-
             std::array<UInt64, max_rows_to_translate_individually> positions; // NOLINT(cppcoreguidelines-pro-type-member-init,hicpp-member-init) - only the first `length` entries are written before read
-            size_t previous_src_position = std::numeric_limits<size_t>::max();
-            UInt64 previous_dst_position = 0;
             for (size_t i = 0; i < length; ++i)
-            {
-                const size_t src_position = src_indexes.getUInt(start + i);
-                if (src_position != previous_src_position)
-                {
-                    previous_src_position = src_position;
-                    if (src_null_index && src_position == *src_null_index)
-                        previous_dst_position = dst_dictionary.getNullValueIndex();
-                    else if (dst_keys.compareAt(dst_default_index, src_position, src_keys, 1) == 0)
-                        previous_dst_position = dst_default_index;
-                    else
-                        previous_dst_position = dst_dictionary.uniqueInsertFrom(src_keys, src_position);
-                }
-                positions[i] = previous_dst_position;
-            }
+                positions[i] = src_indexes.getUInt(start + i);
+            getDictionary().uniqueInsertRowsFrom(*low_cardinality_src->getDictionary().getNestedColumn(), {positions.data(), length});
             for (size_t i = 0; i < length; ++i)
                 idx.insertIndex(positions[i]);
             return;
