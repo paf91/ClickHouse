@@ -263,6 +263,8 @@ private:
 
         String value;
         bool quoted = false;
+        /// An unquoted element with an escape is never a null: PostgreSQL reads `{\NULL}` as the string `NULL`.
+        bool escaped = false;
 
         if (pos < text.size() && text[pos] == '"')
         {
@@ -290,24 +292,30 @@ private:
         }
         else
         {
+            /// Trailing whitespace is insignificant, unless it arrived through an escape: `{a\ }` is `a `.
+            size_t significant_size = 0;
             while (pos < text.size() && text[pos] != ',' && text[pos] != '}')
             {
+                bool is_escaped = false;
                 if (text[pos] == '\\')
                 {
                     ++pos;
                     if (pos >= text.size())
                         throwError("unterminated escape sequence");
+                    is_escaped = true;
+                    escaped = true;
                 }
                 value += text[pos];
                 ++pos;
+                if (is_escaped || !isWhitespaceASCII(value.back()))
+                    significant_size = value.size();
             }
 
-            while (!value.empty() && isWhitespaceASCII(value.back()))
-                value.pop_back();
+            value.resize(significant_size);
         }
 
-        /// Only an unquoted `NULL` is a null element - `"NULL"` is the four-character string.
-        if (!quoted && Poco::toUpper(value) == "NULL")
+        /// Only an unquoted, unescaped `NULL` is a null element - `"NULL"` is the four-character string.
+        if (!quoted && !escaped && Poco::toUpper(value) == "NULL")
         {
             /// `LowCardinality(Nullable(T))` holds nulls too, and its default value is a null, but the
             /// column itself does not report as nullable.
