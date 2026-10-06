@@ -75,10 +75,11 @@ namespace
 /// functions are picked up dynamically via `FunctionFactory::tryGet`'s
 /// `isDeterministic` (no list maintenance needed there). This set covers what
 /// `FunctionFactory` does not reach: table functions (registered in
-/// `TableFunctionFactory`), and aggregate functions whose metamorphic
-/// `State`/`Merge` rewrite legitimately produces a different value than direct
-/// evaluation (so they aren't "non-deterministic functions" in the
-/// `system.functions` sense, but they are unsafe for oracle equality).
+/// `TableFunctionFactory`), and aggregate functions not registered as
+/// `is_order_dependent` whose metamorphic `State`/`Merge` rewrite legitimately
+/// produces a different value than direct evaluation (so they aren't
+/// "non-deterministic functions" in the `system.functions` sense, but they are
+/// unsafe for oracle equality).
 const std::unordered_set<String> non_deterministic_functions = {
     "rand", "rand32", "rand64", "randConstant", "randUniform", "randNormal",
     "randBernoulli", "randExponential", "randChiSquared", "randStudentT",
@@ -111,20 +112,10 @@ const std::unordered_set<String> non_deterministic_functions = {
     "fuzzQuery",
     "materialize",
     /// Non-deterministic or approximate aggregate functions.
-    "any", "anyLast", "anyHeavy",
     "anyRespectNulls", "anyLastRespectNulls",
     /// `anyRespectNulls` / `anyLastRespectNulls` are aliases; these are the
     /// names they are registered under and are equally valid in a query.
     "any_respect_nulls", "anyLast_respect_nulls",
-    "first_value", "last_value",
-    "topK", "topKWeighted",
-    /// `approx_top_k` / `approx_top_sum` are the space-saving counterparts of
-    /// `topK`: which elements survive the bounded counter table, and the counts
-    /// reported for them, depend on the order values arrive in and on how the
-    /// partial states are merged. `QueryFuzzer`'s aggregate swap list offers
-    /// `approx_top_k` for any single-argument aggregate, so omitting it here let
-    /// the TLP Aggregate oracle report false mismatches on master CI.
-    "approx_top_k", "approx_top_sum",
     "uniqHLL12", "uniqCombined", "uniqCombined64", "uniqTheta",
     /// Approximate quantile/median functions: State/Merge gives different results
     /// than direct computation due to approximate merging algorithms. Block both
@@ -153,15 +144,14 @@ const std::unordered_set<String> non_deterministic_functions = {
     /// `quantileExactWeightedInterpolated`, which stays exact and is therefore
     /// deliberately NOT listed here.
     "quantilePrometheusHistogram", "quantilesPrometheusHistogram",
-    /// Order-dependent or floating-point aggregates whose State/Merge path
-    /// can differ from direct computation. `sum` / `sumWithOverflow` are
+    /// Floating-point aggregates whose State/Merge path can differ from direct
+    /// computation. `sum` / `sumWithOverflow` are
     /// blocked because floating-point addition is non-associative — the
     /// metamorphic `sumState`/`sumMerge` rewrite can legitimately produce a
     /// different rounded value than direct `sum` over Float32/Float64
     /// arguments. We don't try to inspect argument types here, so we exclude
     /// `sum` family unconditionally — that costs some integer-sum coverage
     /// but eliminates a flaky-mismatch source.
-    "deltaSum", "deltaSumTimestamp",
     "stddevPop", "stddevSamp", "stddevPopStable", "stddevSampStable",
     "varPop", "varSamp", "varPopStable", "varSampStable",
     "covarPop", "covarSamp", "covarPopStable", "covarSampStable", "corr", "corrStable",
@@ -173,24 +163,11 @@ const std::unordered_set<String> non_deterministic_functions = {
     /// a merge-order-dependent order, exactly like `sum` above.
     "sumMappedArrays", "sumMapWithOverflow",
     "sumMapFiltered", "sumMapFilteredWithOverflow",
-    "stochasticLinearRegression", "stochasticLogisticRegression",
     "initializeAggregation",
     /// Order-dependent aggregate functions.
-    "groupArray", "groupUniqArray", "groupArrayInsertAt",
-    /// `groupArrayIntersect` emits the surviving set in hash-table iteration
-    /// order, which depends on the insertion history — same reason as
-    /// `groupUniqArray`. The *set* matches, the array order does not.
-    "groupArrayIntersect",
-    "groupArrayMovingSum", "groupArrayMovingAvg",
-    "groupArraySorted", "groupArrayLast",
-    "groupArraySample", "groupFormat", "hierarchicalKMeans", "MVTEncode",
+    "groupArraySorted",
     /// Events with equal timestamps are matched in arrival order.
     "sequenceMatch", "sequenceCount", "sequenceMatchEvents", "sequenceNextNode",
-    /// `argMin`/`argMax`/`groupConcat` are order-dependent on ties: the
-    /// `State`/`Merge`, DQP and subquery-rewrite paths can legitimately
-    /// pick a different "arg" value or concatenation order than direct
-    /// evaluation, so exact row equality is wrong here.
-    "argMin", "argMax", "argAndMin", "argAndMax", "groupConcat",
     /// Approximate/formatting-dependent aggregates.
     "entropy", "exponentialMovingAverage", "exponentialTimeDecayedAvg",
     "simpleLinearRegression", "sparkBar", "histogram",
@@ -206,9 +183,6 @@ const std::unordered_set<String> non_deterministic_functions = {
     /// points: on ties in the x argument which point wins is merge-order
     /// dependent, and the ratio is a Float64 either way.
     "boundingRatio",
-    /// `mergedJSONPatch` keeps the last write per path ordered by the sort key,
-    /// so tied keys resolve differently depending on the merge order.
-    "mergedJSONPatch",
     /// Depends on physical data layout, not values.
     "estimateCompressionRatio",
     /// Statistical hypothesis-test / correlation aggregates: they return
@@ -233,8 +207,8 @@ constexpr size_t MAX_ORACLE_RESULT_ROWS = 10'000'000;
 
 /// Case-insensitive view of `non_deterministic_functions`. ClickHouse resolves
 /// aggregate (and scalar) function names case-insensitively and the parser
-/// preserves whatever spelling the fuzzer produced, so a query using `SUM`,
-/// `argmax`, or `ANY` must still match the unsafe set. Compare lowercased.
+/// preserves whatever spelling the fuzzer produced, so a query using `SUM` or
+/// `AVG` must still match the unsafe set. Compare lowercased.
 const std::unordered_set<String> non_deterministic_functions_lower = []
 {
     std::unordered_set<String> result;
@@ -299,9 +273,9 @@ String resolveAggregateAlias(const String & name)
 /// entry of `non_deterministic_functions` (matched case-insensitively).
 /// Membership must be tested at EVERY stripping stage, not only at the
 /// fixpoint: real aggregate names can themselves end in a combinator-looking
-/// word, e.g. `groupUniqArrayOrNull` strips to `groupUniqArray` (a set
-/// member), but one more iteration eats the literal `Array` and produces
-/// `groupUniq`, which the set does not contain.
+/// word, e.g. `retentionStateOrNull` strips to `retentionState` (a set
+/// member), but one more iteration eats the literal `State` and produces
+/// `retention`, which the set does not contain.
 bool namesUnsafeFunctionAfterStripping(String name)
 {
     while (true)
@@ -314,9 +288,14 @@ bool namesUnsafeFunctionAfterStripping(String name)
 }
 
 /// As above, but a name is also unsafe when the aggregate function it is an
-/// alias of is.
+/// alias of is, or when it names an aggregate registered as order-dependent.
 bool isOracleUnsafeFunctionName(String name)
 {
+    /// Window functions are registered as order-dependent too; their order comes from `OVER`.
+    if (const auto properties = AggregateFunctionFactory::instance().tryGetProperties(name, NullsAction::EMPTY);
+        properties && properties->is_order_dependent && !properties->is_window_function)
+        return true;
+
     while (true)
     {
         if (non_deterministic_functions_lower.contains(Poco::toLower(name)))
@@ -348,9 +327,9 @@ bool isOracleUnsafeFunctionName(String name)
 ///   1. Table functions (`file`, `url`, `s3`, `numbers`, ...) — registered in
 ///      `TableFunctionFactory`; would slip through as scalar calls otherwise.
 ///   2. Aggregate functions whose `State`/`Merge` rewrite legitimately
-///      diverges from direct evaluation (`any`, `topK`, `quantile*`, `sum` on
-///      floats, ...) — semantically deterministic but unsafe for our exact
-///      equality oracle.
+///      diverges from direct evaluation (`quantile*`, `sum` on floats, ...):
+///      semantically deterministic but unsafe for our exact equality oracle.
+///      Order-dependent aggregates are read from their registration instead.
 /// We strip aggregate combinator suffixes before lookup so e.g.
 /// `first_valueOrNull` resolves to `first_value` — the fuzzer routinely
 /// appends `*OrNull`/`*Distinct`/`*State` chains and neither
