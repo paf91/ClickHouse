@@ -849,7 +849,7 @@ def test_paimon_incremental_read_expired_snapshot_is_skipped(started_cluster):
     This is the other half of the "unreadable snapshot fails the read" rule: only ids
     below the warehouse's earliest snapshot may be skipped, so if resolving `earliest`
     stops working, a table that merely expired old snapshots would stall forever. The
-    three phases below re-run the same scan with the hint absent, valid, and stale."""
+    phases below re-run the same scan with the hint absent, valid, stale, and malformed."""
     writer_container_id = cluster.get_instance_docker_id("paimon-incremental-writer")
 
     warehouse_name = "warehouse_expired"
@@ -889,6 +889,9 @@ def test_paimon_incremental_read_expired_snapshot_is_skipped(started_cluster):
             # A hint left behind pointing at an expired snapshot. Trusting it would put
             # earliest back at 1, which would make snapshot 2 look like a real error.
             ("hint stale", f"printf 1 > {snapshot_dir}/EARLIEST"),
+            # A hint that cannot be parsed, e.g. partially written. It is only a shortcut, so
+            # it must be ignored like a stale one rather than stall the stream.
+            ("hint malformed", f"printf not-a-number > {snapshot_dir}/EARLIEST"),
         ):
             _warehouse_shell(writer_container_id, hint_setup)
             zk.set(f"{keeper_path}/committed_snapshot", b"1")

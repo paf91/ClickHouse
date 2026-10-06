@@ -56,6 +56,9 @@ namespace ErrorCodes
 {
 extern const int FILE_DOESNT_EXIST;
 extern const int CANNOT_PARSE_NUMBER;
+extern const int MEMORY_LIMIT_EXCEEDED;
+extern const int QUERY_WAS_CANCELLED;
+extern const int QUERY_WAS_CANCELLED_BY_CLIENT;
 }
 
 /// A valid `LATEST` contains one positive decimal `Int64` and fits well within this limit.
@@ -286,11 +289,14 @@ std::optional<Int64> PaimonTableClient::getEarliestSnapshotId()
 {
     const auto snapshot_dir = std::filesystem::path(table_location) / PAIMON_SNAPSHOT_DIR;
 
-    /// Try the EARLIEST hint first, but only trust it when it agrees with the directory:
-    /// the hint must point at an existing snapshot whose predecessor is already gone.
-    StoredObject earliest_hint_object(snapshot_dir / PAIMON_SNAPSHOT_EARLIEST_HINT);
-    if (object_storage->exists(earliest_hint_object))
+    /// Returns the EARLIEST hint only when it agrees with the directory: it must point at an
+    /// existing snapshot whose predecessor is already gone. nullopt if the hint is missing or stale.
+    auto read_verified_earliest_hint = [&]() -> std::optional<Int64>
     {
+        StoredObject earliest_hint_object(snapshot_dir / PAIMON_SNAPSHOT_EARLIEST_HINT);
+        if (!object_storage->exists(earliest_hint_object))
+            return std::nullopt;
+
         auto read_settings = getPaimonMetadataReadSettings(/*disable_filesystem_cache=*/true);
         read_settings.local_fs_settings.buffer_size
             = std::max(read_settings.local_fs_settings.buffer_size, PAIMON_HINT_FILE_SIZE);
@@ -302,25 +308,42 @@ std::optional<Int64> PaimonTableClient::getEarliestSnapshotId()
         Int64 hinted_version = -1;
         const auto * end = hint_version_string.data() + hint_version_string.size();
         auto [ptr, ec] = std::from_chars(hint_version_string.data(), end, hinted_version);
-
-        /// Malformed content (e.g. a partially overwritten hint) only makes the hint unusable,
-        /// like a stale one: it is not an error, because the directory listing below decides.
-        /// Errors reading the storage are not caught here - without the storage nothing decides.
         if (ec != std::errc() || ptr != end || hinted_version <= 0 || hinted_version == std::numeric_limits<Int64>::max())
         {
-            LOG_WARNING(log, "The Paimon EARLIEST hint file content '{}' is invalid, falling back to snapshot listing",
-                hint_version_string);
+            throw Exception(
+                ErrorCodes::CANNOT_PARSE_NUMBER, "The Paimon snapshot hint file content: {} is invalid.", hint_version_string);
         }
-        else
-        {
-            StoredObject hinted_object(snapshot_dir / (PAIMON_SNAPSHOT_PREFIX + std::to_string(hinted_version)));
-            StoredObject previous_object(snapshot_dir / (PAIMON_SNAPSHOT_PREFIX + std::to_string(hinted_version - 1)));
-            if (object_storage->exists(hinted_object) && !object_storage->exists(previous_object))
-                return hinted_version;
-        }
+
+        StoredObject hinted_object(snapshot_dir / (PAIMON_SNAPSHOT_PREFIX + std::to_string(hinted_version)));
+        StoredObject previous_object(snapshot_dir / (PAIMON_SNAPSHOT_PREFIX + std::to_string(hinted_version - 1)));
+        if (object_storage->exists(hinted_object) && !object_storage->exists(previous_object))
+            return hinted_version;
+        return std::nullopt;
+    };
+
+    /// The hint is only a shortcut: whatever it says, the decision is the directory listing's
+    /// when the hint cannot be used. So a hint that cannot be read or parsed (a transient error,
+    /// the file being rewritten between the `exists` and the read, partially written content) is
+    /// treated like a stale one. This does not fail open: if the storage itself is unavailable,
+    /// the listing below throws, and the caller then leaves the cursor where it is.
+    try
+    {
+        if (auto hinted_version = read_verified_earliest_hint())
+            return hinted_version;
+    }
+    catch (...)
+    {
+        /// The query is going away, so there is no point in listing the directory.
+        const auto code = getCurrentExceptionCode();
+        if (code == ErrorCodes::QUERY_WAS_CANCELLED || code == ErrorCodes::QUERY_WAS_CANCELLED_BY_CLIENT
+            || code == ErrorCodes::MEMORY_LIMIT_EXCEEDED)
+            throw;
+
+        LOG_WARNING(
+            log, "Failed to use the Paimon EARLIEST hint file, falling back to snapshot listing: {}", getCurrentExceptionMessage(false));
     }
 
-    /// The hint is missing, malformed or stale - the snapshot directory is the source of truth.
+    /// The hint is missing, unusable or stale - the snapshot directory is the source of truth.
     auto snapshot_files = listFiles(
         *object_storage,
         table_location,
