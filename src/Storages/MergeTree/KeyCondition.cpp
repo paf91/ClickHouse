@@ -3294,16 +3294,19 @@ static bool tryPrepareSetColumnsForIndex(
         /// set - a pruned row that the predicate keeps, which relaxing the atom cannot repair, because a
         /// relaxed atom still prunes on the points it holds. The index is not used for such a set. A
         /// `String` element is cast the other way only by padding a `FixedString` key, which keeps the
-        /// atom a superset; an element with value carriers keeps its own carrier and is handled above.
+        /// atom a superset; a top-level `Dynamic`, `Variant` or `JSON` element keeps its own carrier and is
+        /// handled above. A composite that merely contains one, such as `Map(String, Dynamic)`, gets no
+        /// such exemption: the key is still cast into the composite, which is a parse or a conversion error.
         if (membership_compares_carriers)
         {
             const DataTypePtr predicate_column_type = removeLowCardinalityAndNullable(
                 set_transforming_dags[indexes_mapping_index].has_value() ? set_transforming_dags[indexes_mapping_index]->input_type
                                                                          : key_column_type);
             const DataTypePtr element_type = removeLowCardinalityAndNullable(set_element_type);
+            const bool element_is_carrier = isDynamic(element_type) || isVariant(element_type) || isObject(element_type);
 
             if (isStringOrFixedString(predicate_column_type) && !isString(element_type) && !isNothing(element_type)
-                && !element_type->equals(*predicate_column_type) && !typeHasValueCarriers(*element_type))
+                && !element_type->equals(*predicate_column_type) && !element_is_carrier)
                 return false;
         }
 

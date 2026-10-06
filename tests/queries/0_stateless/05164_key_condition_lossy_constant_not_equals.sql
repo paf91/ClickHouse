@@ -201,4 +201,8 @@ INSERT INTO t_lossy_const_str_key VALUES ('x');
 SELECT count() FROM t_lossy_const_str_key WHERE s IN (SELECT map('a', toUInt8(1))); -- { serverError TYPE_MISMATCH }
 SELECT countIf(s IN (SELECT map('a', toUInt8(1)))) FROM t_lossy_const_str_key; -- { serverError TYPE_MISMATCH }
 
+-- Nor does a composite that merely contains a `Dynamic`: only a top-level carrier keeps its own type.
+SELECT count() FROM t_lossy_const_str_key WHERE s IN (SELECT map('a', CAST(toUInt8(1), 'Dynamic'))); -- { serverError TYPE_MISMATCH }
+SELECT countIf(s IN (SELECT map('a', CAST(toUInt8(1), 'Dynamic')))) FROM t_lossy_const_str_key; -- { serverError TYPE_MISMATCH }
+
 DROP TABLE t_lossy_const_str_key;
