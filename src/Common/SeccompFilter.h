@@ -34,8 +34,15 @@ enum class SeccompMode : uint8_t
 };
 
 /// The mode the server passed to `installSeccompFilter` at startup, or nothing if it has not called
-/// it. This, not the configuration, is the policy in force: the configuration can be reloaded, but
-/// the filter cannot be changed once installed - nor installed later, if it was not at startup.
+/// it. The configuration can be reloaded, but the filter cannot be changed once installed - nor
+/// installed later, if it was not at startup - so a different value in a reloaded configuration
+/// takes effect only after a restart.
+std::optional<SeccompMode> getRequestedSeccompMode();
+
+/// The mode of the filter in force: the one requested at startup, or `Disabled` if no filter was
+/// installed - because the policy is not implemented for this architecture, or because the `Log`
+/// mode was requested and the kernel cannot install its filter. Nothing if `installSeccompFilter`
+/// has not been called. This, not the configuration, is the policy in force.
 std::optional<SeccompMode> getInstalledSeccompMode();
 
 #if defined(OS_LINUX)

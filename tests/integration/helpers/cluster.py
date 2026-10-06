@@ -6707,6 +6707,17 @@ class ClickHouseInstance:
             p.join(self.base_config_dir, self.main_config_name),
             p.join(instance_config_dir, self.main_config_name),
         )
+        if self.with_installed_binary:
+            # The main config.xml comes from the current sources, and an older server version refuses
+            # to start on a top-level element it does not know yet, such as `seccomp`. Only the old
+            # version needs it removed, but the config is shared with `restart_with_latest_version`,
+            # where the setting then keeps its built-in default.
+            main_config_path = p.join(instance_config_dir, self.main_config_name)
+            with open(main_config_path, "r") as f:
+                main_config = f.read()
+            main_config = re.sub(r"\n[ \t]*<seccomp>[^<]*</seccomp>", "", main_config)
+            with open(main_config_path, "w") as f:
+                f.write(main_config)
         shutil.copyfile(
             p.join(self.base_config_dir, self.users_config_name),
             p.join(instance_config_dir, self.users_config_name),
@@ -6744,13 +6755,6 @@ class ClickHouseInstance:
                 "0_common_instance_config.xml",
                 self.config_d_dir,
                 self.with_installed_binary,
-            )
-
-        if self.with_installed_binary:
-            # The main config.xml is copied from the current sources, so an older server version
-            # must not refuse to start on an element it does not know yet, such as `seccomp`.
-            write_embedded_config(
-                "0_common_skip_check_for_incorrect_settings.xml", self.config_d_dir
             )
 
         if not self.cluster.with_dolor:

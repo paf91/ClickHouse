@@ -1938,6 +1938,8 @@ A filter cannot be removed or relaxed once installed, and it is inherited across
 
 The policy is only implemented for x86-64 and AArch64, since it is a list of architecture-specific system call numbers. On any other architecture the server logs a warning at startup and runs without a filter, but `PR_SET_NO_NEW_PRIVS`, which does not depend on the architecture, is still set in every mode but `disabled`.
 
+`system.server_settings` reports the mode of the filter in force, not the configured one: `disabled` wherever the server runs without a filter - on an architecture without a policy, or in the `log` mode when the kernel cannot install its filter - and the mode set at startup otherwise, even after the configuration is reloaded with another value.
+
 **Example**
 
 ```xml
