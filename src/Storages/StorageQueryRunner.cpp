@@ -17,8 +17,6 @@
 #include <Interpreters/executeQuery.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTSQLSecurity.h>
-#include <Parsers/ParserQuery.h>
-#include <Parsers/parseQuery.h>
 #include <Processors/Executors/CompletedPipelineExecutor.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Processors/Sinks/SinkToStorage.h>
@@ -65,13 +63,9 @@ namespace Setting
     extern const SettingsLoadBalancing load_balancing;
     extern const SettingsString log_comment;
     extern const SettingsBool log_queries;
-    extern const SettingsUInt64 log_queries_cut_to_length;
     extern const SettingsMilliseconds log_queries_min_query_duration_ms;
     extern const SettingsLogQueriesType log_queries_min_type;
     extern const SettingsBool log_query_settings;
-    extern const SettingsUInt64 max_parser_backtracks;
-    extern const SettingsUInt64 max_parser_depth;
-    extern const SettingsUInt64 max_query_size;
 }
 
 namespace QueryRunnerSetting
@@ -638,23 +632,7 @@ private:
 
         const auto event_time = std::chrono::system_clock::now();
 
-        const char * pos = job.query.data();
-        const char * end = pos + job.query.size();
-        ParserQuery parser(end, /*allow_settings_after_format_in_insert_*/ true, /*implicit_select_*/ true);
-        String parse_error;
-        const ASTPtr ast = tryParseQuery(
-            parser,
-            pos,
-            end,
-            parse_error,
-            /*hilite*/ false,
-            "",
-            /*allow_multi_statements*/ false,
-            settings[Setting::max_query_size],
-            settings[Setting::max_parser_depth],
-            settings[Setting::max_parser_backtracks],
-            /*skip_insignificant*/ true);
-        const String query_for_logging = ast ? ast->formatForLogging(settings[Setting::log_queries_cut_to_length]) : "";
+        const String query_for_logging = formatQueryForLogging(job.query, settings);
 
         query_log->add([&](QueryLogElement & element)
         {
