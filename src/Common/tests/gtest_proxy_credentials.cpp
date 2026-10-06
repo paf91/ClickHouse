@@ -1,7 +1,15 @@
+#include "config.h"
+
 #include <gtest/gtest.h>
 
 #include <Common/ProxyConfiguration.h>
 #include <Poco/URI.h>
+
+#if USE_SSL
+#include <Poco/Net/Context.h>
+#include <Poco/Net/HTTPRequest.h>
+#include <Poco/Net/HTTPSClientSession.h>
+#endif
 
 namespace DB
 {
@@ -68,5 +76,56 @@ TEST(ProxyCredentials, UserInfoIsNotDecodedByPocoURI)
     Poco::URI::decode(password, decoded_password);
     ASSERT_EQ(decoded_password, "p%41ss:word");
 }
+
+#if USE_SSL
+
+namespace
+{
+
+/// Exposes the protected `proxyAuthenticate` hook that `sendRequest` calls for a request
+/// sent through a proxy without a `CONNECT` tunnel.
+class TestHTTPSClientSession : public Poco::Net::HTTPSClientSession
+{
+public:
+    using Poco::Net::HTTPSClientSession::HTTPSClientSession;
+    using Poco::Net::HTTPSClientSession::proxyAuthenticate;
+};
+
+}
+
+TEST(ProxyCredentials, HTTPSSessionSendsCredentialsWithoutTunnel)
+{
+    Poco::Net::Context::Params params;
+    params.verificationMode = Poco::Net::Context::VERIFY_NONE;
+    Poco::Net::Context::Ptr context = new Poco::Net::Context(Poco::Net::Context::CLIENT_USE, params);
+
+    TestHTTPSClientSession session("minio1", 9001, context);
+
+    Poco::Net::HTTPClientSession::ProxyConfig proxy_config;
+    proxy_config.host = "proxy";
+    proxy_config.port = 443;
+    proxy_config.protocol = "https";
+    proxy_config.tunnel = false;
+    proxy_config.username = "user";
+    proxy_config.password = "p@ssword";
+    session.setProxyConfig(proxy_config);
+
+    Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_GET, "/root/data", Poco::Net::HTTPMessage::HTTP_1_1);
+    session.proxyAuthenticate(request);
+
+    /// base64("user:p@ssword")
+    ASSERT_EQ(request.get("Proxy-Authorization", ""), "Basic dXNlcjpwQHNzd29yZA==");
+
+    /// Without credentials nothing is sent.
+    proxy_config.username.clear();
+    proxy_config.password.clear();
+    session.setProxyConfig(proxy_config);
+
+    Poco::Net::HTTPRequest request_without_credentials(Poco::Net::HTTPRequest::HTTP_GET, "/root/data", Poco::Net::HTTPMessage::HTTP_1_1);
+    session.proxyAuthenticate(request_without_credentials);
+    ASSERT_FALSE(request_without_credentials.has("Proxy-Authorization"));
+}
+
+#endif
 
 }
