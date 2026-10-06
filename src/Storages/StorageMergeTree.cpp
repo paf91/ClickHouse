@@ -4484,6 +4484,13 @@ void StorageMergeTree::wakeupBackgroundWorkers() noexcept
     /// part loaders returned without loading while the workers were disabled; a loader that saw a
     /// writable table re-arms itself, one that saw the temporary `table_readonly = 1` of a failed
     /// 0 -> 1 commit does not, so they are scheduled again explicitly, which is also faster.
+    ///
+    /// Nothing is woken up after `shutdown`: it has already stopped the part loaders and the cleanup
+    /// thread, and re-arming them here (e.g. from the rollback of a failed settings `ALTER`) would let
+    /// them fire on a shut-down table, possibly while `~MergeTreeData` destroys the state they touch.
+    if (shutdown_called.load())
+        return;
+
     try
     {
         background_operations_assignee.trigger();
