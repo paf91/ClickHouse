@@ -304,9 +304,37 @@ REGISTER_FUNCTION(PredictXGBoost)
             "the accepted keys.",
             {"Map(String, (U)Int8/16/32/64)"}}},
         .returned_value = {"The model prediction as Float64, one per row.", {"Float64"}},
-        .examples
-        = {{"Predict", "SELECT predictXGBoost('model', 1.0, 2.0);", "7.0"},
-           {"Predict with parameters", "SELECT predictXGBoost('model', 1.0, 2.0, map('type', 0, 'iteration_end', 0));", "7.0"}},
+        .examples = {{"Predict", R"(
+-- A model trained on the linear target y = 2 * x1 + 3 * x2. The XGBoost integration is experimental.
+SET enable_xgboost = 1;
+
+CREATE TABLE training_data (x1 Float64, x2 Float64, y Float64) ENGINE = MergeTree ORDER BY tuple();
+INSERT INTO training_data SELECT number AS x1, number * 2 AS x2, 2 * x1 + 3 * x2 AS y FROM numbers(100);
+
+CREATE DICTIONARY model (x1 Float64, x2 Float64, y Float64)
+PRIMARY KEY (x1, x2)
+SOURCE(CLICKHOUSE(TABLE 'training_data'))
+LAYOUT(XGBOOST(objective 'reg:squarederror' num_iterations 100 max_depth 6))
+LIFETIME(0);
+
+-- The ground truth is 2 * 1 + 3 * 2 = 8.
+SELECT round(predictXGBoost('model', 1.0, 2.0), 1) AS prediction;
+        )",
+        R"(
+┌─prediction─┐
+│          8 │
+└────────────┘
+        )"},
+           {"Predict with parameters", R"(
+-- The raw margin of the model above, before the objective's transformation. For `reg:squarederror` it is the
+-- prediction itself, while for `binary:logistic` it is the log-odds rather than the probability.
+SELECT round(predictXGBoost('model', 1.0, 2.0, map('type', 1)), 1) AS margin;
+        )",
+        R"(
+┌─margin─┐
+│      8 │
+└────────┘
+        )"}},
         .introduced_in = {26, 9},
         .category = FunctionDocumentation::Category::MachineLearning});
 }

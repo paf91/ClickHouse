@@ -11,6 +11,7 @@
 #include <Columns/IColumn.h>
 #include <Core/Block.h>
 #include <Common/Exception.h>
+#include <Common/logger_useful.h>
 #include <Common/scope_guard_safe.h>
 
 #include <base/types.h>
@@ -44,6 +45,51 @@ inline void throwOnError(int err, std::string_view call)
 {
     if (err != 0)
         throw Exception(ErrorCodes::XGBOOST_ERROR, "XGBoost call {} failed: {}", call, XGBGetLastError());
+}
+
+/// Forwards a message of the XGBoost library to the server log instead of `stderr`, where XGBoost writes by
+/// default. A message carries no separate level: it is formatted as `[HH:MM:SS] LEVEL: file:line: text`, and the
+/// lines XGBoost prints regardless of `verbosity` (such as its timing monitor) have no level at all.
+void logXGBoostMessage(const char * raw_message)
+{
+    static const LoggerPtr log = getLogger("XGBoost");
+
+    std::string_view message(raw_message);
+
+    /// The server log has its own timestamp.
+    if (message.starts_with('['))
+        if (const auto end = message.find("] "); end != std::string_view::npos)
+            message.remove_prefix(end + 2);
+
+    while (message.ends_with('\n'))
+        message.remove_suffix(1);
+
+    if (message.empty())
+        return;
+
+    auto consume_prefix = [&](std::string_view prefix)
+    {
+        if (!message.starts_with(prefix))
+            return false;
+        message.remove_prefix(prefix.size());
+        return true;
+    };
+
+    if (consume_prefix("WARNING: "))
+        LOG_WARNING(log, "{}", message);
+    else if (consume_prefix("INFO: "))
+        LOG_INFO(log, "{}", message);
+    else if (consume_prefix("DEBUG: "))
+        LOG_DEBUG(log, "{}", message);
+    else
+        LOG_INFO(log, "{}", message);
+}
+
+/// XGBoost keeps the log callback per thread, so it is registered on every thread that calls into the library
+/// before the call, rather than once. XGBoost is built without OpenMP, so it does not log from threads of its own.
+void registerLogCallback()
+{
+    throwOnError(XGBRegisterLogCallback(&logXGBoostMessage), "XGBRegisterLogCallback");
 }
 }
 
@@ -143,6 +189,8 @@ void XGBoostModel::finalizeTraining()
     chassert(labels.size() == ingested_rows);
     chassert(flattened_features.size() == ingested_rows * n_features);
 
+    registerLogCallback();
+
     throwOnError(
         XGDMatrixCreateFromMat(flattened_features.data(), ingested_rows, n_features, std::numeric_limits<float>::quiet_NaN(), &dmatrix),
         "XGDMatrixCreateFromMat");
@@ -222,6 +270,8 @@ ColumnPtr XGBoostModel::predict(const Block & batch, const PredictParameters & p
                 features.push_back(static_cast<float>(feature_cols[c]->getFloat64(r)));
         }
     }
+
+    registerLogCallback();
 
     DMatrixHandle predict_dmatrix{nullptr};
     SCOPE_EXIT({
