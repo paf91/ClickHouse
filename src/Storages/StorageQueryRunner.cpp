@@ -31,7 +31,6 @@
 #include <Common/Exception.h>
 #include <Common/LoggingHelpers.h>
 #include <Common/QueryScope.h>
-#include <Common/SensitiveDataMasker.h>
 #include <Common/SettingsChanges.h>
 #include <Common/Stopwatch.h>
 #include <Common/ThreadPool.h>
@@ -655,10 +654,7 @@ private:
             settings[Setting::max_parser_depth],
             settings[Setting::max_parser_backtracks],
             /*skip_insignificant*/ true);
-        const UInt64 cut_to_length = settings[Setting::log_queries_cut_to_length];
-        const String query_for_logging = ast && ast->hasSecretParts()
-            ? ast->formatForLogging(cut_to_length)
-            : wipeSensitiveDataAndCutToLength(job.query, cut_to_length, true);
+        const String query_for_logging = ast ? ast->formatForLogging(settings[Setting::log_queries_cut_to_length]) : "";
 
         query_log->add([&](QueryLogElement & element)
         {
