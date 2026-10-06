@@ -344,7 +344,7 @@ IsStorageTouched isStorageTouchedByMutations(
             }
             catch (...)
             {
-                /// Stop and join the pipeline first: `cancel` rethrows its own exception, which the destructor would log.
+                /// Stop and join the pipeline here: `cancel` rethrows the pipeline's pending exception, which the destructor would log.
                 executor.cancel();
                 throw;
             }
