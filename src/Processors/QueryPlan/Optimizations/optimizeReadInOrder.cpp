@@ -1664,6 +1664,15 @@ bool readingFromParallelReplicas(const QueryPlan::Node * node)
 
 }
 
+QueryPlan::Node * findReadingStepForReadInOrder(QueryPlan::Node & node, bool read_in_order_through_join)
+{
+    FindReadingStepContext find_reading_ctx{
+        .allow_existing_order = false,
+        .read_in_order_through_join = read_in_order_through_join,
+    };
+    return findReadingStep(node, find_reading_ctx);
+}
+
 InputOrderInfoPtr getInputOrderIfReadInOrderIsUseful(
     const SortingStep & sorting,
     const KeyDescription & sorting_key,

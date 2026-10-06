@@ -249,6 +249,35 @@ FROM ( EXPLAIN actions = 1
         parallel_replicas_for_non_replicated_merge_tree = 0
 );
 
+-- The preserved side is a subquery with `DISTINCT`, whose final `DistinctStep` the second pass does not descend
+-- through, so it cannot reach the read. `topKThroughJoin` must not defer to it then, but add its own Sort + Limit,
+-- both for a Merge table and for a plain table.
+SELECT 'plan_merge_distinct_subquery' AS label,
+       countIf(explain LIKE '%Sorting%') AS sort_count,
+       countIf(explain LIKE '%Limit%') AS limit_count
+FROM ( EXPLAIN actions = 0
+    SELECT l.k, r.v FROM (SELECT DISTINCT k, src FROM t_merge FINAL) AS l LEFT JOIN t_right AS r ON r.k = l.k
+    ORDER BY l.k DESC LIMIT 10
+    SETTINGS query_plan_top_k_through_join = 1, optimize_read_in_reverse_order_final = 1
+);
+
+SELECT 'plan_replacing_distinct_subquery' AS label,
+       countIf(explain LIKE '%Sorting%') AS sort_count,
+       countIf(explain LIKE '%Limit%') AS limit_count
+FROM ( EXPLAIN actions = 0
+    SELECT l.k, r.v FROM (SELECT DISTINCT k, src FROM t_replacing FINAL) AS l LEFT JOIN t_right AS r ON r.k = l.k
+    ORDER BY l.k DESC LIMIT 10
+    SETTINGS query_plan_top_k_through_join = 1, optimize_read_in_reverse_order_final = 1
+);
+
+SELECT 'rows_merge_distinct_subquery_equal' AS label, (SELECT groupArray((k, src, v)) FROM (
+    SELECT l.k AS k, l.src AS src, r.v AS v FROM (SELECT DISTINCT k, src FROM t_merge FINAL) AS l LEFT JOIN t_right AS r ON r.k = l.k
+    ORDER BY l.k DESC LIMIT 10 SETTINGS query_plan_top_k_through_join = 1, optimize_read_in_reverse_order_final = 1
+)) = (SELECT groupArray((k, src, v)) FROM (
+    SELECT l.k AS k, l.src AS src, r.v AS v FROM (SELECT DISTINCT k, src FROM t_merge FINAL) AS l LEFT JOIN t_right AS r ON r.k = l.k
+    ORDER BY l.k DESC LIMIT 10 SETTINGS optimize_read_in_order = 0, query_plan_top_k_through_join = 0
+));
+
 SELECT 'rows_merge_reverse_on' AS label, groupArray((k, src, v)) FROM (
     SELECT l.k AS k, l.src AS src, r.v AS v FROM t_merge AS l FINAL LEFT JOIN t_right AS r ON r.k = l.k
     ORDER BY l.k DESC LIMIT 10

@@ -16,6 +16,11 @@ using InputOrderInfoPtr = std::shared_ptr<const InputOrderInfo>;
 namespace QueryPlanOptimizations
 {
 
+/// Returns the node of the reading step that `optimizeReadInOrder` would find below a sorting step placed on top of `node`,
+/// descending only through the steps it descends itself (expressions, filters, preliminary `DISTINCT`, set-building steps,
+/// and joins with `read_in_order_through_join`), or `nullptr` if there is no such read or it is already read in order.
+QueryPlan::Node * findReadingStepForReadInOrder(QueryPlan::Node & node, bool read_in_order_through_join);
+
 /// Returns the input order that `optimizeReadInOrder` would request to satisfy the query's `sorting` step by reading rows
 /// in `sorting_key` order, or `nullptr` if reading in order would not be useful. Its `direction` is the reading direction,
 /// which is the direction of the sort description flipped by the reverse flags of the sorting key.

@@ -147,18 +147,12 @@ bool joinDefeatsReadInOrderThroughJoin(const IQueryPlanStep & step)
     return true;
 }
 
-/// Walk down a single-child chain looking for a step that reads in sorting-key order:
-/// a `ReadFromMergeTree` or a `ReadFromMerge` (a `Merge` table, whose children are
-/// `MergeTree` reads). We use this to defer to `optimizeReadInOrder`'s through-join pass
-/// when the preserved input can stream rows in sort-key order from MergeTree's primary
-/// key. Inserting our explicit `Sort + Limit n` would mask that opportunity and force a
-/// materializing sort.
-template <typename Step>
-Step * findStorageRead(QueryPlan::Node * node)
+/// Walk down a single-child chain looking for a `ReadFromMergeTree` step.
+const ReadFromMergeTree * findMergeTreeRead(const QueryPlan::Node * node)
 {
     while (node)
     {
-        if (auto * reading = typeid_cast<Step *>(node->step.get()))
+        if (const auto * reading = typeid_cast<const ReadFromMergeTree *>(node->step.get()))
             return reading;
         if (node->children.size() != 1)
             return nullptr;
@@ -360,7 +354,7 @@ size_t tryTopKThroughJoin(QueryPlan::Node * parent_node, QueryPlan::Nodes & node
     /// turn the preserved-side scan into `WithOrder` mode, conflicting with the existing
     /// `read_in_order_through_join` skip for parallel replicas and causing coordination
     /// mode mismatch ("Replica decided to read in Default mode, not in WithOrder").
-    if (const auto * reading = findStorageRead<ReadFromMergeTree>(preserved_input_node))
+    if (const auto * reading = findMergeTreeRead(preserved_input_node))
     {
         if (reading->isParallelReadingFromReplicas())
             return 0;
@@ -430,7 +424,13 @@ size_t tryTopKThroughJoin(QueryPlan::Node * parent_node, QueryPlan::Nodes & node
             n,
             sort_step->getSettings());
 
-        if (const auto * reading = findStorageRead<ReadFromMergeTree>(preserved_input_node))
+        /// Look for the read the same way pass 2 does: it descends only through some steps (expressions,
+        /// filters, preliminary `DISTINCT`, ...), so a read below any other step, e.g. a final `DISTINCT`
+        /// of a subquery, is not reached by it, and deferring there would silently disable both optimizations.
+        QueryPlan::Node * reading_node = findReadingStepForReadInOrder(*preserved_input_node, settings.read_in_order_through_join);
+        IQueryPlanStep * reading_step = reading_node ? reading_node->step.get() : nullptr;
+
+        if (const auto * reading = typeid_cast<const ReadFromMergeTree *>(reading_step))
         {
             const auto order_info = getInputOrderIfReadInOrderIsUseful(
                 probe_sort_step,
@@ -443,7 +443,7 @@ size_t tryTopKThroughJoin(QueryPlan::Node * parent_node, QueryPlan::Nodes & node
             if (order_info && !reverse_read_blocks_pass2)
                 return 0;
         }
-        else if (auto * merge = findStorageRead<ReadFromMerge>(preserved_input_node))
+        else if (auto * merge = typeid_cast<ReadFromMerge *>(reading_step))
         {
             /// A `Merge` table is read through its own step and pass 2 asks every child table
             /// (`ReadFromMerge::requestReadingInOrder`), so the probe asks them all the same way.
