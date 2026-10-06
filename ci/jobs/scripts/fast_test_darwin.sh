@@ -23,13 +23,16 @@ print_host_state() {
     echo "runner-init: provisioned $(cat ~/.clickhouse-ci-runner-init-version 2>/dev/null), running $(grep -m1 -o 'version: int = [0-9]*' /tmp/runner-init.py 2>/dev/null)"
     ls -l /System/Volumes/VM
     timeout 30 diskutil apfs list | grep -E 'APFS Volume Disk|Mount Point|Capacity Consumed'
-    local deleted
-    deleted=$(timeout 60 sudo -n lsof -nP +L1 2>/dev/null | awk '$5 == "REG"')
-    echo "$deleted" | awk 'NF {n++; s += $7} END {printf "open but deleted files: %d, %.1f GiB\n", n, s / 2^30}'
+    echo "diskutil exit status ${PIPESTATUS[0]}"
+    local deleted lsof_rc
+    deleted=$(timeout 60 sudo -n lsof -nP +L1 2>/dev/null | awk '$5 == "REG"'; exit "${PIPESTATUS[0]}")
+    lsof_rc=$?
+    echo "$deleted" | awk -v rc="$lsof_rc" 'NF {n++; s += $7} END {printf "open but deleted files: %d, %.1f GiB (lsof exit status %d)\n", n, s / 2^30, rc}'
     echo "$deleted" | sort -k7,7 -rn | head -n 5 | cut -c1-200
     ps -axm -o pid,ppid,user,etime,rss,command | head -n 11 | cut -c1-200
     if [ "$1" = start ] && [ "$(df -P /System/Volumes/Data | awk 'NR == 2 {print $5 + 0}')" -ge 60 ]; then
         timeout 120 sudo -n du -xk -d 4 /System/Volumes/Data 2>/dev/null | awk '$1 >= 2^20' | sort -rn | head -n 30
+        echo "du exit status ${PIPESTATUS[0]}"
     fi
 }
 
