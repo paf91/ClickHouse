@@ -293,10 +293,21 @@ UnorderedMapWithMemoryTracking<String, String> XGBoostModel::sanitizeTrainingPar
         // If we found num_iterations, record this value and do not add it to the final map
         if (key == "num_iterations")
         {
-            int parsed_iterations = 0;
-            if (!tryParse(parsed_iterations, value) || parsed_iterations <= 0)
+            /// Parsed as `UInt64`, so that a positive integer too large for the `int` iteration index of
+            /// `XGBoosterUpdateOneIter` is reported as out of range rather than as not an integer.
+            UInt64 parsed_iterations = 0;
+            if (!tryParse(parsed_iterations, value) || parsed_iterations == 0)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Parameter 'num_iterations' must be a positive integer, got '{}'", value);
-            num_iterations = parsed_iterations;
+
+            constexpr auto max_iterations = static_cast<UInt64>(std::numeric_limits<int>::max());
+            if (parsed_iterations > max_iterations)
+                throw Exception(
+                    ErrorCodes::BAD_ARGUMENTS,
+                    "Parameter 'num_iterations' is {}, but the maximum is {}",
+                    parsed_iterations,
+                    max_iterations);
+
+            num_iterations = static_cast<int>(parsed_iterations);
         }
         else
         {
