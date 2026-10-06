@@ -2204,7 +2204,21 @@ bool ParserColumnsTransformers::parseImpl(Pos & pos, ASTPtr & node, Expected & e
         auto opos = pos;
         if (ParserExpression().parse(pos, lambda, expected))
         {
-            if (auto * func = lambda->as<ASTFunction>(); func && func->name == "lambda")
+            auto * func = lambda->as<ASTFunction>();
+            if (!func || func->name != "lambda")
+            {
+                /// ParserExpression also takes an operator after `lambda(...)`, as in `APPLY lambda(tuple(x), f(x)) > 1`;
+                /// the call alone is the lambda then, as when nothing follows it.
+                func = nullptr;
+                pos = opos;
+                ASTPtr name;
+                auto after_name = pos;
+                if (ParserIdentifier().parse(after_name, name, expected) && getIdentifierName(name) == "lambda"
+                    && after_name->type == TokenType::OpeningRoundBracket && ParserFunction().parse(pos, lambda, expected))
+                    func = lambda->as<ASTFunction>();
+            }
+
+            if (func && func->name == "lambda")
             {
                 if (!isASTLambdaFunction(*func))
                     throw Exception(ErrorCodes::SYNTAX_ERROR, "Lambda function definition expects two arguments, first argument must be a tuple of arguments");
