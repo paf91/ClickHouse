@@ -396,7 +396,7 @@ public:
                 /// Merge such entries into one instead of rejecting the state.
                 if constexpr (is_floating_point<KeyType> || std::is_same_v<KeyType, BFloat16>)
                 {
-                    mergeSerializedDuplicate(it->second, buf, arena);
+                    mergeSerializedDuplicate(it->second, buf, version, arena);
                     continue;
                 }
                 else
@@ -424,13 +424,14 @@ public:
     }
 
     /// Deserializes one nested state into a temporary place and merges it into `place`.
-    void mergeSerializedDuplicate(AggregateDataPtr place, ReadBuffer & buf, Arena * arena) const
+    /// The duplicate entry is in the same format as the others, so it takes the same `version`.
+    void mergeSerializedDuplicate(AggregateDataPtr place, ReadBuffer & buf, std::optional<size_t> version, Arena * arena) const
     {
         AggregateDataPtr tmp_place = arena->alignedAlloc(nested_func->sizeOfData(), nested_func->alignOfData());
         nested_func->create(tmp_place);
         try
         {
-            nested_func->deserialize(tmp_place, buf, std::nullopt, arena);
+            nested_func->deserialize(tmp_place, buf, version, arena);
             /// A zero-sized nested state aliases `place`, see `mergeImpl`.
             if (nested_func->sizeOfData() != 0)
                 nested_func->merge(place, tmp_place, arena);

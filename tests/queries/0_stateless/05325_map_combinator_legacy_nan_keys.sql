@@ -13,3 +13,8 @@ SELECT countMapMerge(CAST(unhex('02' || '0000C07F' || '01' || '0100C07F' || '02'
 
 -- A duplicate key of a non-floating point type is still rejected.
 SELECT countMapMerge(CAST(unhex('02' || '01000000' || '01' || '01000000' || '02'), 'AggregateFunction(countMap, Map(UInt32, UInt8))')); -- { serverError INCORRECT_DATA }
+
+-- The duplicate entry of a versioned nested function is read with the same version as the others.
+-- Version 1 of the `uniq` state has an extra field, so reading it as version 0 would misparse the state.
+SELECT uniqMapMerge(CAST(unhex('02' || '000000000000F87F' || '0000012CCBC234' || '010000000000F87F' || '000001E7830665'), 'AggregateFunction(1, uniqMap, Map(Float64, UInt8))'));
+SELECT uniqMapMerge(CAST(unhex('02' || '000000000000F87F' || '00012CCBC234' || '010000000000F87F' || '0001E7830665'), 'AggregateFunction(0, uniqMap, Map(Float64, UInt8))'));
