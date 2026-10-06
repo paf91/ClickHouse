@@ -21,6 +21,11 @@
 namespace DB
 {
 
+namespace ErrorCodes
+{
+extern const int BAD_ARGUMENTS;
+}
+
 class Aggregator;
 struct AggregatedDataVariants;
 
@@ -89,34 +94,74 @@ using ColumnCodecByName = UnorderedMapWithMemoryTracking<String, ColumnCodecs>;
 /// a type-specific codec may be applied to.
 bool isSerializedAsSingleStreamOfColumnType(const ISerialization & serialization, const DataTypePtr & type);
 
-/// Accumulates one execution's statistics and writes its single cache entry. It lives in the `.cpp`:
-/// nothing outside needs its layout.
-class RuntimeDataflowStatisticsCacheUpdaterImpl;
+/// One execution's dataflow statistics, the single cache entry its updaters fill. Every updater of the
+/// execution shares it, and it writes the entry when the last of them is gone.
+struct RuntimeDataflowStatisticsBlock
+{
+    struct Statistics
+    {
+        std::atomic_size_t counter{0};
 
-/// A handle a plan step holds on the accumulator of the execution it belongs to. Several steps share one
-/// accumulator - the coordinated read, the boundary node whose output is measured, and the read's lazy half
-/// all record into the same entry - and each handle carries the role its own input reads play in it. The
-/// entry is written once, when the last handle is gone.
+        std::mutex mutex;
+        size_t bytes TSA_GUARDED_BY(mutex) = 0;
+        size_t sample_bytes TSA_GUARDED_BY(mutex) = 0;
+        size_t compressed_bytes TSA_GUARDED_BY(mutex) = 0;
+        size_t elapsed_microseconds TSA_GUARDED_BY(mutex) = 0;
+    };
+
+    enum InputStatisticsType
+    {
+        WithByteHint = 0,
+        WithoutByteHint = 1,
+        MaxInputType = 2,
+    };
+
+    enum OutputStatisticsType
+    {
+        AggregationState = 0,
+        AggregationKeys = 1,
+        OutputChunk = 2,
+        MaxOutputType = 3,
+    };
+
+    RuntimeDataflowStatisticsBlock(size_t cache_key_, size_t total_rows_to_read_)
+        : cache_key(cache_key_)
+        , total_rows_to_read(total_rows_to_read_)
+    {
+        if (cache_key == 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cache key for RuntimeDataflowStatisticsBlock cannot be zero");
+
+        if (total_rows_to_read == 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Total rows from storage cannot be zero");
+    }
+
+    ~RuntimeDataflowStatisticsBlock();
+
+    const size_t cache_key = 0;
+    const size_t total_rows_to_read = 0;
+
+    std::atomic_bool unsupported_case{false};
+
+    std::array<Statistics, 2> input_bytes_statistics;
+    std::array<Statistics, 2> replicated_bytes_statistics;
+    std::array<Statistics, 3> output_bytes_statistics;
+};
+
 class RuntimeDataflowStatisticsCacheUpdater
 {
     using ColumnSizeByName = std::unordered_map<std::string, ColumnSize>;
+    using Statistics = RuntimeDataflowStatisticsBlock::Statistics;
+    using InputStatisticsType = RuntimeDataflowStatisticsBlock::InputStatisticsType;
+    using OutputStatisticsType = RuntimeDataflowStatisticsBlock::OutputStatisticsType;
 
 public:
-    /// Which bucket this handle's input reads belong to. Parallel replicas split only the coordinated read;
-    /// every other read of the subtree is performed by each replica in full.
-    enum class InputRole
+    /// `replicated` is set on the updater given to the reads parallel replicas would not split: each replica
+    /// performs them in full, so their bytes go to `replicated_bytes` rather than to `input_bytes`.
+    explicit RuntimeDataflowStatisticsCacheUpdater(std::shared_ptr<RuntimeDataflowStatisticsBlock> block_, bool replicated_ = false)
+        : block(std::move(block_))
+        , replicated(replicated_)
     {
-        Coordinated,
-        Replicated,
-    };
-
-    /// A handle on a fresh accumulator, for the read parallel replicas would coordinate.
-    static std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater> createCoordinated(size_t cache_key, size_t total_rows_to_read);
-
-    /// Another handle on the same accumulator, for the reads parallel replicas would not split. One handle
-    /// serves all of them: their bytes accumulate into a single bucket either way.
-    static std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>
-    createForReplicatedReads(const std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater> & coordinated);
+    }
 
     void recordOutputChunk(const Chunk & chunk, const Block & header);
 
@@ -159,13 +204,18 @@ public:
         size_t read_bytes,
         std::optional<bool> & should_continue_sampling);
 
-    void markUnsupportedCase();
+    void markUnsupportedCase() { block->unsupported_case.store(true, std::memory_order_relaxed); }
 
 private:
-    RuntimeDataflowStatisticsCacheUpdater(std::shared_ptr<RuntimeDataflowStatisticsCacheUpdaterImpl> impl_, InputRole role_);
+    static bool shouldSampleBlock(Statistics & statistics, size_t block_rows);
 
-    const std::shared_ptr<RuntimeDataflowStatisticsCacheUpdaterImpl> impl;
-    const InputRole role;
+    /// `full_bytes` overrides the byte count taken from the columns, for callers whose columns
+    /// are only a sample of the dataflow being accounted.
+    static void
+    recordColumns(Statistics & statistics, size_t num_rows, const ColumnsWithTypeAndName & cols, std::optional<size_t> full_bytes = {});
+
+    const std::shared_ptr<RuntimeDataflowStatisticsBlock> block;
+    const bool replicated;
 };
 
 using RuntimeDataflowStatisticsCacheUpdaterPtr = std::shared_ptr<RuntimeDataflowStatisticsCacheUpdater>;
