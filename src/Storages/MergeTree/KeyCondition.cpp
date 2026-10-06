@@ -6831,9 +6831,8 @@ BoolMask KeyCondition::checkInHyperrectangle(
         return SpaceFillingCurveType::Unknown;
     };
 
-    /// The position is the element's index in `rpn`: the bitset is read at that index in the
-    /// template RPN, which this protocol requires to share this RPN's position layout.
-    /// A position never reported keeps the bitset's all-true default.
+    /// The reported position is the element's index in `rpn`: the disjunction bitset is read positionally
+    /// against the template RPN. A position that is never reported keeps the bitset's all-true default.
     for (size_t element_idx = 0; element_idx < rpn.size(); ++element_idx)
     {
         const auto & element = rpn[element_idx];
