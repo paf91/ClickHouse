@@ -204,7 +204,7 @@ WHERE number > 500
 SETTINGS use_query_cache = true, query_cache_for_subqueries = true;
 ```
 
-Subquery cache entries are visible in [system.query_cache](/reference/system-tables/query_cache) with `is_subquery = 1`. The `query_cache_ttl` setting also applies to subquery cache entries and can be set per subquery.
+Subquery cache entries of the in-memory query cache are visible in [system.query_cache](/reference/system-tables/query_cache) with `is_subquery = 1`. Subquery results are also cached on disk if the [query cache on disk](#query-cache-on-disk) is enabled, but these entries are not shown in `system.query_cache`. The `query_cache_ttl` setting also applies to subquery cache entries and can be set per subquery.
 
 ClickHouse reads table data in blocks of [max_block_size](/reference/settings/session-settings/max#max_block_size) rows. Due to filtering, aggregation,
 etc., result blocks are typically much smaller than 'max_block_size' but there are also cases where they are much bigger. Setting
