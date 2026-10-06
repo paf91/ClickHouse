@@ -92,6 +92,9 @@ private:
         /// The header the caller counts in may have the filter column erased from it,
         /// so the caller's positions are shifted back over that column first.
         std::vector<size_t> unneeded_dag_positions;
+        /// The caller's positions the step drops: a pass-through column after a needed one of the same name is kept,
+        /// even if nobody needs it.
+        std::vector<size_t> dropped_output_positions;
         /// The position of the filter column in the DAG's outputs, before any is removed.
         size_t filter_output_position = 0;
 

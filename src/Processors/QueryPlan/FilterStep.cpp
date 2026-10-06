@@ -4,6 +4,7 @@
 #include <optional>
 #include <ranges>
 #include <stack>
+#include <unordered_set>
 #include <DataTypes/DataTypeFactory.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeNullable.h>
@@ -157,6 +158,11 @@ FilterStep::UnneededColumnsPlan FilterStep::analyzeUnneededColumns(
     /// the input header pairs them up with the unneeded positions.
     size_t passthrough_position = old_dag_outputs_size;
     size_t next_unneeded_passthrough = first_unneeded_passthrough;
+
+    /// A dropped column the child keeps is consumed by a new input, and inputs are paired with header columns by name,
+    /// in order. So a pass-through column after a needed one of the same name cannot be consumed, and is kept.
+    std::unordered_set<std::string_view> needed_passthrough_names;
+    std::vector<size_t> kept_unneeded_positions;
     for (size_t position = 0; position < header_columns.size(); ++position)
     {
         if (!header_columns.passesThrough(position))
@@ -168,10 +174,21 @@ FilterStep::UnneededColumnsPlan FilterStep::analyzeUnneededColumns(
             continue;
         }
 
-        const bool is_unneeded = next_unneeded_passthrough < pre_erase_positions.size()
+        bool is_unneeded = next_unneeded_passthrough < pre_erase_positions.size()
             && pre_erase_positions[next_unneeded_passthrough] == passthrough_position;
         if (is_unneeded)
             ++next_unneeded_passthrough;
+
+        /// The filter column comes before the pass-through columns, so the caller counts them one lower when it is erased.
+        const auto & name = input_header.getByPosition(position).name;
+        if (is_unneeded && needed_passthrough_names.contains(name))
+        {
+            is_unneeded = false;
+            kept_unneeded_positions.push_back(remove_filter_column ? passthrough_position - 1 : passthrough_position);
+        }
+
+        if (!is_unneeded)
+            needed_passthrough_names.insert(name);
 
         plan.input_columns[position] = is_unneeded ? InputColumnUsage::PassesThroughDropped : InputColumnUsage::PassesThroughNeeded;
         ++passthrough_position;
@@ -181,6 +198,9 @@ FilterStep::UnneededColumnsPlan FilterStep::analyzeUnneededColumns(
         throw Exception(
             ErrorCodes::LOGICAL_ERROR, "Unneeded output position {} is out of range for pass-through inputs",
             pre_erase_positions[next_unneeded_passthrough]);
+
+    plan.dropped_output_positions = unneeded_output_positions;
+    std::erase_if(plan.dropped_output_positions, [&](size_t position) { return std::ranges::binary_search(kept_unneeded_positions, position); });
 
     return plan;
 }
@@ -557,7 +577,7 @@ FilterStep::removeUnusedColumns(const std::vector<size_t> & unneeded_output_posi
     plan.applyToOutputs(actions_dag, remove_filter_column);
 
     RemoveUnusedColumnsResult result;
-    result.dropped_output_positions = unneeded_output_positions;
+    result.dropped_output_positions = plan.dropped_output_positions;
 
     const bool dag_changed = alignInputsWithPrunedChild(actions_dag, plan.input_columns, *input_header, pruned);
     result.step_changed = plan.changes_output_header || plan.fold_filter_predicate || dag_changed

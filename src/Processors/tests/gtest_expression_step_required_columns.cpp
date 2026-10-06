@@ -2,9 +2,11 @@
 
 #include <algorithm>
 
+#include <Columns/ColumnsNumber.h>
 #include <Core/Block.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Interpreters/ActionsDAG.h>
+#include <Interpreters/ExpressionActions.h>
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/FilterStep.h>
 
@@ -91,6 +93,22 @@ String namesAt(const Block & header, const std::vector<size_t> & positions)
     for (size_t position : positions)
         names.push_back(header.getByPosition(position).name);
     return fmt::format("{}", fmt::join(names, ", "));
+}
+
+/// Runs `dag` on one row the way `ExpressionTransform` does, with `values` in the columns of `header`, in order.
+/// Returns the values of the result columns, in order.
+std::vector<UInt64> runOnOneRow(const ActionsDAG & dag, const Block & header, const std::vector<UInt64> & values)
+{
+    ExpressionActions actions(dag.clone());
+    Columns columns;
+    for (UInt64 value : values)
+        columns.push_back(ColumnUInt64::create(1, value));
+
+    size_t num_rows = 1;
+    std::vector<UInt64> result;
+    for (const auto & column : actions.executeOnColumns(std::move(columns), header, actions.getInputPositions(header), num_rows))
+        result.push_back(column->getUInt(0));
+    return result;
 }
 
 /// Tells the step that only the columns at `required_output_positions` are needed, asks it what it does not
@@ -240,4 +258,43 @@ TEST(FilterStepRequiredColumns, ConsumesWhatTheChildKeepsBeyondTheAsk)
     step->removeUnusedColumns({1}, {prunedChild(input_header, {0, 1, 2})});
     EXPECT_EQ(step->getInputHeaders().front()->dumpNames(), "a, b, c");
     EXPECT_EQ(step->getOutputHeader()->dumpNames(), "x");
+}
+
+/// Input header (a, d, d) where only a is read, so both `d` pass through. Inputs are paired with header columns by
+/// name, in order, so a column consumed by a new input is the first one of its name that no input reads. Here that is
+/// the needed one: the step must not drop the second `d`, or the first one would be consumed in its place.
+TEST(ExpressionStepRequiredColumns, KeepsAPassThroughColumnAfterANeededOneOfTheSameName)
+{
+    auto input_header = std::make_shared<const Block>(Block{column("a"), column("d"), column("d")});
+    ActionsDAG dag;
+    dag.getOutputs() = {&dag.addAlias(dag.addInput(column("a")), "x")};
+    ExpressionStep step(input_header, std::move(dag));
+
+    /// Output header is (x, d, d). Nobody needs the second `d`, but the step keeps it.
+    const auto unneeded = step.getUnneededColumns({2});
+    ASSERT_EQ(unneeded.size(), 1u);
+    EXPECT_TRUE(unneeded.front().empty());
+
+    const auto applied = step.removeUnusedColumns({2}, {prunedChild(*input_header, {0, 1, 2})});
+    EXPECT_TRUE(applied.dropped_output_positions.empty());
+    EXPECT_EQ(runOnOneRow(step.getExpression(), *step.getInputHeaders().front(), {7, 1, 2}), std::vector<UInt64>({7, 1, 2}));
+}
+
+/// The same for a filter, whose output header has the filter column erased from it.
+TEST(FilterStepRequiredColumns, KeepsAPassThroughColumnAfterANeededOneOfTheSameName)
+{
+    auto input_header = std::make_shared<const Block>(Block{column("a"), column("d"), column("d")});
+    ActionsDAG dag;
+    dag.getOutputs() = {&dag.addAlias(dag.addInput(column("a")), "f")};
+    FilterStep step(input_header, std::move(dag), "f", /*remove_filter_column=*/true);
+
+    /// Output header is (d, d). Nobody needs the second `d`, but the step keeps it.
+    const auto unneeded = step.getUnneededColumns({1});
+    ASSERT_EQ(unneeded.size(), 1u);
+    EXPECT_TRUE(unneeded.front().empty());
+
+    const auto applied = step.removeUnusedColumns({1}, {prunedChild(*input_header, {0, 1, 2})});
+    EXPECT_TRUE(applied.dropped_output_positions.empty());
+    /// The DAG still outputs the filter column `f` first.
+    EXPECT_EQ(runOnOneRow(step.getExpression(), *step.getInputHeaders().front(), {7, 1, 2}), std::vector<UInt64>({7, 1, 2}));
 }

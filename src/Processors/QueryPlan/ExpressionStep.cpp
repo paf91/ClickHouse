@@ -13,6 +13,7 @@
 #include <Interpreters/ActionsDAG.h>
 
 #include <span>
+#include <unordered_set>
 
 
 namespace DB
@@ -226,6 +227,11 @@ ExpressionStep::analyzeUnneededColumns(const std::vector<size_t> & unneeded_outp
     size_t passthrough_index = 0;
     size_t next_unneeded_passthrough = 0;
 
+    /// A dropped column the child keeps is consumed by a new input, and inputs are paired with header columns by name,
+    /// in order. So a pass-through column after a needed one of the same name cannot be consumed, and is kept.
+    std::unordered_set<std::string_view> needed_passthrough_names;
+    std::vector<size_t> kept_unneeded_positions;
+
     for (size_t position = 0; position < header_columns.size(); ++position)
     {
         if (!header_columns.passesThrough(position))
@@ -236,11 +242,22 @@ ExpressionStep::analyzeUnneededColumns(const std::vector<size_t> & unneeded_outp
             continue;
         }
 
-        const bool is_unneeded = next_unneeded_passthrough < unneeded_passthrough_positions.size()
-            && unneeded_passthrough_positions[next_unneeded_passthrough] - dag_output_count == passthrough_index;
+        const auto output_position = dag_output_count + passthrough_index;
+        bool is_unneeded = next_unneeded_passthrough < unneeded_passthrough_positions.size()
+            && unneeded_passthrough_positions[next_unneeded_passthrough] == output_position;
 
         if (is_unneeded)
             ++next_unneeded_passthrough;
+
+        const auto & name = input_header->getByPosition(position).name;
+        if (is_unneeded && needed_passthrough_names.contains(name))
+        {
+            is_unneeded = false;
+            kept_unneeded_positions.push_back(output_position);
+        }
+
+        if (!is_unneeded)
+            needed_passthrough_names.insert(name);
 
         plan.input_columns[position] = is_unneeded ? InputColumnUsage::PassesThroughDropped : InputColumnUsage::PassesThroughNeeded;
         ++passthrough_index;
@@ -250,6 +267,9 @@ ExpressionStep::analyzeUnneededColumns(const std::vector<size_t> & unneeded_outp
         throw Exception(ErrorCodes::LOGICAL_ERROR,
             "Unneeded output position {} is out of range for the output header",
             unneeded_passthrough_positions[next_unneeded_passthrough]);
+
+    /// Both lists are sorted, and the kept positions are pass-through ones, so they are not in the prefix of DAG outputs.
+    std::erase_if(plan.unneeded_output_positions, [&](size_t position) { return std::ranges::binary_search(kept_unneeded_positions, position); });
 
     return plan;
 }
@@ -269,7 +289,7 @@ ExpressionStep::removeUnusedColumns(const std::vector<size_t> & unneeded_output_
     actions_dag.getOutputs() = plan.neededDAGOutputs(actions_dag.getOutputs());
 
     RemoveUnusedColumnsResult result;
-    result.dropped_output_positions = unneeded_output_positions;
+    result.dropped_output_positions = plan.unneeded_output_positions;
 
     const bool dag_changed = alignInputsWithPrunedChild(actions_dag, plan.input_columns, *input_header, pruned);
     result.step_changed = !result.dropped_output_positions.empty() || dag_changed

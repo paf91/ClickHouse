@@ -66,6 +66,17 @@ bool IQueryPlanStep::alignInputsWithPrunedChild(
 
     const auto header_columns = mapHeaderColumnsToInputs(dag.getInputs(), old_header);
 
+    /// Inputs are paired with header columns by name, in order, so a new input consumes the first column of its name that
+    /// no input reads. A column that passes through before it would be consumed in its place.
+    std::unordered_set<std::string_view> passthrough_names;
+    const auto consume = [&](ColumnsWithTypeAndName & to_consume, const ColumnWithTypeAndName & column)
+    {
+        if (passthrough_names.contains(column.name))
+            throw Exception(ErrorCodes::LOGICAL_ERROR,
+                "Cannot consume column {}: a column of the same name passes through before it", column.name);
+        to_consume.push_back(column);
+    };
+
     std::unordered_set<const ActionsDAG::Node *> kept_inputs;
     ColumnsWithTypeAndName to_consume;
     for (size_t position = 0; position < old_header.columns(); ++position)
@@ -82,12 +93,14 @@ bool IQueryPlanStep::alignInputsWithPrunedChild(
         if (!header_columns.passesThrough(position))
             kept_inputs.insert(dag.getInputs()[header_columns.read_by[position]]);
         else if (usage == InputColumnUsage::PassesThroughDropped)
-            to_consume.push_back(old_header.getByPosition(position));
+            consume(to_consume, old_header.getByPosition(position));
+        else
+            passthrough_names.insert(old_header.getByPosition(position).name);
     }
 
     const size_t kept_count = old_header.columns() - pruned.dropped_positions.size();
     for (size_t position = kept_count; position < pruned.header->columns(); ++position)
-        to_consume.push_back(pruned.header->getByPosition(position));
+        consume(to_consume, pruned.header->getByPosition(position));
 
     bool changed = dag.removeUnusedActions(kept_inputs);
     for (const auto & column : to_consume)
