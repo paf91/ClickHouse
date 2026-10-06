@@ -36,6 +36,8 @@ namespace Setting
     extern const SettingsBool allow_reorder_prewhere_conditions;
     extern const SettingsBool use_statistics;
     extern const SettingsBool apply_string_filters_during_scan;
+    extern const SettingsBool use_columns_cache;
+    extern const SettingsBool enable_writes_to_columns_cache;
 }
 
 namespace
@@ -161,8 +163,10 @@ MergeTreeWhereOptimizer::MergeTreeWhereOptimizer(
 MergeTreeWhereOptimizer::FilterActionsOptimizeResult MergeTreeWhereOptimizer::optimize(const ActionsDAG & filter_dag,
     const std::string & filter_column_name,
     const ContextPtr & context,
-    bool is_final)
+    bool is_final,
+    const NameSet & columns_read_before_filter)
 {
+    const auto & settings = context->getSettingsRef();
     WhereOptimizerContext where_optimizer_context;
     where_optimizer_context.context = context;
     where_optimizer_context.array_joined_names = {};
@@ -172,7 +176,10 @@ MergeTreeWhereOptimizer::FilterActionsOptimizeResult MergeTreeWhereOptimizer::op
     where_optimizer_context.allow_reorder_prewhere_conditions = context->getSettingsRef()[Setting::allow_reorder_prewhere_conditions];
     where_optimizer_context.is_final = is_final;
     where_optimizer_context.use_statistics = context->getSettingsRef()[Setting::use_statistics] && estimator != nullptr;
-    where_optimizer_context.apply_string_filters_during_scan = context->getSettingsRef()[Setting::apply_string_filters_during_scan];
+    /// The reader does not apply string value filters when it may write the columns to the columns cache.
+    where_optimizer_context.apply_string_filters_during_scan = settings[Setting::apply_string_filters_during_scan]
+        && !(settings[Setting::use_columns_cache] && settings[Setting::enable_writes_to_columns_cache]);
+    where_optimizer_context.columns_read_before_filter = &columns_read_before_filter;
 
     RPNBuilderTreeNode node(&filter_dag.findInOutputs(filter_column_name), context);
 
@@ -411,7 +418,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
             /// unless the condition can be used as a string filter during the scan:
             /// then it is beneficial on its own, because the reader skips copying the non-matching values.
             && (info.columns.size() < queried_columns.size()
-                || (where_optimizer_context.apply_string_filters_during_scan && isConditionSuitableForStringValueFilter(conjunct)));
+                || (where_optimizer_context.apply_string_filters_during_scan && isConditionSuitableForStringValueFilter(conjunct, where_optimizer_context)));
 
         infos.push_back(std::move(info));
     }
@@ -567,7 +574,7 @@ MergeTreeWhereOptimizer::Conditions MergeTreeWhereOptimizer::analyze(const RPNBu
                 && (!where_optimizer_context.is_final || isDeterministicExpressionOverSortingKey(conjunct, where_optimizer_context.context))
                 && columnsSupportPrewhere(columns)
                 && (columns.size() < queried_columns.size()
-                    || (where_optimizer_context.apply_string_filters_during_scan && isConditionSuitableForStringValueFilter(conjunct)));
+                    || (where_optimizer_context.apply_string_filters_during_scan && isConditionSuitableForStringValueFilter(conjunct, where_optimizer_context)));
             res.emplace_back(std::move(cond));
         }
         return res;
@@ -741,7 +748,8 @@ bool MergeTreeWhereOptimizer::columnsSupportPrewhere(const NameSet & columns) co
     return true;
 }
 
-bool MergeTreeWhereOptimizer::isConditionSuitableForStringValueFilter(const RPNBuilderTreeNode & node) const
+bool MergeTreeWhereOptimizer::isConditionSuitableForStringValueFilter(
+    const RPNBuilderTreeNode & node, const WhereOptimizerContext & where_optimizer_context) const
 {
     if (!node.isFunction())
         return false;
@@ -752,10 +760,15 @@ bool MergeTreeWhereOptimizer::isConditionSuitableForStringValueFilter(const RPNB
     if (function_node.getArgumentsSize() != 2)
         return false;
 
-    /// A full String or Nullable(String) column (the scan filter does not support subcolumns).
+    /// A full String or Nullable(String) column (the scan filter does not support subcolumns),
+    /// which is not read by the existing PREWHERE or the row policy (then the scan filter is not applied).
     auto is_string_column = [&](const RPNBuilderTreeNode & argument)
     {
         if (argument.isFunction() || argument.isConstant() || argument.isSubqueryOrSet())
+            return false;
+
+        if (where_optimizer_context.columns_read_before_filter
+            && where_optimizer_context.columns_read_before_filter->contains(argument.getColumnName()))
             return false;
 
         auto column = storage_metadata->getColumns().tryGetColumnOrSubcolumn(GetColumnsOptions::AllPhysical, argument.getColumnName());

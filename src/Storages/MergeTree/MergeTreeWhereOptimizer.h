@@ -51,10 +51,14 @@ public:
         bool fully_moved_to_prewhere = false;
     };
 
+    /// `columns_read_before_filter` are the columns that the reader observes before the moved conditions
+    /// are applied (the existing PREWHERE and the row policy): no string value filter can be applied
+    /// during the scan to them (see `extractStringValueFilters`).
     FilterActionsOptimizeResult optimize(const ActionsDAG & filter_dag,
         const std::string & filter_column_name,
         const ContextPtr & context,
-        bool is_final);
+        bool is_final,
+        const NameSet & columns_read_before_filter = {});
 
 private:
     struct Condition
@@ -136,6 +140,7 @@ private:
         bool is_final = false;
         bool use_statistics = false;
         bool apply_string_filters_during_scan = false;
+        const NameSet * columns_read_before_filter = nullptr;
     };
 
     struct OptimizeResult
@@ -164,7 +169,7 @@ private:
     /// a string value filter during the scan when `apply_string_filters_during_scan` is enabled
     /// (see `extractStringValueFilters`). Such a condition is worth moving to PREWHERE even when
     /// it involves all queried columns: the reader then skips copying the non-matching values.
-    bool isConditionSuitableForStringValueFilter(const RPNBuilderTreeNode & node) const;
+    bool isConditionSuitableForStringValueFilter(const RPNBuilderTreeNode & node, const WhereOptimizerContext & where_optimizer_context) const;
 
     bool isSortingKey(const String & column_name) const;
 
