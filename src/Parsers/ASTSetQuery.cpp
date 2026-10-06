@@ -25,7 +25,7 @@ namespace ErrorCodes
 /// Renders a change whose value is a secret as the SQL text that hides it, and returns `nullopt` for
 /// a change that carries none. `formatImpl` and `hasSecretParts` both go through this, so they cannot
 /// disagree on what is secret.
-static std::optional<String> renderSecretChangeValue(const SettingChange & change)
+std::optional<String> renderSecretChangeValue(const SettingChange & change)
 {
     /// The queue engines also take every setting, a format setting included, with the legacy `s3queue_` prefix.
     static constexpr std::string_view s3queue_prefix = "s3queue_";
