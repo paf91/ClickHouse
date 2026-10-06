@@ -71,6 +71,17 @@ private:
         ColumnArray::Offsets & res_offsets,
         const ColumnNullable * nullable_col);
 
+    /// The null map check is resolved at compile time, and the loop is kept out of line: inlined into
+    /// `executeNumber` with a run-time null map check, it runs out of registers on aarch64 and
+    /// rematerializes the `DefaultHash` multiplier constants for every element. Keep `NO_INLINE`.
+    template <typename T, bool has_null_map>
+    NO_INLINE static void executeNumberImpl(
+        const T * values,
+        const UInt8 * null_map,
+        const ColumnArray::Offsets & src_offsets,
+        PaddedPODArray<T> & res_data,
+        ColumnArray::Offsets & res_offsets);
+
     static bool executeString(
         const IColumn & src_data,
         const ColumnArray::Offsets & src_offsets,
@@ -153,14 +164,24 @@ bool FunctionArrayDistinct::executeNumber(
         return false;
     }
 
-    const PaddedPODArray<T> & values = src_data_concrete->getData();
+    const T * values = src_data_concrete->getData().data();
     PaddedPODArray<T> & res_data = typeid_cast<ColVecType &>(res_data_col).getData();
 
-    const PaddedPODArray<UInt8> * src_null_map = nullptr;
-
     if (nullable_col)
-        src_null_map = &nullable_col->getNullMapData();
+        executeNumberImpl<T, true>(values, nullable_col->getNullMapData().data(), src_offsets, res_data, res_offsets);
+    else
+        executeNumberImpl<T, false>(values, nullptr, src_offsets, res_data, res_offsets);
+    return true;
+}
 
+template <typename T, bool has_null_map>
+void FunctionArrayDistinct::executeNumberImpl(
+    const T * values,
+    const UInt8 * null_map,
+    const ColumnArray::Offsets & src_offsets,
+    PaddedPODArray<T> & res_data,
+    ColumnArray::Offsets & res_offsets)
+{
     using Set = ClearableHashSetWithStackMemory<T, DefaultHash<T>,
         INITIAL_SIZE_DEGREE>;
 
@@ -175,8 +196,9 @@ bool FunctionArrayDistinct::executeNumber(
 
         for (ColumnArray::Offset j = prev_src_offset; j < curr_src_offset; ++j)
         {
-            if (nullable_col && (*src_null_map)[j])
-                continue;
+            if constexpr (has_null_map)
+                if (null_map[j])
+                    continue;
 
             if (set.insert(values[j]).second)
                 res_data.emplace_back(values[j]);
@@ -187,7 +209,6 @@ bool FunctionArrayDistinct::executeNumber(
 
         prev_src_offset = curr_src_offset;
     }
-    return true;
 }
 
 bool FunctionArrayDistinct::executeString(
