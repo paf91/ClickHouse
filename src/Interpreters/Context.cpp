@@ -6505,7 +6505,7 @@ std::unique_lock<std::timed_mutex> acquireZooKeeperLock(
         lock.lock();
     else if (!lock.try_lock_for(std::chrono::milliseconds(lock_acquire_timeout.totalMilliseconds())))
     {
-        /// Background callers retry Keeper hardware errors, a query fails fast instead.
+        /// Without a query context, report a Keeper error, handled like a lost connection; a query fails fast instead.
         if (!has_query_context)
             throw Coordination::Exception(
                 Coordination::Error::ZOPERATIONTIMEOUT,

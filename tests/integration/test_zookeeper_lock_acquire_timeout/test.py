@@ -186,7 +186,8 @@ AUX_LOCK_FAILPOINT = "context_auxiliary_zookeeper_lock_acquired_pause"
 
 @contextlib.contextmanager
 def hold_auxiliary_keeper_lock(instance, attempts=5):
-    """Keep one query paused in `Context::getAuxiliaryZooKeeper` while it holds the auxiliary Keeper mutex.
+    """Pause a `SYSTEM DROP REPLICA ... FROM ZKPATH` query in `Context::getAuxiliaryZooKeeper` while it holds
+    the auxiliary Keeper mutex; that query takes the Keeper client outside a query pipeline.
 
     The fail point pauses whichever thread takes the mutex first. If a background thread wins,
     the holder query times out instead: release the fail point and try again."""
@@ -199,15 +200,15 @@ def hold_auxiliary_keeper_lock(instance, attempts=5):
             holder = pool.submit(
                 instance.query,
                 f"SYSTEM ENABLE FAILPOINT {AUX_LOCK_FAILPOINT}; "
-                "SELECT count() FROM system.zookeeper WHERE path = '/' AND zookeeperName = 'zookeeper2' "
-                "SETTINGS get_zookeeper_lock_acquire_timeout_ms = 500",
+                f"SYSTEM DROP REPLICA 'lock_holder' FROM ZKPATH 'zookeeper2:/clickhouse/{query_id}'",
+                settings={"get_zookeeper_lock_acquire_timeout_ms": 500},
                 query_id=query_id,
             )
             # `SYSTEM WAIT FAILPOINT` returns at once while the fail point is not enabled yet,
-            # so wait for the holder's SELECT, which starts after it is enabled.
+            # so wait for the holder's DROP REPLICA, which starts after it is enabled.
             for _ in range(300):
                 if holder.done() or int(instance.query(
-                    f"SELECT count() FROM system.processes WHERE query_id = '{query_id}' AND query ILIKE '%system.zookeeper%'"
+                    f"SELECT count() FROM system.processes WHERE query_id = '{query_id}' AND query ILIKE '%DROP REPLICA%'"
                 )):
                     break
                 time.sleep(0.1)
@@ -229,7 +230,9 @@ def hold_auxiliary_keeper_lock(instance, attempts=5):
     finally:
         instance.query(f"SYSTEM DISABLE FAILPOINT {AUX_LOCK_FAILPOINT}")
         pool.shutdown(wait=False)
-    holder.result(timeout=60)
+    with pytest.raises(QueryRuntimeException) as e:
+        holder.result(timeout=60)
+    assert "does not look like a table path" in str(e.value)
 
 
 def test_s3queue_registry_survives_lock_timeout(started_cluster):
@@ -246,10 +249,9 @@ def test_s3queue_registry_survives_lock_timeout(started_cluster):
             additional_settings={"keeper_path": f"zookeeper2:{keeper_path}"},
         )
         with hold_auxiliary_keeper_lock(node_background):
-            # The registry read goes through the S3Queue Keeper retries first, so allow for their backoff.
             node_background.wait_for_log_line(
                 rf"StorageObjectStorageQueue\(zookeeper2:{keeper_path}\).*will try to connect again: .*Timeout exceeded while acquiring auxiliary ZooKeeper lock",
-                timeout=90,
+                timeout=30,
             )
         assert node_background.query("SELECT 1") == "1\n"
         assert not node_background.contains_in_log("Logical error")
