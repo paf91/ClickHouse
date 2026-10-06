@@ -1,0 +1,8 @@
+<clickhouse>
+    <profiles>
+        <default>
+            <!-- The global context takes its settings from this profile, so background Keeper users stop waiting for a busy client lock after 1 s. -->
+            <get_zookeeper_lock_acquire_timeout_ms>1000</get_zookeeper_lock_acquire_timeout_ms>
+        </default>
+    </profiles>
+</clickhouse>
