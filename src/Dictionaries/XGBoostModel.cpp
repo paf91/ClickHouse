@@ -75,6 +75,10 @@ void XGBoostModel::throwIfTypeIsInvalid(const ColumnWithTypeAndName & col)
 
 void XGBoostModel::startTraining(const Block & header, const String & target_column_)
 {
+    /// Validate the parameters provided by the user before the caller reads the source, so that a mistake in the
+    /// layout definition is reported without paying for a scan of the whole training table.
+    training_params = sanitizeTrainingParams(hps);
+
     /// Record the training schema: `target_column_` is the label, every other column of `header` a feature.
     if (!header.has(target_column_))
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Target column '{}' is not present in the training data", target_column_);
@@ -135,9 +139,6 @@ void XGBoostModel::finalizeTraining()
     if (ingested_rows == 0)
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "No training data was provided");
 
-    // Validate the parameters provided by the user
-    const auto params = sanitizeTrainingParams(hps);
-
     chassert(labels.size() == ingested_rows);
     chassert(flattened_features.size() == ingested_rows * n_features);
 
@@ -148,8 +149,8 @@ void XGBoostModel::finalizeTraining()
     // Create the model
     throwOnError(XGBoosterCreate(&dmatrix, 1, &booster), "XGBoosterCreate");
 
-    // Apply already sanitized params into the model
-    for (const auto & [key, value] : params)
+    // Apply the params sanitized in `startTraining` into the model
+    for (const auto & [key, value] : training_params)
     {
         throwOnError(
             XGBoosterSetParam(booster, key.c_str(), value.c_str()), fmt::format("XGBoosterSetParam({} = {})", key, value));

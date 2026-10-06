@@ -67,6 +67,8 @@ private:
     void * dmatrix{nullptr};
 
     HyperParameters hps;
+    /// `hps` validated by `startTraining`, without `num_iterations`, which is kept separately.
+    UnorderedMapWithMemoryTracking<String, String> training_params;
     int num_iterations{100};
 
     /// Target column.
