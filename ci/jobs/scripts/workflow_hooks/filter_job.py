@@ -40,6 +40,9 @@ PRELIMINARY_JOBS = [
 
 # The `arm_binary` jobs that run in pull requests instead of the LLVM coverage jobs
 # (see `ci/workflows/pull_request.py`).
+FUNCTIONAL_COVERAGE_REPLACEMENT_JOBS = [
+    j.name for j in JobConfigs.functional_tests_arm_binary_coverage_replacement_pr_jobs
+]
 COVERAGE_REPLACEMENT_JOBS = [
     j.name
     for j in JobConfigs.functional_tests_arm_binary_coverage_replacement_pr_jobs
@@ -776,11 +779,23 @@ def should_skip_job(job_name):
     # scripts) AND does not touch the test pipeline's own code (`_has_coverage_pipeline_changes`).
     # The changed tests themselves run in the targeted and flaky-check jobs, and rerunning the whole
     # suite on a binary identical to master's would find nothing new.
+    # The exception is a PR that changes stateless tests: the targeted jobs do not run the
+    # `DBReplicated`, `ParallelReplicas` and `AsyncInsert` configurations, and a test can change its
+    # membership in them by its own tags (`no-replicated-database`, `no-parallel-replicas`,
+    # `no-async-insert`). The functional replacement jobs run then, and `functional_tests.py`
+    # narrows each of them down to the batches containing a changed test.
     if (
         job_name in COVERAGE_REPLACEMENT_JOBS
         and _info_cache.pr_number > 0
         and not _has_build_digest_changes(_info_cache.get_changed_files() or [])
         and not _has_coverage_pipeline_changes(_info_cache.get_changed_files() or [])
+        and not (
+            job_name in FUNCTIONAL_COVERAGE_REPLACEMENT_JOBS
+            and any(
+                f.removeprefix("./").startswith("tests/queries/0_stateless/")
+                for f in _info_cache.get_changed_files() or []
+            )
+        )
     ):
         return True, "Skipped: no build-affecting changes; the full suite would run on a binary identical to master"
 
