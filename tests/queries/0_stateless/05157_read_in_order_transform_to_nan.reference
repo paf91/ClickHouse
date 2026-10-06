@@ -67,3 +67,7 @@ x / inf	Granules: 0/4
 x * 0.	Granules: 0/4
 1
 1
+finite ranges Decimal
+0. / x	Granules: 0/4
+1
+1

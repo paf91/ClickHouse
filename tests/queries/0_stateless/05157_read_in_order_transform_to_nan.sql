@@ -101,3 +101,19 @@ SELECT count() FROM t_read_in_order_nan_ranges_bf16 WHERE isNaN(x / inf);
 SELECT count() FROM t_read_in_order_nan_ranges_bf16 WHERE isNaN(x * 0.);
 
 DROP TABLE t_read_in_order_nan_ranges_bf16;
+
+-- The same for a `Decimal` key, whose mark range endpoints are `DecimalField`: a range away from zero
+-- keeps the monotonicity of `0. / x`, and the granules are still pruned.
+DROP TABLE IF EXISTS t_read_in_order_nan_ranges_decimal;
+CREATE TABLE t_read_in_order_nan_ranges_decimal (x Decimal(10, 2)) ENGINE = MergeTree ORDER BY x SETTINGS index_granularity = 2, index_granularity_bytes = '10Mi';
+INSERT INTO t_read_in_order_nan_ranges_decimal SELECT number + 1 FROM numbers(8);
+
+SELECT 'finite ranges Decimal';
+SELECT '0. / x', extract(explain, 'Granules: \\d+/\\d+') FROM (EXPLAIN indexes = 1 SELECT count() FROM t_read_in_order_nan_ranges_decimal WHERE 0. / x = 1 SETTINGS use_statistics_for_part_pruning = 0) WHERE explain LIKE '%Granules: %/%';
+
+INSERT INTO t_read_in_order_nan_ranges_decimal VALUES (0);
+
+SELECT count() FROM t_read_in_order_nan_ranges_decimal WHERE isNaN(0. / x);
+SELECT count() FROM t_read_in_order_nan_ranges_decimal WHERE isNaN(x * inf);
+
+DROP TABLE t_read_in_order_nan_ranges_decimal;
