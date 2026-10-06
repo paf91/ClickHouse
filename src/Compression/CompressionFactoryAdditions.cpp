@@ -52,7 +52,12 @@ void CompressionCodecFactory::checkCodecIsNotColumnLevelOnly(const String & fami
             "Codec {} can only be specified in the column definition", family_name);
 }
 
-void CompressionCodecFactory::checkCodecChainIsNotColumnLevelOnly(const ASTPtr & ast)
+namespace
+{
+
+/// Calls `check` with the family name of every codec of the chain in `ast`.
+template <typename Check>
+void forEachCodecFamilyNameInChain(const ASTPtr & ast, Check && check)
 {
     const auto * func = ast->as<ASTFunction>();
     if (!func || !func->arguments)
@@ -61,10 +66,27 @@ void CompressionCodecFactory::checkCodecChainIsNotColumnLevelOnly(const ASTPtr &
     for (const auto & inner_codec_ast : func->arguments->children)
     {
         if (const auto * identifier = inner_codec_ast->as<ASTIdentifier>())
-            checkCodecIsNotColumnLevelOnly(identifier->name());
+            check(identifier->name());
         else if (const auto * inner_func = inner_codec_ast->as<ASTFunction>())
-            checkCodecIsNotColumnLevelOnly(inner_func->name);
+            check(inner_func->name);
     }
+}
+
+}
+
+void CompressionCodecFactory::checkCodecChainIsNotColumnLevelOnly(const ASTPtr & ast)
+{
+    forEachCodecFamilyNameInChain(ast, [](const String & family_name) { checkCodecIsNotColumnLevelOnly(family_name); });
+}
+
+void CompressionCodecFactory::checkCodecChainIsNotDeclarative(const ASTPtr & ast)
+{
+    forEachCodecFamilyNameInChain(ast, [](const String & family_name)
+    {
+        if (equalsCaseInsensitive(family_name, "Quantized"))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                "Codec {} can only be specified in the column definition", family_name);
+    });
 }
 
 void CompressionCodecFactory::validateCodec(

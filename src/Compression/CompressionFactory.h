@@ -136,6 +136,11 @@ public:
     /// Get codec by name with optional params. Example: LZ4, ZSTD(3)
     CompressionCodecPtr get(const String & compression_codec) const;
 
+    /// `Quantized` is declarative: it only takes effect through the serialization that a column-level `CODEC`
+    /// attaches to the column, and compresses nothing by itself. Throws if any codec of the chain in `ast` is
+    /// such a codec. For a caller that applies a codec chain directly to bytes, e.g. `estimateCompressionRatio`.
+    static void checkCodecChainIsNotDeclarative(const ASTPtr & ast);
+
     /// Names of the dedicated settings gating registered codec families.
     Strings getGateSettingNames() const;
 
