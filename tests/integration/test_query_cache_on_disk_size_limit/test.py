@@ -129,7 +129,8 @@ def test_limit_applies_to_the_serialized_size(started_cluster):
     # A single-row `Const` result: its in-memory weight is one padded allocation, while the serialized entry additionally carries
     # the fixed header, the access metadata and the compression framing, so the serialized entry is the larger one. The sizes are
     # measured at runtime instead of being hardcoded, since both depend on allocator and codec details.
-    set_max_entry_size_in_bytes(1073741824)  # both backends must accept the entry to measure it
+    # Both backends must accept the entry to measure it.
+    set_max_entry_size_in_bytes(1073741824)
     query = "SELECT 1"
     in_memory_weight, serialized_size = measure_entry_sizes(query, "const_measure")
     assert in_memory_weight < serialized_size
@@ -146,9 +147,8 @@ def test_limit_applies_to_the_serialized_size(started_cluster):
 def test_limit_does_not_apply_to_the_in_memory_weight(started_cluster):
     # The opposite direction: many one-row chunks are padded allocations in memory, but compress to a small entry on disk. The limit
     # is about the bytes stored on disk, so such a result must be stored even though its in-memory weight exceeds the limit.
-    set_max_entry_size_in_bytes(
-        1073741824
-    )  # both backends must accept the entry to measure it
+    # Both backends must accept the entry to measure it.
+    set_max_entry_size_in_bytes(1073741824)
 
     query = "SELECT number FROM numbers(100)"
     query_settings = ", max_block_size = 1, query_cache_squash_partial_results = 0"
