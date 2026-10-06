@@ -4422,13 +4422,24 @@ void StorageMergeTree::startBackgroundMovesIfNeeded()
     /// `changeSettings` calls this on a `storage_policy` change before the metadata commit. For a
     /// table whose workers are disabled (attached with `table_readonly = 1`, or in the middle of a
     /// `table_readonly` toggle), the toggle itself starts the move assignee in `startBackgroundWorkers`.
+    ///
+    /// Nothing is started after `shutdown`. `shutdown` publishes `shutdown_called` before finishing the
+    /// assignee, so re-checking it after `start` closes the race with a concurrent `shutdown`: either it
+    /// finishes the assignee started here, or this re-check observes the flag and finishes it itself.
+    if (shutdown_called.load())
+        return;
+
     if (background_workers_enabled && areBackgroundMovesNeeded())
+    {
         background_moves_assignee.start();
+        if (shutdown_called.load())
+            background_moves_assignee.finish();
+    }
 }
 
 bool StorageMergeTree::scheduleDataMovingJob(BackgroundJobsAssignee & assignee)
 {
-    if (!background_workers_enabled)
+    if (!background_workers_enabled || shutdown_called.load())
         return false;
 
     return MergeTreeData::scheduleDataMovingJob(assignee);
