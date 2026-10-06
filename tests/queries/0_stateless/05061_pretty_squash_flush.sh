@@ -37,10 +37,11 @@ wait_for_content()
     do
         if grep -q -- "$pattern" "$file"
         then
-            return
+            return 0
         fi
         sleep 0.1
     done
+    return 1
 }
 
 echo '--- unframed output'
@@ -90,8 +91,11 @@ pid=$!
 
 # A `data` packet carrying the rendered table arrives while the query is still running. Other packet
 # kinds (`profile_events`, `log`) may precede it, so wait for the `data` packet itself rather than
-# for the first line.
-wait_for_content "$framed" '"packet":"data"'
+# for the first line. As above, the packet must be there before the query is cancelled.
+if ! wait_for_content "$framed" '"packet":"data"'
+then
+    echo "The data packet did not arrive while the query was running"
+fi
 
 { kill "$pid"; wait "$pid"; } 2>/dev/null
 
