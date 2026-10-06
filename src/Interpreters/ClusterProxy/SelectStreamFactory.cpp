@@ -16,6 +16,7 @@
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Storages/StorageDistributed.h>
+#include <Storages/StorageProxy.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Storages/removeGroupingFunctionSpecializations.h>
 #include <TableFunctions/TableFunctionFactory.h>
@@ -121,7 +122,8 @@ void SelectStreamFactory::createForShardImpl(
         /// for a nested `Distributed`, which sets up its own cluster. A `View` over a `Distributed` is left
         /// out: it reads without parallel replicas, as it did before.
         auto local_context = context;
-        if (context->canUseTaskBasedParallelReplicas() && !typeid_cast<const StorageDistributed *>(local_storage.get()))
+        if (context->canUseTaskBasedParallelReplicas()
+            && !castStorage<StorageDistributed>(local_storage, DeferredTable::Load))
         {
             if (!context_without_parallel_replicas)
             {
