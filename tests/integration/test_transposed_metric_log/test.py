@@ -285,6 +285,8 @@ def test_bucketed_schema_with_explicit_engine_warns(start_cluster):
     restart_with_engine_settings("map_serialization_version = 'with_buckets'")
     assert node7.contains_in_log(warning)
     assert node7.contains_in_log("max_buckets_in_map is not set")
+    # An omitted setting whose `MergeTree` default already has the required value is not reported.
+    assert not node7.contains_in_log("map_serialization_version_for_zero_level_parts is not set")
 
     restart_with_engine_settings(bucketed_settings.replace("'constant'", "'sqrt'"))
     assert node7.contains_in_log(warning)

@@ -285,6 +285,9 @@ std::shared_ptr<TSystemLog> createSystemLog(
 
         const auto * engine_storage = storage_with_comment.storage ? storage_with_comment.storage->as<ASTStorage>() : nullptr;
         const auto * engine_settings = engine_storage ? engine_storage->settings : nullptr;
+        /// A setting omitted from the engine takes the effective `MergeTree` default, which may already be the required value.
+        const bool is_replicated = engine_storage && engine_storage->engine && engine_storage->engine->name.starts_with("Replicated");
+        const MergeTreeSettings & effective_defaults = is_replicated ? context->getReplicatedMergeTreeSettings() : context->getMergeTreeSettings();
         for (const auto & required : default_settings_ast->as<ASTSetQuery &>().changes)
         {
             /// The last occurrence wins, e.g. when `settings` from the configuration override the defaults.
@@ -294,7 +297,10 @@ std::shared_ptr<TSystemLog> createSystemLog(
                     if (change.name == required.name)
                         actual = &change.value;
             if (!actual)
-                engine_settings_mismatches.push_back(fmt::format("{} is not set", required.name));
+            {
+                if (effective_defaults.get(required.name) != required.value)
+                    engine_settings_mismatches.push_back(fmt::format("{} is not set", required.name));
+            }
             else if (*actual != required.value)
                 engine_settings_mismatches.push_back(fmt::format("{} = {} instead of {}",
                     required.name, applyVisitor(FieldVisitorToString(), *actual), applyVisitor(FieldVisitorToString(), required.value)));
