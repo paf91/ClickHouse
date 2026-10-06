@@ -470,6 +470,18 @@ std::unordered_map<std::string, int64_t> FsSnapshot::getBlobLinkDeltas() const
     return blob_link_deltas;
 }
 
+std::shared_ptr<const BlobObjectKeyRemap> FsSnapshot::getBackupsOfPendingReplaceTargets() const
+{
+    UniqueLock lock(mutex);
+    return backups_of_pending_replace_targets;
+}
+
+void FsSnapshot::setBackupsOfPendingReplaceTargets(std::shared_ptr<const BlobObjectKeyRemap> backups)
+{
+    UniqueLock lock(mutex);
+    backups_of_pending_replace_targets = std::move(backups);
+}
+
 void FsSnapshot::resetDeltas()
 {
     UniqueLock lock(mutex);

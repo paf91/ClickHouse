@@ -47,6 +47,9 @@ std::string getDefaultBlobKey(const std::string & directory_remote_path, const s
 
 class BlobLinkCounts;
 
+/// Blob object keys to read instead of the given ones, by the given ones.
+using BlobObjectKeyRemap = std::unordered_map<std::string, std::string>;
+
 struct FsNode : public std::enable_shared_from_this<FsNode>
 {
     std::optional<DirectoryRemoteInfo> info = {};
@@ -161,6 +164,10 @@ public:
     void resetToRoot(std::shared_ptr<FsNode> new_root);
     std::pair<int64_t, int64_t> getRemoteLayoutDeltas() const;
     std::unordered_map<std::string, int64_t> getBlobLinkDeltas() const;
+    /// On a read-only disk: the object keys of the backups of the targets of pending replacements, by the object keys of the targets.
+    /// It is a part of the snapshot, so that a reader never combines the files of one load with the remap of another.
+    std::shared_ptr<const BlobObjectKeyRemap> getBackupsOfPendingReplaceTargets() const;
+    void setBackupsOfPendingReplaceTargets(std::shared_ptr<const BlobObjectKeyRemap> backups);
     /// Forgets the accumulated deltas without changing the tree. Called after the deltas have been folded
     /// into the committed state, so a snapshot promoted to the committed one does not double-count them.
     void resetDeltas();
@@ -182,6 +189,7 @@ private:
     mutable int64_t remote_layout_directories_delta TSA_GUARDED_BY(mutex) = 0;
     mutable int64_t remote_layout_files_delta TSA_GUARDED_BY(mutex) = 0;
     std::optional<FsJournal> journal TSA_GUARDED_BY(mutex);
+    std::shared_ptr<const BlobObjectKeyRemap> backups_of_pending_replace_targets TSA_GUARDED_BY(mutex);
 };
 
 }

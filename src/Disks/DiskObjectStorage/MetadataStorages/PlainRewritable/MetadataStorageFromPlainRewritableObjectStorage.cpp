@@ -348,7 +348,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
 
     /// The targets of pending replacements that a read-only disk reads from their backups.
     std::vector<std::pair<PlainRewritableLayout::PendingReplace, ObjectMetadata>> targets_read_from_backups;
-    auto backups_of_targets = std::make_unique<std::unordered_map<std::string, std::string>>();
+    auto backups_of_targets = std::make_shared<BlobObjectKeyRemap>();
 
     /// A subsequent load of a writable disk leaves a pending replacement alone, because the move may be running in
     /// this very process.
@@ -866,9 +866,8 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
         });
     }
 
-    backups_of_pending_replace_targets.set(std::move(backups_of_targets));
     remote_directories_of_pending_replaces = std::move(current_remote_directories_of_pending_replaces);
-    fs.applyLayout(std::move(remote_layout));
+    fs.applyLayout(std::move(remote_layout), std::move(backups_of_targets));
     local_paths_by_remote_directory = std::move(new_local_paths);
     previous_refresh.restart();
 
@@ -1028,9 +1027,10 @@ std::optional<StoredObjects> MetadataStorageFromPlainRewritableObjectStorage::ge
     auto object_key = layout->constructBlobObjectKey(getBlobKey(*directory_remote_info, normalized_path.filename(), file_it->second));
     if (object_storage->isReadOnly())
     {
-        const auto backups = backups_of_pending_replace_targets.get();
-        if (auto it = backups->find(object_key); it != backups->end())
-            object_key = it->second;
+        /// Taken from the same snapshot as the file, so that the size and the key of the blob come from the same load.
+        if (const auto backups = tree->getBackupsOfPendingReplaceTargets())
+            if (auto it = backups->find(object_key); it != backups->end())
+                object_key = it->second;
     }
 
     return StoredObjects{StoredObject(object_key, path, file_it->second.bytes_size)};
@@ -1096,7 +1096,8 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::commit(const Tr
 
     /// 0. Add preconditions for transaction commit and publishing of its result.
     operations.prependOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(uncommitted_state.getTxPreconditions(), commit_snapshot));
-    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStoragePublishOperation>(commit_snapshot, metadata_storage.fs));
+    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStoragePublishOperation>(
+        commit_snapshot, metadata_storage.fs, metadata_storage.object_storage, metadata_storage.layout, removed_objects));
 
     {
         /// 1. Exclude the transactions touching the same paths, their ancestors or descendants, as well as full reloads.
