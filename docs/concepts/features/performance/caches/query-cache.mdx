@@ -251,7 +251,7 @@ be marked accessible by other users (i.e. shared) by supplying setting
 
 By default, the query cache keeps its entries in memory. Additionally, query results can be cached on disk, backed by a
 [filesystem cache](/concepts/features/configuration/server-config/storing-data#using-local-cache). Compared to the in-memory query cache, the query cache on
-disk provides more space, survives server restarts, and (when the filesystem cache is distributed) can be shared between servers.
+disk provides more space and survives server restarts.
 
 To use the query cache on disk, first configure a filesystem cache in the `filesystem_caches` section of the server configuration:
 
@@ -302,7 +302,8 @@ The entries of the query cache on disk are ordinary entries of the filesystem ca
 same filesystem cache: they are not held from deletion and they are evicted by the same rules (e.g. least-recently-used) when the
 filesystem cache runs out of space. There are no separate limits on their total size or number - only the limits of the filesystem
 cache itself apply. Statement `SYSTEM CLEAR QUERY CACHE` (and `SYSTEM CLEAR QUERY CACHE TAG 'tag'`) also removes the entries (with the
-given tag) of the query cache on disk from the filesystem cache selected by setting `query_cache_on_disk_cache_name` of the session
+given tag; corrupt entries and entries of an incompatible format are removed regardless of their tag) of the query cache on disk from
+the filesystem cache selected by setting `query_cache_on_disk_cache_name` of the session
 (e.g. after `SET query_cache_on_disk_cache_name = 'query_results'`), and leaves the other data of the filesystem cache in place. To
 find the entries, it scans all keys of the filesystem cache and recognizes an entry by its header at the beginning of the entry. If the
 filesystem cache has already evicted the beginning of an entry, the remainder of the entry can no longer be told apart from other data:

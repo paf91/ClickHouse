@@ -187,8 +187,8 @@
     M(QueryCacheMisses, "Number of times a query result has not been found in the query cache (and required query computation). Counts the query cache as a whole: a query is a miss only if it was found in neither the in-memory nor the on-disk backend. Only updated for SELECT queries with SETTING use_query_cache = 1.", ValueType::Number) \
     M(QueryCacheOnDiskHits, "Number of times a query result has been found in the query cache on disk (see setting query_cache_on_disk_cache_name), the breakdown of the on-disk backend of QueryCacheHits. Only updated for SELECT queries with SETTING use_query_cache = 1.", ValueType::Number) \
     M(QueryCacheOnDiskMisses, "Number of times a query result has not been found in the query cache on disk (see setting query_cache_on_disk_cache_name), the breakdown of the on-disk backend of QueryCacheMisses. Only updated for SELECT queries with SETTING use_query_cache = 1.", ValueType::Number) \
-    M(QueryCacheOnDiskReadBytes, "Number of serialized bytes read from the query cache on disk.", ValueType::Bytes) \
-    M(QueryCacheOnDiskWrittenBytes, "Number of serialized bytes written into the query cache on disk.", ValueType::Bytes) \
+    M(QueryCacheOnDiskReadBytes, "Number of serialized (compressed) bytes read from the query cache on disk.", ValueType::Bytes) \
+    M(QueryCacheOnDiskWrittenBytes, "Number of serialized (compressed) bytes written into the query cache on disk.", ValueType::Bytes) \
     M(QueryCacheAgeSeconds, "The sum of ages of found query cache entries in seconds. Only updated for hits, of both the in-memory and the on-disk backend of the query cache.", ValueType::Number) \
     M(QueryCacheReadRows, "The number of rows read from the query cache.", ValueType::Number) \
     M(QueryCacheReadBytes, "The number of (uncompressed) bytes read from the query cache.", ValueType::Bytes) \
