@@ -57,6 +57,7 @@ namespace DB
 namespace Setting
 {
 extern const SettingsBool ast_fuzzer_oracle;
+extern const SettingsJoinStrictness join_default_strictness;
 }
 
 namespace ErrorCodes
@@ -818,16 +819,23 @@ bool usesFinalAnywhere(const ASTPtr & ast)
 /// ASOF JOIN tie-breaking among equal asof-column values is
 /// implementation-defined, so which right-side row a left row pairs with can
 /// change between plans — observed as a `Subquery wrap` false mismatch.
-/// Checked recursively: an ASOF join in any subquery taints the whole query.
-bool hasAsofJoinAnywhere(const ASTPtr & ast)
+/// `ANY` pairs with an arbitrary match (`ANY INNER` keeps one row per key), so it is plan-dependent too.
+/// A join written without a strictness gets `join_default_strictness`, or `ALL` if it is `LATERAL`.
+/// Checked recursively: such a join in any subquery taints the whole query.
+bool hasNonDeterministicJoinAnywhere(const ASTPtr & ast, JoinStrictness default_strictness)
 {
     if (!ast)
         return false;
     if (const auto * join = ast->as<ASTTableJoin>())
-        if (join->strictness == JoinStrictness::Asof)
+    {
+        auto strictness = join->strictness;
+        if (strictness == JoinStrictness::Unspecified && !join->lateral && join->kind != JoinKind::Cross && join->kind != JoinKind::Comma)
+            strictness = default_strictness;
+        if (strictness == JoinStrictness::Asof || strictness == JoinStrictness::Any || strictness == JoinStrictness::RightAny)
             return true;
+    }
     for (const auto & child : ast->children)
-        if (hasAsofJoinAnywhere(child))
+        if (hasNonDeterministicJoinAnywhere(child, default_strictness))
             return true;
     return false;
 }
@@ -1067,6 +1075,9 @@ bool referencesUnscreenedDefinitionAnywhere(const ASTPtr & ast, const ContextPtr
 
                 for (const auto & definition : definitions)
                     if (hasNonDeterministicFunctionsImpl(definition, context)
+                        || hasNonDeterministicJoinAnywhere(definition, context->getSettingsRef()[Setting::join_default_strictness])
+                        || hasNonStrippableInlineSettings(definition)
+                        || hasNestedThreadSettings(definition, nullptr)
                         || referencesSystemDatabaseAnywhere(definition, context->getCurrentDatabase())
                         || referencesDistributedTableAnywhere(definition, context)
                         || referencesUnscreenedDefinitionAnywhere(definition, context, depth + 1))
@@ -2689,9 +2700,9 @@ bool QueryOracleChecker::check(const ASTPtr & query_ast, const ContextMutablePtr
         }
     }
 
-    if (hasAsofJoinAnywhere(query_ast))
+    if (hasNonDeterministicJoinAnywhere(query_ast, context->getSettingsRef()[Setting::join_default_strictness]))
     {
-        LOG_TRACE(logger, "Oracle skip: ASOF JOIN (tie-breaking is plan-dependent)");
+        LOG_TRACE(logger, "Oracle skip: ASOF or ANY JOIN (the matched row is plan-dependent)");
         return false;
     }
 
