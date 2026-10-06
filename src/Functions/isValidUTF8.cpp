@@ -45,17 +45,9 @@ struct ValidUTF8Impl
             }
             for (; row < rows && row_begin(row + 1) == valid_end; ++row)
                 res[row] = 1;
-            if (row == rows)
-                break;
-            /// This row contains the first invalid byte or ends in the middle of a code point. The rows after it are checked one
-            /// by one up to the next valid one, so that a run of invalid rows does not cost a simdutf call per row.
-            res[row++] = 0;
-            while (row < rows)
-            {
-                res[row] = isValidUTF8(data + row_begin(row), row_begin(row + 1) - row_begin(row));
-                if (res[row++])
-                    break;
-            }
+            /// This row contains the first invalid byte or ends in the middle of a code point.
+            if (row < rows)
+                res[row++] = 0;
         }
 #else
         for (size_t row = 0; row < rows; ++row)
