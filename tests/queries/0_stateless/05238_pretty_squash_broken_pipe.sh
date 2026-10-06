@@ -11,6 +11,8 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # `output_format_pretty_max_rows` is raised so that every block is written, and the query keeps
 # writing into the broken pipe. `output_format_pretty_squash_consecutive_ms` is pinned because the
 # background writer is only used when it is non-zero. `timeout` exits with 124 if the query hangs.
+# The query has to fail with the original write error, `CANNOT_WRITE_TO_FILE_DESCRIPTOR` (exit code 75),
+# not with `QUERY_WAS_CANCELLED` or anything else.
 timeout 60 $CLICKHOUSE_LOCAL --max_threads=1 --output_format_pretty_squash_consecutive_ms=50 --output_format_pretty_max_rows=1000000000000 \
     --query "SELECT number FROM numbers(1e18) FORMAT PrettyCompact" 2>/dev/null | head -n 1 > /dev/null
 
@@ -18,6 +20,9 @@ code=${PIPESTATUS[0]}
 if [ "$code" -eq 124 ]
 then
     echo "The query did not stop after its output pipe was broken"
+elif [ "$code" -ne 75 ]
+then
+    echo "Unexpected exit code $code"
 else
     echo "OK"
 fi
@@ -33,13 +38,16 @@ code=${PIPESTATUS[0]}
 if [ "$code" -eq 124 ]
 then
     echo "The query did not stop after its output pipe was broken, with no more output to write"
+elif [ "$code" -ne 75 ]
+then
+    echo "Unexpected exit code $code"
 else
     echo "OK"
 fi
 
 # The same with the remote `clickhouse-client`, which formats the result itself. The query in its
 # process list is on the server, so the background thread has nothing to cancel there: the error is
-# reported on the next progress packet instead.
+# reported by the client while it waits for packets from the server instead.
 timeout 60 $CLICKHOUSE_CLIENT --max_threads=1 --output_format_pretty_squash_consecutive_ms=50 --output_format_pretty_max_rows=1000000000000 --max_rows_to_read=0 \
     --query "SELECT DISTINCT number % 100000 AS x FROM numbers(1e18) FORMAT PrettyCompact" 2>/dev/null | head -n 1 > /dev/null
 
@@ -47,6 +55,9 @@ code=${PIPESTATUS[0]}
 if [ "$code" -eq 124 ]
 then
     echo "The remote client did not stop after its output pipe was broken, with no more output to write"
+elif [ "$code" -ne 75 ]
+then
+    echo "Unexpected exit code $code"
 else
     echo "OK"
 fi

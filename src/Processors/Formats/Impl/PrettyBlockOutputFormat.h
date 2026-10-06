@@ -33,7 +33,7 @@ public:
 
     String getName() const override { return "PrettyBlockOutputFormat"; }
 
-    void onProgress(const Progress & progress) override;
+    void checkBackgroundError() override;
 
 protected:
     void consume(Chunk) override;

@@ -391,20 +391,18 @@ void PrettyBlockOutputFormat::rethrowBackgroundExceptionIfAny()
         std::rethrow_exception(background_exception);
 }
 
-void PrettyBlockOutputFormat::onProgress(const Progress & progress)
+void PrettyBlockOutputFormat::checkBackgroundError()
 {
     /// The remote `clickhouse-client` formats the result itself, and there is no query in its process
     /// list for `writingThread` to cancel. A query that has already produced all of its output does not
-    /// call the writing methods anymore, but the client keeps receiving progress packets, so report
-    /// the write error here. Not waiting for the mutex: if it is busy, the next progress update will do.
+    /// call the writing methods anymore, so the client calls this while it waits for packets from the
+    /// server. Not waiting for the mutex: if it is busy, the next call will do.
     if (has_background_exception)
     {
         std::unique_lock lock(writing_mutex, std::try_to_lock);
         if (lock)
             rethrowBackgroundExceptionIfAny();
     }
-
-    IOutputFormat::onProgress(progress);
 }
 
 void PrettyBlockOutputFormat::writeChunk(const Chunk & chunk, PortKind port_kind)

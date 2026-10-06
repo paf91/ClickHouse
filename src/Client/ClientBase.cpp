@@ -2006,6 +2006,12 @@ void ClientBase::receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, b
                 }
             }
 
+            /// The output format may write in a background thread (squashing in `Pretty` formats). If that
+            /// write has failed (for example, the output pipe is broken), stop now: the query may have
+            /// produced all of its output already, and the next write would happen only at its end.
+            if (output_format)
+                output_format->checkBackgroundError();
+
             /// Poll for changes after a cancellation check, otherwise it never reached
             /// because of progress updates from server.
 

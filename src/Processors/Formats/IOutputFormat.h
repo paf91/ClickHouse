@@ -59,6 +59,11 @@ public:
     /// Passed values are deltas, that must be summarized.
     virtual void onProgress(const Progress & progress);
 
+    /// Rethrow the error of writing in a background thread, if the format writes there and it has failed.
+    /// For a caller that has nothing to write at the moment (for example, the client waiting for packets
+    /// from the server), so that it stops promptly instead of at the next write. Does not block.
+    virtual void checkBackgroundError() {}
+
     /// Hand the final progress - carrying the final counters (`result_rows` / `result_bytes` /
     /// `memory_usage`) computed after the query finished - to the framing format (see `setFraming`),
     /// which writes it as the last `progress` packet of its own (deferred) finalization, after the
