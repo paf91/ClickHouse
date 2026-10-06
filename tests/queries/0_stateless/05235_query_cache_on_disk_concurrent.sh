@@ -7,9 +7,10 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CUR_DIR"/../shell_config.sh
 
-# The in-memory query cache is disabled, so that every query goes to the disk. The tag makes the key unique to this test run.
+# The in-memory query cache is disabled, so that every query goes to the disk. The tag makes the key unique to this test run. The TTL
+# must outlast all rounds, which can take a while on slow builds (e.g. with sanitizers).
 tag="05235_${CLICKHOUSE_DATABASE}_${RANDOM}${RANDOM}"
-settings="use_query_cache = 1, query_cache_on_disk_cache_name = 'cache_for_query_results', enable_reads_from_query_cache = 0, enable_writes_to_query_cache = 0, query_cache_tag = '${tag}'"
+settings="use_query_cache = 1, query_cache_on_disk_cache_name = 'cache_for_query_results', enable_reads_from_query_cache = 0, enable_writes_to_query_cache = 0, query_cache_tag = '${tag}', query_cache_ttl = 3600"
 query="SELECT sum(cityHash64(number)), count() FROM numbers(300000) SETTINGS ${settings}"
 
 expected=$(${CLICKHOUSE_CLIENT} --query "SELECT sum(cityHash64(number)), count() FROM numbers(300000)")

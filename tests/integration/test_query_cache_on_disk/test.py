@@ -53,7 +53,8 @@ def run_queries(cache, tag):
     """Runs a deterministic query (with totals and extremes, to cover the extra blocks of an entry) and a non-deterministic one
     (stored explicitly, so that serving it from the cache is observable in the result itself). Returns both results.
     """
-    settings = f"use_query_cache = 1, query_cache_on_disk_cache_name = '{cache}', query_cache_tag = '{tag}'"
+    # The TTL must outlast the restart of the server, which can take a while on slow builds (e.g. with sanitizers).
+    settings = f"use_query_cache = 1, query_cache_on_disk_cache_name = '{cache}', query_cache_tag = '{tag}', query_cache_ttl = 3600"
     deterministic = node.query(
         "SELECT number % 3 AS k, sum(number), max(toString(number)), [toLowCardinality('x'), NULL] "
         "FROM numbers(10000) GROUP BY k WITH TOTALS ORDER BY k "
