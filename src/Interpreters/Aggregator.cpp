@@ -2317,9 +2317,11 @@ bool Aggregator::executeOnBlock(Columns columns,
             all_keys_are_const &= isColumnConst(*columns.at(keys_positions[i]));
     }
 
-    /// The plan's `top_k` flag stays set after the heap has frozen, and `executeImpl` freezes the
-    /// heap at the start of this block when `shouldFreeze()` is already true. `topKHeapInactive`
-    /// covers both states, so this mirrors exactly whether `executeImpl` will rank the block.
+    /// The plan's `top_k` flag stays set after the heap has frozen, and `executeImpl` may freeze
+    /// the heap at the start of this block. `topKHeapInactive` is true only when `executeImpl`
+    /// certainly will not rank the block: it errs towards "active" when the shared-boundary
+    /// exchange in `executeImpl` may still restart the profitability window and keep the heap
+    /// running, so an active heap never sees key columns in a representation it cannot rank.
     const bool top_k_active = params.top_k && !result.topKHeapInactive();
 
     /// Remember the columns we will work with

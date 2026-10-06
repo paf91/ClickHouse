@@ -86,6 +86,18 @@ struct TopKAggregationHeapBase
 
     bool shouldFreeze() const;
 
+    /// Whether the next block certainly runs with the heap frozen. Unlike `shouldFreeze`, this
+    /// accounts for the `exchangeSharedBoundary` call that precedes the freeze check, which may
+    /// restart the profitability window once and so keep the heap active.
+    bool willBeInactive() const
+    {
+        if (frozen)
+            return true;
+        if (!shouldFreeze())
+            return false;
+        return tie_overflow || !shared_boundary || window_restarted_for_shared;
+    }
+
     /// A skip boundary exists once the local set has filled to K, or earlier if another
     /// thread has published a shared boundary this thread can borrow.
     bool hasBoundary() const { return boundary_is_shared || boundary_row != invalid_row; }
