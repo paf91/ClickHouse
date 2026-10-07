@@ -296,16 +296,30 @@ static bool isKnownWithoutDefaultUserDiskAccessStorage(const fs::path & director
         if (lists_are_used)
             return !has_default_user_in_lists;
 
+        /// Same as `DiskAccessStorage::reloadAllAndRebuildLists`: only regular `<uuid>.sql` files are entities,
+        /// and a file that cannot be read or parsed is skipped.
         for (const auto & entry : fs::directory_iterator(directory_path))
         {
-            if (entry.path().extension() != ".sql")
+            UUID id;
+            if (!entry.is_regular_file() || entry.path().extension() != ".sql" || !tryParse(id, entry.path().stem().string()))
                 continue;
-            String definition;
+
+            AccessEntityPtr entity;
+            try
             {
-                ReadBufferFromFile in(entry.path().string());
-                readStringUntilEOF(definition, in);
+                String definition;
+                {
+                    ReadBufferFromFile in(entry.path().string());
+                    readStringUntilEOF(definition, in);
+                }
+                entity = deserializeAccessEntity(definition, entry.path().string());
             }
-            auto entity = deserializeAccessEntity(definition, entry.path().string());
+            catch (...)
+            {
+                /// Ok: the server skips such a file too.
+                continue;
+            }
+
             if (entity->isTypeOf<User>() && entity->getName() == "default")
                 return false;
         }
@@ -1107,6 +1121,14 @@ int mainEntryClickHouseInstall(int argc, char ** argv)
                     fmt::print("The default user is defined in {}.\n", default_user_config_file.string());
                 }
                 break;
+            }
+
+            /// No XML users config defines the default user, but the server continues looking it up in the later
+            /// storage that is not an XML users config.
+            if (is_default_user_removed && !shadowing_access_storage.empty())
+            {
+                is_default_user_removed = false;
+                is_default_user_maybe_shadowed = true;
             }
         }
 
