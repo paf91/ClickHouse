@@ -1122,7 +1122,7 @@ std::optional<S3::URI> Client::getURIFromError(const Aws::S3::S3Error & error) c
     /// <Endpoint> XML), so validate it against RemoteHostFilter before following the redirect,
     /// otherwise a malicious S3 server can redirect us to internal hosts (SSRF). This mirrors
     /// the Poco 307 path in PocoHTTPClient. Throws UNACCEPTABLE_URL.
-    client_configuration.remote_host_filter.checkURL(result.uri);
+    result.checkRemoteHostFilter(client_configuration.remote_host_filter);
 
     return result;
 }

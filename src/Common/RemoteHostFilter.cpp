@@ -74,6 +74,7 @@ void RemoteHostFilter::setValuesFromConfig(const Poco::Util::AbstractConfigurati
         std::lock_guard guard(hosts_mutex);
         primary_hosts.clear();
         regexp_hosts.clear();
+        s3_buckets.clear();
 
         for (const auto & key : keys)
         {
@@ -81,6 +82,15 @@ void RemoteHostFilter::setValuesFromConfig(const Poco::Util::AbstractConfigurati
                 regexp_hosts.push_back(config.getString("remote_url_allow_hosts." + key));
             else if (startsWith(key, "host"))
                 primary_hosts.insert(config.getString("remote_url_allow_hosts." + key));
+            else if (startsWith(key, "s3_bucket"))
+            {
+                const auto value = config.getString("remote_url_allow_hosts." + key);
+                const auto slash = value.find('/');
+                if (slash == 0 || slash == std::string::npos || slash + 1 == value.size() || value.find('/', slash + 1) != std::string::npos)
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "<s3_bucket> \"{}\" in <remote_url_allow_hosts> must have the form host/bucket or host:port/bucket", value);
+                s3_buckets.insert(value);
+            }
         }
 
         is_initialized = true;
@@ -91,7 +101,18 @@ void RemoteHostFilter::setValuesFromConfig(const Poco::Util::AbstractConfigurati
         std::lock_guard guard(hosts_mutex);
         primary_hosts.clear();
         regexp_hosts.clear();
+        s3_buckets.clear();
     }
+}
+
+bool RemoteHostFilter::isBucketAllowed(const std::string & endpoint_host, UInt16 endpoint_port, const std::string & bucket) const
+{
+    if (!is_initialized)
+        return true;
+
+    std::lock_guard guard(hosts_mutex);
+    return s3_buckets.contains(endpoint_host + "/" + bucket)
+        || s3_buckets.contains(endpoint_host + ":" + toString(endpoint_port) + "/" + bucket);
 }
 
 bool RemoteHostFilter::checkForDirectEntry(const std::string & str) const
