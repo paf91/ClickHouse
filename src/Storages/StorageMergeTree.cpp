@@ -4587,6 +4587,9 @@ void StorageMergeTree::wakeupBackgroundWorkers() noexcept
     /// Nothing is woken up after `shutdown`: it has already stopped the part loaders and the cleanup
     /// thread, and re-arming them here (e.g. from the rollback of a failed settings `ALTER`) would let
     /// them fire on a shut-down table, possibly while `~MergeTreeData` destroys the state they touch.
+    /// `shutdown` publishes `shutdown_called` before stopping them, so re-checking it after the wake-up
+    /// closes the race with a concurrent `shutdown`: either it stops what was woken up here, or this
+    /// re-check observes the flag and stops it itself.
     if (shutdown_called.load())
         return;
 
@@ -4596,6 +4599,9 @@ void StorageMergeTree::wakeupBackgroundWorkers() noexcept
         background_moves_assignee.trigger();
         cleanup_thread.wakeup();
         startOutdatedAndUnexpectedDataPartsLoadingTask();
+
+        if (shutdown_called.load())
+            stopAllBackgroundTasks();
     }
     catch (...)
     {
