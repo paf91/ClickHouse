@@ -52,6 +52,20 @@ FROM (
     WHERE step IN ('Aggregating', 'Union', 'Join', 'ReadFromMergeTree', 'ReadFromParallelReplicas')
 );
 
+-- Plan-based parallel replicas still apply the row threshold to it.
+SELECT arrayStringConcat(groupArray(step), ' ')
+FROM (
+    SELECT trimLeft(explain) AS step
+    FROM (
+        EXPLAIN actions = 0, pretty = 0, optimize = 1, description = 0, header = 0
+        SELECT count() FROM t_l ANY RIGHT JOIN t_r ON t_l.k = t_r.k
+        SETTINGS enable_parallel_replicas = 1, max_parallel_replicas = 3, cluster_for_parallel_replicas = 'test_cluster_one_shard_three_replicas_localhost',
+            parallel_replicas_for_non_replicated_merge_tree = 1, parallel_replicas_min_number_of_rows_per_replica = 1000000, parallel_replicas_plan_based = 1,
+            parallel_replicas_local_plan = 1
+    )
+    WHERE step IN ('Aggregating', 'Union', 'Join', 'ReadFromMergeTree', 'ReadFromParallelReplicas')
+);
+
 -- Positive control: without the setting the whole join still ships.
 SELECT arrayStringConcat(groupArray(step), ' ')
 FROM (
