@@ -137,6 +137,25 @@
     return true;
   }
 
+  function enhanceHomeButton() {
+    var homeButton = document.getElementById('home-assistant-entry');
+    if (!homeButton || homeButton.dataset.chAskAiEnhanced) return Boolean(homeButton);
+
+    // The homepage has a purpose-built hero CTA, rather than a conventional
+    // document heading. Keep it context-free, but make it use the same Kapa
+    // behavior, analytics event, and visual treatment as the other entries.
+    homeButton.dataset.chAskAiEnhanced = 'true';
+    homeButton.removeAttribute('data-galaxy-event');
+    homeButton.classList.add('ch-ask-ai-button', 'ch-home-ask-ai-button');
+    homeButton.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      trackDocsAi('home', false);
+      openKapa();
+    });
+    return true;
+  }
+
   function injectMobileButton() {
     var mobileButton = document.getElementById(MOBILE_BTN_ID);
     if (document.getElementById(PAGE_BTN_ID)) {
@@ -173,12 +192,14 @@
   function init() {
     injectSidebarButton();
     injectPageButton();
+    enhanceHomeButton();
     injectMobileButton();
     bindShortcut();
 
     var observer = new MutationObserver(function () {
       injectSidebarButton();
       injectPageButton();
+      enhanceHomeButton();
       injectMobileButton();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
