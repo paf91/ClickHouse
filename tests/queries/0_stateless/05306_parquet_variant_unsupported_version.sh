@@ -14,4 +14,4 @@ DATA_FILE=$CUR_DIR/data_parquet/05306_variant_unsupported_version.parquet
 ${CLICKHOUSE_LOCAL} --query="SELECT n, v FROM file('${DATA_FILE}', Parquet) ORDER BY n" 2>&1 \
     | grep -o "Parquet column v is a variant with specification version 2, but only version 1 is supported"
 
-${CLICKHOUSE_LOCAL} --query="SELECT count(), max(n) FROM file('${DATA_FILE}', Parquet)"
+${CLICKHOUSE_LOCAL} --query="SELECT count(), max(n) FROM file('${DATA_FILE}', Parquet, 'n Int32')"

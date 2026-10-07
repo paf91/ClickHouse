@@ -20,5 +20,5 @@ ${CLICKHOUSE_LOCAL} --query="SELECT n, v FROM file('${DATA_FILE}', Parquet) WHER
 
 for n in 2 3; do
     ${CLICKHOUSE_LOCAL} --query="SELECT v FROM file('${DATA_FILE}', Parquet) WHERE n = $n" 2>&1 \
-        | grep -o "Malformed Parquet variant column 'v': a row has .* but no .*"
+        | grep -o "Malformed Parquet variant column 'v': a row has [^:]*"
 done

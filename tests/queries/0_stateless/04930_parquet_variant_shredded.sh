@@ -24,7 +24,7 @@ ${CLICKHOUSE_LOCAL} --query="SELECT n, v FROM file('${DATA_FILE}', Parquet) ORDE
     | grep -o "Parquet column v is a shredded variant.*not supported yet"
 
 echo '--- reading the other column ---'
-${CLICKHOUSE_LOCAL} --query="SELECT n FROM file('${DATA_FILE}', Parquet) ORDER BY n"
+${CLICKHOUSE_LOCAL} --query="SELECT n FROM file('${DATA_FILE}', Parquet, 'n Int32') ORDER BY n"
 
 echo '--- schema inference ---'
 ${CLICKHOUSE_LOCAL} --query="DESCRIBE file('${DATA_FILE}', Parquet)" 2>&1 \

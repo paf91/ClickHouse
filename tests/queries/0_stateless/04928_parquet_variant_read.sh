@@ -27,7 +27,7 @@ ${CLICKHOUSE_LOCAL} --stacktrace --query="SELECT n, v FROM file('${DATA_FILE}', 
 echo '--- schema inference ---'
 ${CLICKHOUSE_LOCAL} --query="DESCRIBE file('${DATA_FILE}', Parquet)"
 echo '--- input_format_parquet_detect_variant_by_structure = 0 ---'
-${CLICKHOUSE_LOCAL} --query="DESCRIBE file('${DATA_FILE}', Parquet) SETTINGS input_format_parquet_detect_variant_by_structure = 0"
+${CLICKHOUSE_LOCAL} --query="DESCRIBE file('${DATA_FILE}', Parquet) SETTINGS input_format_parquet_detect_variant_by_structure = 0, print_pretty_type_names = 0"
 ${CLICKHOUSE_LOCAL} --query="
     SELECT n, length(v.value), length(v.metadata) FROM file('${DATA_FILE}', Parquet) ORDER BY n
     SETTINGS input_format_parquet_detect_variant_by_structure = 0"
