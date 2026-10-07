@@ -1317,8 +1317,7 @@ bool MergeTreeIndexConditionText::traverseFunctionNode(
     const bool can_search_substrings
         = tokenizer->supportsStringLike() || like_optimization_supported_tokenizers.contains(tokenizer->getType());
 
-    /// Searches the needle as `LIKE '%needle%'` (`ILIKE` if case-insensitive), which is exact: a needle is found
-    /// in a value iff its pattern matches one of the value's tokens.
+    /// Exact: a needle occurs in a value iff its `%needle%` pattern matches one of the value's tokens.
     auto try_search_needle_by_infix_pattern = [&](std::string_view needle, bool case_insensitive)
     {
         const bool tokenizer_supported = like_optimization_supported_tokenizers.contains(tokenizer->getType());
@@ -1797,8 +1796,7 @@ bool MergeTreeIndexConditionText::traverseFunctionNode(
 
         const bool is_case_insensitive = function_name.starts_with("multiSearchAnyCaseInsensitive");
 
-        /// One needle is `LIKE '%needle%'`. More needles keep the path below: the dictionary scan would search
-        /// every block once per needle, while the function makes one pass for all of them.
+        /// One needle only: the dictionary scan searches every block once per needle.
         if (needles.size() == 1 && needles.front().getType() == Field::Types::String
             && try_search_needle_by_infix_pattern(needles.front().safeGet<String>(), is_case_insensitive))
             return true;
