@@ -54,6 +54,7 @@
 #include <Common/ProfileEvents.h>
 #include <Common/thread_local_rng.h>
 #include <Common/logger_useful.h>
+#include <Common/maskSensitiveQueryParameters.h>
 #include <Common/maskURIPassword.h>
 #include <Common/quoteString.h>
 
@@ -3184,6 +3185,21 @@ static StoragePtr tryDispatchURLEngineByScheme(const StorageFactory::Arguments &
         configuration.url, std::move(resolved_format), is_replayed_definition);
 }
 
+/// Masks the credentials a url carries: its userinfo password, the presigned S3/GCS parameters and every query
+/// parameter named like a credential (`access_token`, Azure SAS `sig`, ...). Returns whether anything was masked.
+static bool maskURLCredentials(String & url)
+{
+    bool changed = maskURIPassword(&url);
+    changed |= maskPresignedURLParameters(url);
+    String masked = maskSensitiveQueryParametersInURI(url);
+    if (masked != url)
+    {
+        url = std::move(masked);
+        changed = true;
+    }
+    return changed;
+}
+
 SecretArgumentsSpec urlSecretArguments(size_t url_offset)
 {
     return {.custom = [url_offset](FunctionSecretArgumentsFinder & finder)
@@ -3197,7 +3213,7 @@ SecretArgumentsSpec urlSecretArguments(size_t url_offset)
         if (finder.isNamedCollectionName(url_offset))
         {
             /// url(named_collection, url = 'https://user:password@host/...', headers(...), ...): mask the
-            /// userinfo password of a `url` override. The parser evaluates constant-expression keys and
+            /// credentials of a `url` override. The parser evaluates constant-expression keys and
             /// values, so fail closed on anything we cannot read as a plain literal (a nested `headers(...)`
             /// map or other expression could carry a secret): an unevaluable key can name `url`, and any
             /// non-literal value of a visible override can hide a nested secret. The headers are handled
@@ -3225,7 +3241,7 @@ SecretArgumentsSpec urlSecretArguments(size_t url_offset)
                     String url;
                     if (equals_func->arguments->at(1)->tryGetString(&url, /* allow_identifier= */ false))
                     {
-                        if (maskURIPassword(&url))
+                        if (maskURLCredentials(url))
                             finder.result.replaced_arguments[i] = "url = " + quoteString(url);
                     }
                     else
@@ -3243,8 +3259,8 @@ SecretArgumentsSpec urlSecretArguments(size_t url_offset)
         String uri;
         if (finder.tryGetStringFromArgument(url_offset, &uri, /* allow_identifier= */ false))
         {
-            /// A readable url literal: mask only its userinfo password, keeping the host and path visible.
-            if (maskURIPassword(&uri))
+            /// A readable url literal: mask only its credentials, keeping the host and path visible.
+            if (maskURLCredentials(uri))
                 finder.result.replaced_arguments[url_offset] = quoteString(uri);
         }
         else
