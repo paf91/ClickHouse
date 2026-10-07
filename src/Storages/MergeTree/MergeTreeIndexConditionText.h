@@ -118,8 +118,7 @@ public:
     const Block & getHeader() const { return header; }
 
     /// Create text search query for the function node if it is suitable for optimization.
-    /// `allow_drop_nullable` is passed to `unwrapLosslessConversion`.
-    TextSearchQueryPtr createTextSearchQuery(const ActionsDAG::Node & node, bool allow_drop_nullable) const;
+    TextSearchQueryPtr createTextSearchQuery(const ActionsDAG::Node & node) const;
     /// Whether the index can answer the predicate of the function node.
     bool canAnswerFunctionNode(const ActionsDAG::Node & node) const;
     /// Returns generated virtual column name for the replacement of related function node.
@@ -166,7 +165,7 @@ private:
 
     using RPN = std::vector<RPNElement>;
 
-    bool traverseAtomNode(const RPNBuilderTreeNode & node, RPNElement & out, bool allow_drop_nullable) const;
+    bool traverseAtomNode(const RPNBuilderTreeNode & node, RPNElement & out) const;
 
     /// Whether the function accepts a tokenizer definition as its third argument and the given node
     /// is a constant one that denotes the index tokenizer.
@@ -177,8 +176,7 @@ private:
         const RPNBuilderTreeNode & argument_node,
         DataTypePtr value_type,
         Field value_field,
-        RPNElement & out,
-        bool allow_drop_nullable) const;
+        RPNElement & out) const;
 
     TextIndexDirectReadMode getHintOrNoneMode() const;
 
@@ -219,8 +217,7 @@ private:
     std::vector<OptimizedRegularExpression>
     stringLikeToPatterns(const Field & field, bool case_insensitive, bool allow_arbitrary_patterns) const;
 
-    bool tryPrepareSetForTextSearch(
-        const RPNBuilderTreeNode & lhs, const RPNBuilderTreeNode & rhs, const String & function_name, RPNElement & out, bool allow_drop_nullable) const;
+    bool tryPrepareSetForTextSearch(const RPNBuilderTreeNode & lhs, const RPNBuilderTreeNode & rhs, const String & function_name, RPNElement & out) const;
 
     bool hasIndexForColumn(const String & column_name) const { return header.has(column_name) || column_name == normalized_index_column_name; }
 

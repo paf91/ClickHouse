@@ -633,6 +633,14 @@ private:
         ActionsDAGWithInversionPushDown canonical_dag(&function_node, context, /* boolean_context */ false);
         const auto & canonical_node = canonical_dag.predicate ? *canonical_dag.predicate : function_node;
 
+        /// The index is analyzed under a `CAST` that drops `Nullable` and throws on NULL. Direct read replaces or
+        /// short-circuits the predicate, so `NOT hasToken(CAST(s, 'String'), 'a')` would return the NULL row
+        /// instead of throwing. Use the index only to skip granules then.
+        const bool drops_nullable = std::ranges::any_of(canonical_node.children, [](const auto * argument)
+        {
+            return unwrapLosslessConversion(argument, /*allow_drop_nullable=*/ false) != unwrapLosslessConversion(argument);
+        });
+
         NameSet used_index_columns;
         std::vector<SelectedCondition> selected_conditions;
 
@@ -647,7 +655,7 @@ private:
             if (index_header.columns() != 1 || used_index_columns.contains(index_header.begin()->name))
                 continue;
 
-            auto search_query = text_index_condition.createTextSearchQuery(canonical_node, /*allow_drop_nullable=*/ true);
+            auto search_query = text_index_condition.createTextSearchQuery(canonical_node);
             if (!search_query)
                 continue;
 
@@ -661,12 +669,9 @@ private:
 
             /// Use direct read only when enabled and the entry is direct-read-eligible (has `index`) and has no
             /// patched parts. Otherwise just inject the tokenizer/preprocessor/postprocessor (no virtual column),
-            /// same as None mode. Direct read replaces or short-circuits the predicate, so it must not look through
-            /// a `CAST` that drops `Nullable`: `NOT hasToken(CAST(s, 'String'), 'a')` would return the NULL row
-            /// instead of throwing.
-            if (!direct_read_from_text_index || !info.index || info.has_patched_parts
-                || search_query->getDirectReadMode() == TextIndexDirectReadMode::None
-                || !text_index_condition.createTextSearchQuery(canonical_node, /*allow_drop_nullable=*/ false))
+            /// same as None mode.
+            if (!direct_read_from_text_index || !info.index || info.has_patched_parts || drops_nullable
+                || search_query->getDirectReadMode() == TextIndexDirectReadMode::None)
             {
                 selected_conditions.emplace_back(search_query, index_name, String{}, &info, is_index_analyzed);
                 used_index_columns.insert(index_header.begin()->name);
