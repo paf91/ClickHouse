@@ -3405,6 +3405,21 @@ DataPartsVector StorageMergeTree::renameAndCommitEmptyParts(MutableDataPartsVect
             catch (...)
             {
                 tryLogCurrentException(log, "while rolling back the empty parts");
+
+                /// `rollback` can throw before it moves the parts out of `PreActive`, e.g. when storing the rolled back
+                /// creation CSN fails. Evict such parts from the working set directly, so that they do not leak there
+                /// (counted by the size limits, awaited by `preactive_parts_cv` waiters) and can be removed below.
+                /// Clear the transaction as well, otherwise its destructor would roll back the parts again.
+                DataPartsVector preactive_parts;
+                {
+                    auto parts_lock = lockParts();
+                    for (const auto & part : new_parts)
+                        if (part && part->getState() == DataPartState::PreActive)
+                            preactive_parts.push_back(part);
+                    removePartsFromWorkingSetImmediatelyAndSetTemporaryState(preactive_parts, parts_lock);
+                    transaction.clear();
+                }
+                preactive_parts_cv.notify_all();
             }
             for (auto & part : new_parts)
             {
