@@ -1307,15 +1307,14 @@ struct ToStartOfInterval<IntervalKind::Kind::Year>
 };
 
 
-/// The factor of the functions that depend on the UTC offset in effect (`timezoneOffset`, `toTimeWithFixedDate`): the local day
-/// and the UTC offset. The lookup table holds at most one offset change per day, so equal factors mean no change lies between them.
+/// The lookup table holds at most one UTC offset change per local day, so equal factors mean no change lies between them.
 struct ToDayAndUTCOffsetFactorImpl
 {
     static constexpr auto name = "toDayAndUTCOffsetFactor";
 
     static std::pair<Int64, Int64> execute(Int64 t, const DateLUTImpl & time_zone)
     {
-        /// Outside the lookup table nothing is claimed: the factor is unique to the end point.
+        /// Outside the lookup table no two points share a factor.
         if (!DateLUTImpl::isTimeInLUTRange(t))
             return {std::numeric_limits<Int64>::min(), t};
         return {time_zone.toDayNum(t).toUnderType(), time_zone.timezoneOffset(t)};
