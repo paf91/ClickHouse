@@ -78,14 +78,14 @@ void ASTPair::formatImpl(WriteBuffer & ostr, const FormatSettings & settings, Fo
     /// Hide the secrets each dictionary source declares, e.g. the password:
     /// SOURCE(CLICKHOUSE(host 'example01-01-1' port 9000 user 'default' password '[HIDDEN]' db 'default' table 'ids'))
     String masked;
-    if (const auto * finder = getSecretArgumentsFinder(); finder && !settings.show_secrets)
+    if (!settings.show_secrets)
     {
         WriteBufferFromOwnString temp_buf;
         FormatSettings tmp_settings(settings.one_line);
         FormatState tmp_state;
         second->format(temp_buf, tmp_settings, tmp_state, frame);
         masked = temp_buf.str();
-        if (!finder->maskDictionarySourceValue(first, masked))
+        if (!getSecretArgumentsFinder().maskDictionarySourceValue(first, masked))
             masked.clear();
     }
 
@@ -102,12 +102,9 @@ void ASTPair::formatImpl(WriteBuffer & ostr, const FormatSettings & settings, Fo
 bool ASTPair::hasSecretParts() const
 {
     /// A partly secret value (a `uri` with a password) is a secret part only when its masker finds one.
-    if (const auto * finder = getSecretArgumentsFinder())
-    {
-        String value = second->formatWithSecretsOneLine();
-        if (finder->maskDictionarySourceValue(first, value))
-            return true;
-    }
+    String value = second->formatWithSecretsOneLine();
+    if (getSecretArgumentsFinder().maskDictionarySourceValue(first, value))
+        return true;
     return second->hasSecretParts();
 }
 

@@ -98,9 +98,22 @@ public:
     virtual bool maskDictionarySourceValue(const String & key, String & value) const = 0;
 };
 
-/// Installed once at startup by the programs that hide secrets (`server`, `local`, `format`). Without it,
-/// the secrets of engine arguments are shown: the client and the WebAssembly parser always show them.
+/// Finds no secrets. For the programs that don't register the engines (the client, the WebAssembly parser):
+/// they show the secrets of engine arguments.
+class NoSecretArgumentsFinder final : public ISecretArgumentsFinder
+{
+public:
+    static const NoSecretArgumentsFinder & instance();
+
+    SecretArgumentsResult find(ASTFunction::Kind, const AbstractFunction &) const override { return {}; }
+    std::optional<String> renderSecretSetting(const String &, const Field &) const override { return {}; }
+    bool maskDictionarySourceValue(const String &, String &) const override { return false; }
+};
+
+/// Installed once at startup by every program that formats an AST hiding its secrets: `SecretArgumentsRegistry`
+/// where the engines are registered (`server`, `local`, `format`), `NoSecretArgumentsFinder` elsewhere.
 void setSecretArgumentsFinder(const ISecretArgumentsFinder * finder);
-const ISecretArgumentsFinder * getSecretArgumentsFinder();
+/// Throws `LOGICAL_ERROR` if no finder is installed, so a program that forgets to install one can't show secrets.
+const ISecretArgumentsFinder & getSecretArgumentsFinder();
 
 }

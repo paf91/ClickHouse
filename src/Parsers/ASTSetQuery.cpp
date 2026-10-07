@@ -35,10 +35,7 @@ std::optional<String> renderSecretChangeValue(const SettingChange & change)
         return masked;
 
     /// The table and database engine settings, declared by each engine in its `SecretArgumentsSpec`.
-    if (const auto * finder = getSecretArgumentsFinder())
-        return finder->renderSecretSetting(setting_name, change.value);
-
-    return {};
+    return getSecretArgumentsFinder().renderSecretSetting(setting_name, change.value);
 }
 
 

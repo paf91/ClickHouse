@@ -92,11 +92,25 @@ private:
     const ASTFunction * function = nullptr;
 };
 
-/// The secret arguments of a function as the installed finder sees them; none without a finder.
+/// The secret arguments of a function as the installed finder sees them.
 inline SecretArgumentsResult findSecretArguments(const ASTFunction & function)
 {
-    const auto * finder = getSecretArgumentsFinder();
-    return finder ? finder->find(function.getKind(), FunctionAST(function)) : SecretArgumentsResult{};
+    /// Codecs, statistics, window functions and lambdas take no secrets, so the programs that format only
+    /// those (`keeper` and `compressor` format codecs) need no finder.
+    switch (function.getKind())
+    {
+        case ASTFunction::Kind::ORDINARY_FUNCTION:
+        case ASTFunction::Kind::TABLE_ENGINE:
+        case ASTFunction::Kind::DATABASE_ENGINE:
+        case ASTFunction::Kind::BACKUP_NAME:
+            break;
+        case ASTFunction::Kind::WINDOW_FUNCTION:
+        case ASTFunction::Kind::LAMBDA_FUNCTION:
+        case ASTFunction::Kind::CODEC:
+        case ASTFunction::Kind::STATISTICS:
+            return {};
+    }
+    return getSecretArgumentsFinder().find(function.getKind(), FunctionAST(function));
 }
 
 }
