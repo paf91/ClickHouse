@@ -13,7 +13,7 @@ SELECT a FROM t_decimal_overflow_key WHERE a < 2 AND a - toDecimal32(1, 0) BETWE
 SELECT a FROM t_decimal_overflow_key WHERE a < 2 AND toDecimal32(5, 0) - a BETWEEN 4 AND 5 ORDER BY a;
 SELECT a FROM t_decimal_overflow_key WHERE a < 2 AND a + toDecimal32(1, 4) IN (1, 2) ORDER BY a;
 
-SELECT trimLeft(explain) AS s FROM (EXPLAIN indexes = 1 SELECT a FROM t_decimal_overflow_key WHERE a < 2 AND a + toDecimal32(1, 0) BETWEEN 1 AND 3)
+SELECT trimLeft(explain) AS s FROM (EXPLAIN indexes = 1 SELECT a FROM t_decimal_overflow_key WHERE a < 2 AND a + toDecimal32(1, 0) BETWEEN 1 AND 3 SETTINGS enable_parallel_replicas = 0)
 WHERE s LIKE 'Granules: %/%';
 
 -- The row that does not fit is still reported when it is read.
