@@ -16,6 +16,7 @@ namespace DB
 namespace FailPoints
 {
     extern const char totals_having_transform_pause[];
+    extern const char totals_having_transform_drop_cancelled_chunk[];
 }
 
 namespace ErrorCodes
@@ -203,6 +204,7 @@ void TotalsHavingTransform::transform(Chunk & chunk)
         addToTotals(chunk, nullptr);
         if (isCancelled())
         {
+            FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
             chunk.clear();
             stopReading();
             return;
@@ -235,6 +237,7 @@ void TotalsHavingTransform::transform(Chunk & chunk)
             addToTotals(chunk, nullptr);
             if (isCancelled())
             {
+                FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
                 chunk.clear();
                 stopReading();
                 return;
@@ -250,6 +253,7 @@ void TotalsHavingTransform::transform(Chunk & chunk)
                 addToTotals(chunk, nullptr);
                 if (isCancelled())
                 {
+                    FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
                     chunk.clear();
                     stopReading();
                     return;
@@ -268,6 +272,7 @@ void TotalsHavingTransform::transform(Chunk & chunk)
             addToTotals(chunk, nullptr);
             if (isCancelled())
             {
+                FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
                 chunk.clear();
                 stopReading();
                 return;
@@ -278,6 +283,7 @@ void TotalsHavingTransform::transform(Chunk & chunk)
             addToTotals(chunk, filter_description.data);
             if (isCancelled())
             {
+                FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
                 chunk.clear();
                 stopReading();
                 return;

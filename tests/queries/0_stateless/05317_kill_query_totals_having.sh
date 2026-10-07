@@ -18,6 +18,11 @@
 # covered: the plain query accumulates without a filter (`BEFORE_HAVING`) and the `HAVING` query
 # accumulates with the filter of the `HAVING` expression (`AFTER_HAVING_EXCLUSIVE`, the default
 # `totals_mode`).
+#
+# The drop after the poll is asserted positively: the release below resumes the loop while the
+# query is already cancelled, and the drop path of `transform` parks at a second failpoint. The
+# wait for that pause must succeed, so a build which still filters and emits the cancelled chunk
+# after the loop returned fails instead of passing on the old evidence alone.
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -26,6 +31,7 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 set -e
 
 FP=totals_having_transform_pause
+DROP_FP=totals_having_transform_drop_cancelled_chunk
 TOTALS_QID="totals_kill_${CLICKHOUSE_DATABASE}_$$"
 HAVING_QID="totals_having_kill_${CLICKHOUSE_DATABASE}_$$"
 
@@ -55,6 +61,7 @@ SETTINGS ${SETTINGS_SUFFIX}"
 function cleanup()
 {
     $CLICKHOUSE_CLIENT --query "SYSTEM DISABLE FAILPOINT ${FP}" 2>/dev/null ||:
+    $CLICKHOUSE_CLIENT --query "SYSTEM DISABLE FAILPOINT ${DROP_FP}" 2>/dev/null ||:
     $CLICKHOUSE_CLIENT --query "KILL QUERY WHERE query_id IN ('${TOTALS_QID}', '${HAVING_QID}') FORMAT Null" 2>/dev/null ||:
     wait 2>/dev/null ||:
 }
@@ -101,8 +108,11 @@ function kill_during_totals_accumulation()
     $CLICKHOUSE_CLIENT --query "KILL QUERY WHERE query_id = '${query_id}' ASYNC FORMAT Null" > /dev/null
 
     ## Re-arm the one-shot failpoint and only then resume the loop, so that the loop pausing again
-    ## at the next boundary is observable by the second wait below.
+    ## at the next boundary is observable by the second wait below. Arm the drop failpoint as well:
+    ## the release resumes a loop which is cancelled by now, so its next cancellation check in
+    ## `transform` drops the chunk and parks there, which is asserted below.
     $CLICKHOUSE_CLIENT --query "SYSTEM ENABLE FAILPOINT ${FP}"
+    $CLICKHOUSE_CLIENT --query "SYSTEM ENABLE FAILPOINT ${DROP_FP}"
     $CLICKHOUSE_CLIENT --query "SYSTEM NOTIFY FAILPOINT ${FP}"
 
     local pause_rc=0
@@ -116,9 +126,22 @@ function kill_during_totals_accumulation()
     fi
     echo "${label}: the accumulation loop stopped at the cancelled row"
 
+    ## The loop stopped at the cancelled row - now prove that the resumed transform does not keep
+    ## the chunk: the drop path of `transform` parks at this failpoint before clearing the chunk
+    ## and stopping the reading, and the wait for that pause has to succeed. The query is cancelled
+    ## by now, so a build which filters and emits the chunk instead never reaches it. The wait is
+    ## already satisfied here, because the drop happened while the assertion above waited out its
+    ## timeout, so the fixed case costs no extra time.
+    if ! timeout 10 $CLICKHOUSE_CLIENT --query "SYSTEM WAIT FAILPOINT ${DROP_FP} PAUSE" > /dev/null 2>&1; then
+        echo "FAIL: ${label} query did not drop the cancelled chunk after the accumulation loop stopped"
+        exit 1
+    fi
+    $CLICKHOUSE_CLIENT --query "SYSTEM NOTIFY FAILPOINT ${DROP_FP}"
+
     ## DISABLE releases the query if it is still parked and disarms the failpoint for the tests
     ## which run after this one.
     $CLICKHOUSE_CLIENT --query "SYSTEM DISABLE FAILPOINT ${FP}"
+    $CLICKHOUSE_CLIENT --query "SYSTEM DISABLE FAILPOINT ${DROP_FP}"
 
     timeout 60 tail --pid="${query_pid}" -f /dev/null
     wait "${query_pid}" 2>/dev/null ||:
