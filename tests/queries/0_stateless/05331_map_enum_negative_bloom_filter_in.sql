@@ -51,7 +51,7 @@ INSERT INTO t_map_nullable_enum_neg_keys_bf VALUES (1, map('x', 'a')), (2, map('
 
 SELECT id FROM t_map_nullable_enum_neg_keys_bf WHERE m['k'] IN ('z') ORDER BY id;
 SELECT id FROM t_map_nullable_enum_neg_keys_bf WHERE m['k'] IN ('z') ORDER BY id SETTINGS use_skip_indexes = 0;
-SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1 SELECT id FROM t_map_nullable_enum_neg_keys_bf WHERE m['k'] IN ('z') SETTINGS use_query_condition_cache = 0, parallel_replicas_local_plan = 1) WHERE explain LIKE '%Granules: %/%';
+SELECT extract(explain, 'Granules: \\d+/\\d+') FROM (EXPLAIN indexes = 1 SELECT id FROM t_map_nullable_enum_neg_keys_bf WHERE m['k'] IN ('z') SETTINGS use_query_condition_cache = 0, parallel_replicas_local_plan = 1) WHERE explain LIKE '%Granules: %/%';
 
 DROP TABLE t_map_enum_neg_values_bf;
 DROP TABLE t_map_enum_neg_keys_bf;
