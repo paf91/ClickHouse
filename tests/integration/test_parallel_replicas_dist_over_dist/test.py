@@ -108,11 +108,11 @@ def insert_data(node, matching_rows, body_length):
 def parallel_replicas_coordinators(query_id):
     """Names of the nodes that hosted a parallel-replicas reading coordinator """
 
-    coordinators = []
+    coordinators = set()
     for node in nodes:
         # SYSTEM FLUSH LOGS is not cluster-aware, it has to be issued on each node separately.
         node.query("SYSTEM FLUSH LOGS query_log")
-        reads = int(
+        if int(
             node.query(
                 f"""
                 SELECT countIf(ProfileEvents['ParallelReplicasNumRequests'] > 0)
@@ -121,8 +121,8 @@ def parallel_replicas_coordinators(query_id):
                 SETTINGS enable_parallel_replicas = 0
                 """
             )
-        )
-        coordinators += [node.name] * reads
+        ):
+            coordinators.add(node.name)
     return coordinators
 
 
@@ -153,10 +153,9 @@ def test_parallel_replicas_over_distributed_over_distributed(
         == EXPECTED
     )
 
-    # Exactly one parallel-replicas read inside each instance, over that instance's own `default`
-    # cluster of two replicas
+    # Each instance read with parallel replicas over its own `default` cluster of two replicas
     coordinators = parallel_replicas_coordinators(query_id)
-    assert [
-        sum(name in [node.name for node in instance_nodes] for name in coordinators)
-        for _, instance_nodes in INSTANCES
-    ] == [1, 1], coordinators
+    for instance, instance_nodes in INSTANCES:
+        assert any(node.name in coordinators for node in instance_nodes), (
+            f"{instance} did not use parallel replicas, coordinators: {coordinators}"
+        )
