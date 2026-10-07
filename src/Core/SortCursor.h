@@ -1027,21 +1027,25 @@ size_t getEqualRangeEndAssumeSorted(const TColumns & columns, const TSortDescrip
         descr.size(), begin, end, [&](size_t i) -> decltype(auto) { return columns[i]; }, [&](size_t i) { return descr[i].nulls_direction; });
 }
 
-/** Same as the overloads above, for a caller that finds the runs of one range one after another (see SortedKeyRuns).
-  * `runs` must be sized to the number of key columns and reset when the columns or `end` change.
+/** Same as the overloads above, for a caller that finds the runs of one range one after another (see `SortedKeyRuns`).
+  * `runs` must be sized to the number of key columns and reset as `SortedKeyRuns` requires.
   */
 template <typename TColumns>
-size_t getEqualRangeEndAssumeSorted(SortedKeyRuns & runs, const TColumns & columns, size_t begin, size_t end, int nan_direction_hint)
+ALWAYS_INLINE size_t getEqualRangeEndAssumeSorted(SortedKeyRuns & runs, const TColumns & columns, size_t begin, size_t end, int nan_direction_hint)
 {
+    if (columns.size() < 2)
+        return getEqualRangeEndAssumeSorted(columns, begin, end, nan_direction_hint);
     chassert(runs.keySize() == columns.size());
     return runs.findRunEnd(
         begin, end, [&](size_t i, size_t from, size_t bound) { return columns[i]->getEqualRangeEndAssumeSorted(from, bound, nan_direction_hint); });
 }
 
 template <typename TColumns>
-size_t getEqualRangeEndAssumeSorted(
+ALWAYS_INLINE size_t getEqualRangeEndAssumeSorted(
     SortedKeyRuns & runs, const TColumns & columns, const std::vector<size_t> & positions, size_t begin, size_t end, int nan_direction_hint)
 {
+    if (positions.size() < 2)
+        return getEqualRangeEndAssumeSorted(columns, positions, begin, end, nan_direction_hint);
     chassert(runs.keySize() == positions.size());
     return runs.findRunEnd(
         begin,
@@ -1051,8 +1055,10 @@ size_t getEqualRangeEndAssumeSorted(
 
 template <typename TColumns, typename TSortDescription>
 requires requires (const TSortDescription & d) { d.size(); d[0].nulls_direction; }
-size_t getEqualRangeEndAssumeSorted(SortedKeyRuns & runs, const TColumns & columns, const TSortDescription & descr, size_t begin, size_t end)
+ALWAYS_INLINE size_t getEqualRangeEndAssumeSorted(SortedKeyRuns & runs, const TColumns & columns, const TSortDescription & descr, size_t begin, size_t end)
 {
+    if (descr.size() < 2)
+        return getEqualRangeEndAssumeSorted(columns, descr, begin, end);
     chassert(runs.keySize() == descr.size());
     return runs.findRunEnd(
         begin,

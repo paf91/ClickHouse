@@ -153,7 +153,7 @@ ALWAYS_INLINE Int64 compareTrackAtImpl(
   * column `i` is sorted there because `bound` is the end of the run of columns `0..i-1`.
   */
 template <typename Search>
-size_t findKeyRangeEndAssumeSorted(size_t key_size, size_t begin, size_t end, Search && search)
+ALWAYS_INLINE size_t findKeyRangeEndAssumeSorted(size_t key_size, size_t begin, size_t end, Search && search)
 {
     size_t run_end = end;
     for (size_t i = 0; i < key_size; ++i)
@@ -165,9 +165,10 @@ size_t findKeyRangeEndAssumeSorted(size_t key_size, size_t begin, size_t end, Se
     return run_end;
 }
 
-/** Same result as findKeyRangeEndAssumeSorted, for callers that search the runs of one range one after another.
+/** Same result as `findKeyRangeEndAssumeSorted`, for callers that search the runs of one range one after another.
   * Remembers the last run found for each key prefix: a search from a row inside it ends at the same row, so a column
-  * is searched again only when the search leaves its prefix's run. Call reset() when the columns or `end` change.
+  * is searched again only when the search leaves its prefix's run. Call `reset` when the columns change, or when `end`
+  * changes and the next search may start before the previous `end`.
   */
 class SortedKeyRuns
 {

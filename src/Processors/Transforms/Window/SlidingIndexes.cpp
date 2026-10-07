@@ -23,7 +23,6 @@ bool haveSameKeys(const Columns & lhs, size_t lhs_row, const Columns & rhs, size
 void markKeyChangesInRange(
     const Columns & columns, const std::vector<size_t> & key_indices, size_t begin, size_t end, SortedKeyRuns & key_runs, std::vector<bool> & changes)
 {
-    key_runs.reset(key_indices.size());
     size_t next_change = getEqualRangeEndAssumeSorted(key_runs, columns, key_indices, begin, end, /*nan_direction_hint=*/1);
     while (next_change < end)
     {
@@ -36,7 +35,7 @@ std::vector<bool> markPartitionStarts(const Columns & columns, size_t rows_count
 {
     std::vector<bool> starts(rows_count, false);
     starts[0] = !previous_partition_key || !haveSameKeys(*previous_partition_key, 0, columns, 0, partition_by_indices);
-    SortedKeyRuns key_runs;
+    SortedKeyRuns key_runs(partition_by_indices.size());
     markKeyChangesInRange(columns, partition_by_indices, 0, rows_count, key_runs, starts);
     return starts;
 }
@@ -58,7 +57,8 @@ std::vector<bool> markPeerGroupStarts(
     std::vector<bool> starts = partition_starts;
     starts[0] = starts[0] || !previous_order_key || !haveSameKeys(*previous_order_key, 0, columns, 0, order_by_indices);
 
-    SortedKeyRuns key_runs;
+    /// The partitions are searched in order and none starts inside an earlier one, so their runs need no reset.
+    SortedKeyRuns key_runs(order_by_indices.size());
     size_t partition_begin = 0;
     while (partition_begin < rows_count)
     {

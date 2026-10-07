@@ -452,7 +452,7 @@ void WindowTransform::advanceFrameEndRangeOffset()
     frame_ended = partition.bounds().fully_visible;
 }
 
-Int64 WindowTransform::findPeerRunEnd(Int64 block, Int64 begin, Int64 end)
+ALWAYS_INLINE Int64 WindowTransform::findPeerRunEnd(Int64 block, Int64 begin, Int64 end)
 {
     const auto & columns = blocks.blockAt(block).materialized_columns;
     if (params.order_by_indices.size() < 2)
