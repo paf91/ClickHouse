@@ -90,6 +90,10 @@ SELECT x, y, arrayMap(z -> sipHash64(t3.*), [1]) AS r FROM t3 GROUP BY GROUPING 
 SELECT '-- 10b. APPLY carve-out: aggregate created by APPLY must not be promoted';
 SELECT x, * APPLY q -> argMax(q, y) FROM t3 GROUP BY x WITH ROLLUP ORDER BY x;
 
+SELECT '-- 10c. the outer GROUP BY keys must not promote a subquery-local matcher column';
+SELECT x, y, (SELECT arrayMap(z -> tuple(i.x, i.y), [1]) FROM t3 AS i WHERE i.x = 1) AS r, toTypeName(r) FROM t3 GROUP BY x, y WITH ROLLUP ORDER BY x, y;
+SELECT x, y, (SELECT arrayMap(z -> tuple(*), [1]) FROM t3 AS i WHERE i.x = 1) AS r, toTypeName(r) FROM t3 GROUP BY x, y WITH ROLLUP ORDER BY x, y;
+
 SELECT '-- 11. aggregate context: group_by_use_nulls keys must NOT reach into an aggregate argument';
 SELECT x, y, sum(arrayMap(z -> sipHash64(t3.x, t3.y), [1])[1]) AS s FROM t3 GROUP BY x, y WITH ROLLUP ORDER BY x, y;
 SELECT x, y, sum(arrayMap(z -> sipHash64(t3.*), [1])[1]) AS s FROM t3 GROUP BY x, y WITH ROLLUP ORDER BY x, y;

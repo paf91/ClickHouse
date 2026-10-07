@@ -84,6 +84,17 @@
 1	1	2
 3	3	4
 \N	3	4
+-- 10c. the outer GROUP BY keys must not promote a subquery-local matcher column
+1	2	[(1,2)]	Array(Tuple(UInt64, UInt64))
+1	\N	[(1,2)]	Array(Tuple(UInt64, UInt64))
+3	4	[(1,2)]	Array(Tuple(UInt64, UInt64))
+3	\N	[(1,2)]	Array(Tuple(UInt64, UInt64))
+\N	\N	[(1,2)]	Array(Tuple(UInt64, UInt64))
+1	2	[(1,2)]	Array(Tuple(UInt64, UInt64))
+1	\N	[(1,2)]	Array(Tuple(UInt64, UInt64))
+3	4	[(1,2)]	Array(Tuple(UInt64, UInt64))
+3	\N	[(1,2)]	Array(Tuple(UInt64, UInt64))
+\N	\N	[(1,2)]	Array(Tuple(UInt64, UInt64))
 -- 11. aggregate context: group_by_use_nulls keys must NOT reach into an aggregate argument
 1	2	17188187972825434471
 1	\N	17188187972825434471
