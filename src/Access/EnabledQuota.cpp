@@ -212,45 +212,38 @@ std::chrono::system_clock::time_point EnabledQuota::Interval::getEndOfInterval(s
 
 std::chrono::system_clock::time_point EnabledQuota::Interval::getEndOfInterval(std::chrono::system_clock::time_point current_time, bool & counters_were_reset) const
 {
-    auto end_loaded = end_of_interval.load();
-    auto end = std::chrono::system_clock::time_point{end_loaded};
+    counters_were_reset = false;
+
+    auto end = std::chrono::system_clock::time_point{end_of_interval.load()};
     if (current_time < end)
-    {
-        counters_were_reset = false;
         return end;
-    }
 
-    bool need_reset_counters = false;
+    /// The rollover is serialized, and the counters are reset before the new end of the interval is published.
+    /// So a thread which observes the new interval (on the fast path above, or after waiting for the mutex here)
+    /// always accounts its usage after the reset, and the usage at the beginning of the new interval is not lost.
+    std::lock_guard lock(rollover_mutex);
 
-    do
+    end = std::chrono::system_clock::time_point{end_of_interval.load()};
+    if (current_time < end)
+        return end;
+
+    /// Calculate the end of the next interval:
+    ///  |                     X                                 |
+    /// end               current_time                next_end = end + duration * n
+    /// where n is an integer number, n >= 1.
+    UInt64 n = static_cast<UInt64>((current_time - end + duration) / duration);
+    end = end + duration * n;
+
+    boost::range::fill(used, 0);
+
+    /// Also clear per-hash counters.
     {
-        /// Calculate the end of the next interval:
-        ///  |                     X                                 |
-        /// end               current_time                next_end = end + duration * n
-        /// where n is an integer number, n >= 1.
-        UInt64 n = static_cast<UInt64>((current_time - end + duration) / duration);
-        end = end + duration * n;
-        if (end_of_interval.compare_exchange_strong(end_loaded, end.time_since_epoch()))
-        {
-            need_reset_counters = true;
-            break;
-        }
-        end = std::chrono::system_clock::time_point{end_loaded};
+        std::lock_guard per_hash_lock(per_hash_mutex);
+        per_hash_used.clear();
     }
-    while (current_time >= end);
 
-    if (need_reset_counters)
-    {
-        boost::range::fill(used, 0);
-
-        /// Also clear per-hash counters.
-        {
-            std::lock_guard lock(per_hash_mutex);
-            per_hash_used.clear();
-        }
-
-        counters_were_reset = true;
-    }
+    end_of_interval.store(end.time_since_epoch());
+    counters_were_reset = true;
     return end;
 }
 

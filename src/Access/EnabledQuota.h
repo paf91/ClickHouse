@@ -103,6 +103,9 @@ private:
         bool randomize_interval = false;
         mutable std::atomic<std::chrono::system_clock::duration> end_of_interval;
 
+        /// Serializes the rollover to a new interval in `getEndOfInterval`.
+        mutable std::mutex rollover_mutex;
+
         /// Per-normalized-query-hash counters for `QUERIES_PER_NORMALIZED_HASH`.
         mutable std::mutex per_hash_mutex;
         mutable HashMap<UInt64, QuotaValue> per_hash_used;
