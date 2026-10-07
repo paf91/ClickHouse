@@ -2786,8 +2786,7 @@ QueryAnalyzer::QueryTreeNodesWithNames QueryAnalyzer::resolveUnqualifiedMatcher(
                       * In this case `id` is not present in the left table expression,
                       * so asterisk should return `id` from the right table expression.
                       */
-                    /// `table_expression_node_to_data` is populated only on the join-owning scope, so a
-                    /// lambda's child scope would find it empty and never suppress the merged key.
+                    /// `table_expression_node_to_data` is populated only on the join-owning scope.
                     auto is_column_from_parent_scope = [&nearest_query_scope](const QueryTreeNodePtr & using_node_from_table)
                     {
                         if (using_node_from_table->getNodeType() != QueryTreeNodeType::COLUMN)
@@ -2811,9 +2810,7 @@ QueryAnalyzer::QueryTreeNodesWithNames QueryAnalyzer::resolveUnqualifiedMatcher(
                         is_column_from_parent_scope(join_using_column_nodes.at(1)))
                         continue;
 
-                    /// The USING projection must read promotion state from the join-owning scope: a
-                    /// lambda child re-reads `join_use_nulls` from its own context, and records its
-                    /// type change in a rollback map the PREWHERE rollback never consults.
+                    /// `join_use_nulls` and the PREWHERE rollback map `join_columns_with_changed_types` live on the query scope.
                     QueryTreeNodePtr matched_column_node = createProjectionForUsing(
                         join_using_column_node, join_node->getKind(), *nearest_query_scope, semi_anti_star_checker.preservedSideOrNone());
                     matched_column_node->setAlias(join_using_column_name);
@@ -2902,11 +2899,9 @@ QueryAnalyzer::QueryTreeNodesWithNames QueryAnalyzer::resolveUnqualifiedMatcher(
 }
 
 
-/** Find the nearest scope whose `member` container is not empty, bounded at the enclosing
-  * QUERY/UNION scope. `registered_table_expression_nodes` and `nullable_group_by_keys` are
-  * populated only on the scope that owns the join tree, but an expression can be resolved in a
-  * child scope (a lambda body gets a fresh one), where both are empty. The bound keeps an inner
-  * subquery from adopting an outer query's join tree or GROUP BY keys.
+/** Nearest scope, up to the enclosing QUERY/UNION scope, whose `member` is not empty.
+  * `registered_table_expression_nodes` and `nullable_group_by_keys` are populated only on the scope
+  * that owns the join tree, never on a lambda's child scope.
   */
 template <typename Member>
 static IdentifierResolveScope * findNearestScopeWithNonEmpty(IdentifierResolveScope & scope, Member IdentifierResolveScope::* member)
@@ -2923,8 +2918,7 @@ static IdentifierResolveScope * findNearestScopeWithNonEmpty(IdentifierResolveSc
     return nullptr;
 }
 
-/// `ExpressionsStack` is per-scope, so an aggregate/window function enclosing a lambda sits on a
-/// parent scope's stack. Same scan as in `resolveExpressionNode`.
+/// `ExpressionsStack` is per-scope, so an aggregate enclosing a lambda sits on a parent scope's stack.
 static bool isInAggregateOrGroupingFunctionScope(const IdentifierResolveScope & scope)
 {
     for (const auto * scope_ptr = &scope; scope_ptr; scope_ptr = scope_ptr->parent_scope)
@@ -2958,9 +2952,6 @@ ProjectionNames QueryAnalyzer::resolveMatcher(QueryTreeNodePtr & matcher_node, I
     else
         matched_expression_nodes_with_names = resolveUnqualifiedMatcher(matcher_node, scope);
 
-    /// The matcher's columns were discovered against `getNearestQueryScope()`'s join tree, so the
-    /// scope that owns the join tree is also the authority for the promotions below. `scope` itself
-    /// may be a lambda scope with both containers empty.
     auto * join_tree_scope = findNearestScopeWithNonEmpty(scope, &IdentifierResolveScope::registered_table_expression_nodes);
 
     if (join_tree_scope && join_tree_scope->join_use_nulls)
@@ -2982,9 +2973,7 @@ ProjectionNames QueryAnalyzer::resolveMatcher(QueryTreeNodePtr & matcher_node, I
                 if (!join_identifier_side)
                     continue;
                 auto projection_name_it = node_to_projection_name.find(node);
-                /// `join_tree_scope`, not `scope`: `convertJoinedColumnTypeToNullIfNeeded` records the
-                /// type change in `scope.join_columns_with_changed_types`, and the PREWHERE rollback
-                /// below reads that map only from the query scope.
+                /// Records the type change in the given scope's `join_columns_with_changed_types`.
                 auto nullable_node = IdentifierResolver::convertJoinedColumnTypeToNullIfNeeded(node, node->getResultType(), nearest_scope_join_node->getKind(), join_identifier_side, *join_tree_scope);
                 if (nullable_node)
                 {
