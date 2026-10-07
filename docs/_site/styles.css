@@ -3691,6 +3691,7 @@ td:has(> .integration-table-logo) {
     --ch-ai-border-hover-end: #c9cbd1;
     --ch-ai-text: #161517;
     --ch-ai-muted: #696e79;
+    --ch-ai-icon: #161517;
     --ch-ai-sheen: rgba(255, 255, 255, 0.95);
 }
 
@@ -3703,6 +3704,7 @@ td:has(> .integration-table-logo) {
     --ch-ai-border-hover-end: #4a4a4a;
     --ch-ai-text: #f3f3f3;
     --ch-ai-muted: #9f9f9f;
+    --ch-ai-icon: #faff69;
     --ch-ai-sheen: rgba(255, 255, 255, 0.3);
 }
 
@@ -3803,7 +3805,7 @@ td:has(> .integration-table-logo) {
 }
 
 .ch-ask-ai-button .ch-ai-icon {
-    color: var(--ch-ai-border-start) !important;
+    color: var(--ch-ai-icon) !important;
 }
 
 #ch-ask-ai-btn {
