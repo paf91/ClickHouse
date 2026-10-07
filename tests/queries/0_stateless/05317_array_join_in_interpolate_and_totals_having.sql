@@ -19,6 +19,10 @@ SELECT arrayJoin(tags) AS tag, count() AS c FROM (SELECT ['a', 'b', ''] AS tags 
 SELECT number % 3 AS k, max(arrayJoin([number, number * 10])) AS m FROM numbers(10) GROUP BY k WITH TOTALS HAVING max(arrayJoin([number, number * 10])) > 75 ORDER BY k;
 SELECT arrayJoin(tags) AS tag, count() AS c FROM (SELECT ['a', 'b', ''] AS tags FROM numbers(4)) GROUP BY tag WITH TOTALS HAVING arrayJoin([tag]) != ''; -- { serverError ILLEGAL_COLUMN }
 
+-- with group_by_use_nulls, HAVING reads the key in its Nullable form
+SELECT arrayJoin([0, 2, 4]) AS n, count() FROM numbers(3) GROUP BY GROUPING SETS ((n)) WITH TOTALS HAVING n > 0 ORDER BY n SETTINGS group_by_use_nulls = 1;
+SELECT number AS n, count() FROM numbers(3) GROUP BY GROUPING SETS ((n)) WITH TOTALS HAVING arrayJoin([n, n + 1]) > 0 SETTINGS group_by_use_nulls = 1; -- { serverError ILLEGAL_COLUMN }
+
 -- INTERPOLATE can read an arrayJoin of the projection or of a GROUP BY key
 SELECT n, v, arrayJoin([7, 8]) AS a FROM (SELECT number * 2 AS n, number * 100 AS v FROM numbers(3)) ORDER BY n WITH FILL, a INTERPOLATE (v AS v + a);
 SELECT arrayJoin([0, 2, 4]) AS n, count() AS c FROM numbers(3) GROUP BY n ORDER BY n WITH FILL INTERPOLATE (c AS c + n);

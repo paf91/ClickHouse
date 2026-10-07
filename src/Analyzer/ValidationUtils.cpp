@@ -91,23 +91,7 @@ void validateFilters(const QueryTreeNodePtr & query_node)
         validateFilter(query_node_typed.getWhere(), "WHERE", query_node);
 
     if (query_node_typed.hasHaving())
-    {
         validateFilter(query_node_typed.getHaving(), "HAVING", query_node);
-
-        /// the totals are computed together with this filter, which cannot multiply rows
-        if (query_node_typed.isGroupByWithTotals())
-        {
-            QueryTreeNodes group_by_keys;
-            for (const auto & node : query_node_typed.getGroupBy().getNodes())
-            {
-                if (query_node_typed.isGroupByWithGroupingSets())
-                    std::ranges::copy(node->as<ListNode &>().getNodes(), std::back_inserter(group_by_keys));
-                else
-                    group_by_keys.push_back(node);
-            }
-            assertNoArrayJoinOutside(query_node_typed.getHaving(), group_by_keys, ErrorCodes::ILLEGAL_COLUMN, "in HAVING with TOTALS");
-        }
-    }
 
     if (query_node_typed.hasQualify())
         validateFilter(query_node_typed.getQualify(), "QUALIFY", query_node);
@@ -408,7 +392,18 @@ void validateAggregates(const QueryTreeNodePtr & query_node, AggregatesValidatio
         ValidateGroupByColumnsVisitor validate_group_by_columns_visitor(group_by_keys_nodes, original_group_by_keys_nodes, query_node);
 
         if (query_node_typed.hasHaving())
+        {
             validate_group_by_columns_visitor.visit(query_node_typed.getHaving());
+
+            /// the query computes the totals together with this filter, so the filter cannot multiply rows
+            /// a key can appear in both forms, `Nullable` with `group_by_use_nulls` and original inside `grouping`
+            if (query_node_typed.isGroupByWithTotals())
+            {
+                QueryTreeNodes ready_keys = group_by_keys_nodes;
+                ready_keys.insert(ready_keys.end(), original_group_by_keys_nodes.begin(), original_group_by_keys_nodes.end());
+                assertNoArrayJoinOutside(query_node_typed.getHaving(), ready_keys, ErrorCodes::ILLEGAL_COLUMN, "in HAVING with TOTALS");
+            }
+        }
 
         if (query_node_typed.hasQualify())
             validate_group_by_columns_visitor.visit(query_node_typed.getQualify());
