@@ -12,11 +12,11 @@ INSERT INTO t_local_read_throttler_fs_cache SELECT number, toString(number) FROM
 -- Download the data into the filesystem cache, so that the cache files are in the OS page cache.
 SELECT count() FROM t_local_read_throttler_fs_cache WHERE NOT ignore(*)
 SETTINGS enable_filesystem_cache = 1, read_from_filesystem_cache_if_exists_otherwise_bypass_cache = 0,
-    min_bytes_to_use_direct_io = 0, use_uncompressed_cache = 0, use_page_cache_for_disks_without_file_cache = 0;
+    min_bytes_to_use_direct_io = 0, use_uncompressed_cache = 0, use_page_cache_for_disks_without_file_cache = 0, use_columns_cache = 0;
 
 SELECT count() FROM t_local_read_throttler_fs_cache WHERE NOT ignore(*)
 SETTINGS enable_filesystem_cache = 1, read_from_filesystem_cache_if_exists_otherwise_bypass_cache = 0,
-    min_bytes_to_use_direct_io = 0, use_uncompressed_cache = 0, use_page_cache_for_disks_without_file_cache = 0,
+    min_bytes_to_use_direct_io = 0, use_uncompressed_cache = 0, use_page_cache_for_disks_without_file_cache = 0, use_columns_cache = 0,
     max_local_read_bandwidth = 1000000000, log_comment = '05317_local_read_throttler_filesystem_cache';
 
 SYSTEM FLUSH LOGS query_log;

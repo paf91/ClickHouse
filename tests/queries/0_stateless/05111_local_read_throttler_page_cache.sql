@@ -14,11 +14,11 @@ INSERT INTO t_local_read_throttler SELECT number, toString(number) FROM numbers(
 -- up the mark cache, and make sure that nothing but the page cache serves the measured query.
 SELECT count() FROM t_local_read_throttler WHERE NOT ignore(*)
 SETTINGS local_filesystem_read_method = 'pread_threadpool', min_bytes_to_use_direct_io = 0, min_bytes_to_use_mmap_io = 0,
-    use_uncompressed_cache = 0, use_page_cache_for_local_disks = 0, use_page_cache_for_disks_without_file_cache = 0;
+    use_uncompressed_cache = 0, use_page_cache_for_local_disks = 0, use_page_cache_for_disks_without_file_cache = 0, use_columns_cache = 0;
 
 SELECT count() FROM t_local_read_throttler WHERE NOT ignore(*)
 SETTINGS local_filesystem_read_method = 'pread_threadpool', min_bytes_to_use_direct_io = 0, min_bytes_to_use_mmap_io = 0,
-    use_uncompressed_cache = 0, use_page_cache_for_local_disks = 0, use_page_cache_for_disks_without_file_cache = 0,
+    use_uncompressed_cache = 0, use_page_cache_for_local_disks = 0, use_page_cache_for_disks_without_file_cache = 0, use_columns_cache = 0,
     max_local_read_bandwidth = 1000000000, log_comment = '05111_local_read_throttler_page_cache';
 
 SYSTEM FLUSH LOGS query_log;
