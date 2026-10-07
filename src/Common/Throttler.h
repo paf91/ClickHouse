@@ -54,9 +54,11 @@ public:
 
     bool throttleOSPageCacheRead(size_t amount, size_t max_block_ns) override;
 
+    /// A throttler without a speed limit (e.g. `max_local_read_bandwidth_for_server` reloaded to 0) never blocks,
+    /// so it does not need the reads from the OS page cache to be detected.
     bool ignoresOSPageCacheReads() const override
     {
-        return limits_block_device_bandwidth || (parent && parent->ignoresOSPageCacheReads());
+        return (limits_block_device_bandwidth && getMaxSpeed() > 0) || (parent && parent->ignoresOSPageCacheReads());
     }
 
     /// Mark this throttler as the one limiting the bandwidth of a block device,

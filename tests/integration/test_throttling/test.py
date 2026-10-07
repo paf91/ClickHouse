@@ -503,6 +503,30 @@ def test_local_read_throttling_reload():
     _, took = elapsed(node, "select * from data", settings=local_read_settings())
     assert took < 3
 
+    # Without an active limit, there is no point in detecting the reads served from the OS page cache
+    # (it costs an extra system call), so the synchronous `pread` does not do it anymore.
+    query_id = f"no_limit_{uuid.uuid4().hex}"
+    node.query(
+        "select * from data",
+        query_id=query_id,
+        settings={
+            "local_filesystem_read_method": "pread",
+            "use_page_cache_for_local_disks": 0,
+            "use_page_cache_for_disks_without_file_cache": 0,
+        },
+    )
+    node.query("SYSTEM FLUSH LOGS query_log")
+    assert (
+        node.query(
+            f"""
+            SELECT ProfileEvents['ReadBufferFromFileDescriptorPageCacheHitBytes']
+            FROM system.query_log
+            WHERE type = 'QueryFinish' AND query_id = '{query_id}'
+            """
+        ).strip()
+        == "0"
+    )
+
 @pytest.mark.parametrize(
     "policy,mode,setting,value,should_take",
     [
