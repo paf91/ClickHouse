@@ -1881,7 +1881,7 @@ static FieldRef applyFunction(const FunctionBasePtr & func, const DataTypePtr & 
                 field.columns->emplace_back(ColumnWithTypeAndName{nullptr, func->getResultType(), result_name});
             throw;
         }
-        field.columns->emplace_back(ColumnWithTypeAndName{std::move(result_column), func->getResultType(), result_name});
+        field.columns->emplace_back(ColumnWithTypeAndName{result_column, func->getResultType(), result_name});
     }
     else if (!(*columns)[result_idx].column)
     {
