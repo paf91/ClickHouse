@@ -26,8 +26,11 @@ SCRIPT = (
     Path(__file__).resolve().parents[1]
     / "praktika/infrastructure/runner/runner-init.py"
 )
-# Not configurable in `runner-init.py` on Linux.
+# Not configurable in `runner-init.py` on Linux. On a CI runner the checkout
+# is mounted below it, so each scenario sees a scratch directory there instead.
 RUNNER_HOME = Path("/home/ubuntu/actions-runner")
+# The bind mount is private to the scenario's mount namespace.
+ISOLATE = 'mkdir -p "$2" && mount --bind "$1" "$2" && shift 2 && exec "$@"'
 GIB = 1024 * 1024  # in `df -k` blocks
 TOTAL = 100 * GIB
 
@@ -283,8 +286,11 @@ def run_scenario(scenario: Scenario, proxy: str, version: int) -> Result:
     state = Path(tempfile.mkdtemp(prefix="runner-init-e2e-"))
     bin_dir = state / "bin"
     boto3_dir = state / "py" / "boto3"
-    for d in (state / "home", state / "scripts", bin_dir, boto3_dir):
+    runner_home = state / "runner-home"
+    for d in (state / "home", state / "scripts", runner_home, bin_dir, boto3_dir):
         d.mkdir(parents=True)
+    # The checkout is not visible inside the namespace.
+    script = shutil.copy(SCRIPT, state / SCRIPT.name)
     write_executable(bin_dir / "df", FAKE_DF)
     write_executable(bin_dir / "sudo", FAKE_SUDO)
     write_executable(bin_dir / "bash", FAKE_BASH)
@@ -294,9 +300,8 @@ def run_scenario(scenario: Scenario, proxy: str, version: int) -> Result:
     (state / "remote_versions").write_text(
         " ".join(str(version + v) for v in scenario.remote_versions)
     )
-    RUNNER_HOME.mkdir(parents=True)
-    write_executable(RUNNER_HOME / "config.sh", FAKE_CONFIG_SH)
-    write_executable(RUNNER_HOME / "run.sh", FAKE_RUN_SH)
+    write_executable(runner_home / "config.sh", FAKE_CONFIG_SH)
+    write_executable(runner_home / "run.sh", FAKE_RUN_SH)
 
     token = uuid.uuid4().hex
     env = {
@@ -314,7 +319,11 @@ def run_scenario(scenario: Scenario, proxy: str, version: int) -> Result:
     try:
         with open(state / "output", "w") as output:
             proc = subprocess.run(
-                [sys.executable, str(SCRIPT), "--environment", scenario.environment],
+                [
+                    *("unshare", "--mount", "--propagation", "private", "--"),
+                    *("sh", "-c", ISOLATE, "sh", runner_home, RUNNER_HOME),
+                    *(sys.executable, script, "--environment", scenario.environment),
+                ],
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=output,
@@ -327,7 +336,6 @@ def run_scenario(scenario: Scenario, proxy: str, version: int) -> Result:
         problems.append("runner-init did not exit in 120 s")
     finally:
         kill_leftovers(token)
-        shutil.rmtree(RUNNER_HOME, ignore_errors=True)
 
     observed = steps(state)
     output = (state / "output").read_text()
@@ -355,11 +363,9 @@ def run_scenario(scenario: Scenario, proxy: str, version: int) -> Result:
 
 
 def main():
-    # The script under test writes RUNNER_HOME and /tmp the way a real runner does.
+    # The script under test writes /tmp the way a real runner does.
     if not Path("/.dockerenv").exists():
         sys.exit("Refusing to run outside a container")
-    if RUNNER_HOME.exists():
-        sys.exit(f"Refusing to run: {RUNNER_HOME} already exists")
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Metadata)
     threading.Thread(target=server.serve_forever, daemon=True).start()
