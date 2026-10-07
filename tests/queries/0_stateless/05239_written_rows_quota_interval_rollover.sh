@@ -56,7 +56,7 @@ for _ in {1..10}; do
 
     # Both inserts run in one session: a successful login starts the new interval by itself, which would hide the problem.
     # The sleeps cross the end of the interval, then the second insert is the first accounting of the new interval,
-    # and 2 * `BLOCK_BYTES` overflows the stale `written_bytes` of the ended interval. Queries reading only system tables
+    # and 2 * `BLOCK_BYTES` overflows the stale `written_bytes` of the ended interval. Queries reading only tables of the `system` database
     # (including `system.quota_usage`) are not accounted by quotas and do not start the new interval.
     # The usage is read in the same session, because a new client may start too late on a slow machine.
     # A slow attempt may also exceed the quota by accounting both inserts in one interval, so the errors are

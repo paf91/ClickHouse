@@ -41,7 +41,7 @@ for _ in {1..10}; do
 
     # All the queries run in one session: a successful login starts the new interval by itself, which would hide the problem.
     # The first three queries are accounted in the first interval (3 of 4 queries used). The sleeps read `system.one`,
-    # and queries reading only system tables (including `system.quota_usage`) are not accounted by quotas, so they cross
+    # and queries reading only tables of the `system` database (including `system.quota_usage`) are not accounted by quotas, so they cross
     # the end of the interval without starting the new one. The last two queries are the first two of the new interval.
     # The usage is read in the same session, because a new client may start too late on a slow machine.
     # A slow attempt may also exceed the quota by accounting all its queries in one interval, so the errors are
