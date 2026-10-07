@@ -481,6 +481,23 @@ def test_parallel_replicas_order_by(start_cluster, max_parallel_replicas):
     assert off == expected
 
 
+def _remote_replicas_subplan(plan):
+    """The part of an `EXPLAIN distributed=1` output nested under
+    `ReadFromRemoteParallelReplicas`, i.e. the plan the follower replicas run.
+    The initiator's local fragment is printed beside that step, not under it."""
+    lines = plan.splitlines()
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("ReadFromRemoteParallelReplicas"):
+            indent = len(line) - len(line.lstrip())
+            subplan = []
+            for nested in lines[i + 1 :]:
+                if nested.strip() and len(nested) - len(nested.lstrip()) <= indent:
+                    break
+                subplan.append(nested)
+            return "\n".join(subplan)
+    raise AssertionError(f"no ReadFromRemoteParallelReplicas step in:\n{plan}")
+
+
 def test_remote_partial_aggregation_top_k(start_cluster):
     """EXPLAIN must advertise the `Top-K` the followers actually run: on the
     text-planned path (`serialize_query_plan = 0`) the annotation comes from
@@ -514,6 +531,10 @@ def test_remote_partial_aggregation_top_k(start_cluster):
             if opt:
                 assert "Top-K:" in plan, (
                     f"serialize_query_plan={serialize}, opt={opt}\nFull plan:\n{plan}"
+                )
+                assert "Top-K:" in _remote_replicas_subplan(plan), (
+                    f"serialize_query_plan={serialize}: the followers' plan has no Top-K\n"
+                    f"Full plan:\n{plan}"
                 )
             else:
                 assert "Top-K:" not in plan, (
