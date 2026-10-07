@@ -204,10 +204,10 @@ SCENARIOS = [
         expected_output="blocks on rootfs",
     ),
     Scenario(
-        name="Linux takes a job with 10 GiB free and tears Docker down after it",
+        name="Linux takes a job with exactly 5% free and tears Docker down after it",
         environment="production",
-        free=10 * GIB,
-        job_uses=GIB,
+        free=TOTAL // 20,
+        job_uses=0,
         expected_steps=[
             "disk-check",
             "register",
@@ -219,10 +219,10 @@ SCENARIOS = [
         expected_output="Runner completed max number of jobs",
     ),
     Scenario(
-        name="Linux refuses a job below 5% free",
+        name="Linux refuses a job just below 5% free",
         environment="production",
-        free=4 * GIB,
-        job_uses=GIB,
+        free=TOTAL // 20 - 1,
+        job_uses=0,
         expected_steps=["disk-check", "terminate"],
         expected_output="4% of free space on rootfs",
     ),
