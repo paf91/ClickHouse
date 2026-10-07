@@ -47,8 +47,10 @@ fi
 
 # The same with the remote `clickhouse-client`, which formats the result itself. The query in its
 # process list is on the server, so the background thread has nothing to cancel there: the error is
-# reported by the client while it waits for packets from the server instead.
-timeout 60 $CLICKHOUSE_CLIENT --max_threads=1 --output_format_pretty_squash_consecutive_ms=50 --output_format_pretty_max_rows=1000000000000 --max_rows_to_read=0 \
+# reported by the client while it waits for packets from the server instead. `interactive_delay` is
+# raised so that the server sends no progress packets after the first rendered chunk: the client has to
+# notice the error while it polls the connection, not only when it processes a packet.
+timeout 60 $CLICKHOUSE_CLIENT --max_threads=1 --interactive_delay=3600000000 --output_format_pretty_squash_consecutive_ms=50 --output_format_pretty_max_rows=1000000000000 --max_rows_to_read=0 \
     --query "SELECT DISTINCT number % 100000 AS x FROM numbers(1e18) FORMAT PrettyCompact" 2>/dev/null | head -n 1 > /dev/null
 
 code=${PIPESTATUS[0]}
