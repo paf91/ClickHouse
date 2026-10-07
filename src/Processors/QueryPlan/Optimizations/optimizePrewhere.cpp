@@ -280,6 +280,9 @@ void optimizePrewhere(QueryPlan::Node & parent_node, const bool remove_unused_co
     if (auto row_level_filter = source_step_with_filter->getRowLevelFilter())
         for (const auto & input : row_level_filter->actions.getInputs())
             columns_read_before_filter.insert(input->result_name);
+    /// `installTopKDynamicFilter` runs later and prepends `__topKFilter` to PREWHERE, so it reads its column too.
+    if (read_from_merge_tree_step && read_from_merge_tree_step->hasPendingTopKDynamicFilter())
+        columns_read_before_filter.insert(read_from_merge_tree_step->getTopKFilterInfo()->column_name);
 
     auto optimize_result = where_optimizer.optimize(filter_step->getExpression(),
         filter_step->getFilterColumnName(),
