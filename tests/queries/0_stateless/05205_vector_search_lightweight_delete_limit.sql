@@ -37,9 +37,11 @@ SELECT 'with rescoring', count() FROM (SELECT id FROM t_05205 ORDER BY L2Distanc
 SELECT 'the index answer', arraySort(groupArray(d)) FROM (SELECT id, L2Distance(v, [5.0, 5.0]) AS d FROM t_05205 ORDER BY L2Distance(v, [5.0, 5.0]) LIMIT 10);
 SELECT 'the bruteforce answer', arraySort(groupArray(d)) FROM (SELECT id, L2Distance(v, [5.0, 5.0]) AS d FROM t_05205 ORDER BY L2Distance(v, [5.0, 5.0]) LIMIT 10 SETTINGS use_skip_indexes = 0);
 
--- With `apply_deleted_mask = 0` the deleted rows are returned, so the index still matches the data and is used.
-SELECT 'apply_deleted_mask = 0 uses the index', count() FROM (EXPLAIN indexes = 1 SELECT id FROM t_05205 ORDER BY L2Distance(v, [5.0, 5.0]) LIMIT 10 SETTINGS apply_deleted_mask = 0, use_skip_indexes_on_data_read = 0) WHERE explain LIKE '% Granules: 10/1000';
+-- With `apply_deleted_mask = 0` the deleted rows are returned.
 SELECT 'apply_deleted_mask = 0', arraySort(groupArray(d)) FROM (SELECT L2Distance(v, [5.0, 5.0]) AS d FROM t_05205 ORDER BY d LIMIT 10 SETTINGS apply_deleted_mask = 0);
+-- But an explicit filter by `_row_exists` drops them again, the same as the default masked read.
+SELECT 'apply_deleted_mask = 0 and _row_exists', count() FROM (SELECT id FROM t_05205 WHERE _row_exists ORDER BY L2Distance(v, [5.0, 5.0]) LIMIT 10 SETTINGS apply_deleted_mask = 0);
+SELECT 'apply_deleted_mask = 0 and _row_exists', arraySort(groupArray(d)) FROM (SELECT L2Distance(v, [5.0, 5.0]) AS d FROM t_05205 WHERE _row_exists ORDER BY d LIMIT 10 SETTINGS apply_deleted_mask = 0);
 
 -- Deleting a whole cluster of near neighbours used to empty the result as well.
 DELETE FROM t_05205 WHERE L2Distance(v, [5.0, 5.0]) < 1.5;

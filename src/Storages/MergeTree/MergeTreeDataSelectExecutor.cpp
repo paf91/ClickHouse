@@ -1265,11 +1265,11 @@ RangesInDataParts MergeTreeDataSelectExecutor::filterPartsByPrimaryKeyAndSkipInd
                     /// pending `ALTER DELETE` applied on the fly) does not shrink that shortlist: the deleted candidates
                     /// are dropped after the read with nothing to take their place, and the query returns fewer rows
                     /// than its `LIMIT`. Read such a part in full until a merge or a mutation rebuilds the index.
-                    /// With `apply_deleted_mask = 0` lightweight-deleted rows are returned, so the read sees exactly the
-                    /// rows the index was built on; a pending `ALTER DELETE` is applied regardless of that setting.
-                    const bool hides_lightweight_deleted_rows = settings[Setting::apply_deleted_mask]
-                        && (ranges.data_part->hasLightweightDelete() || alter_conversions->hasLightweightDelete());
-                    if (index->isVectorSimilarityIndex() && (hides_lightweight_deleted_rows || alter_conversions->hasDeleteMutation()))
+                    /// This holds even with `apply_deleted_mask = 0`: the query may still filter by `_row_exists`
+                    /// explicitly, which drops the deleted candidates in the same way.
+                    const bool has_deleted_rows = ranges.data_part->hasLightweightDelete()
+                        || alter_conversions->hasLightweightDelete() || alter_conversions->hasDeleteMutation();
+                    if (index->isVectorSimilarityIndex() && has_deleted_rows)
                     {
                         return std::unexpected(PreformattedMessage::create(
                             "Index {} is not used for part {}. Reason: the part has deleted rows that the index still returns",
