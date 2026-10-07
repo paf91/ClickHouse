@@ -6,23 +6,30 @@ from helpers.cluster import ClickHouseCluster
 
 cluster = ClickHouseCluster(__file__)
 
-# Two instances in a hub-and-spoke arrangement. Each carries its own `remote_servers`, where the
-# cluster named `default` - the one a Cloud instance always has - is that instance's own pair of
-# replicas. Only the hub knows `outer_cluster`, the entry point that fans a query out to both.
-# One `ClickHouseCluster` is used for both: separate `ClickHouseCluster` objects get separate docker
+# Three instances in a hub-and-spoke arrangement. Each carries its own `remote_servers`, where the
+# cluster named `default` - the one a Cloud instance always has - is that instance's own replicas:
+# three for the hub, two for the spoke and one for the single-node instance, which therefore cannot
+# use parallel replicas at all. Only the hub knows `outer_cluster`, the entry point that fans a query
+# out to all three.
+# One `ClickHouseCluster` is used for all of them: separate `ClickHouseCluster` objects get separate docker
 # compose projects and therefore separate networks, so their nodes could not reach each other.
 hub_nodes = [
     cluster.add_instance(f"n{i}", main_configs=["configs/hub.xml"], with_zookeeper=True)
-    for i in (1, 2)
+    for i in (1, 2, 3)
 ]
 spoke_nodes = [
     cluster.add_instance(
         f"n{i}", main_configs=["configs/spoke.xml"], with_zookeeper=True
     )
-    for i in (3, 4)
+    for i in (4, 5)
 ]
-INSTANCES = [("hub", hub_nodes), ("spoke", spoke_nodes)]
-nodes = hub_nodes + spoke_nodes
+single_nodes = [
+    cluster.add_instance(
+        "n6", main_configs=["configs/single.xml"], with_zookeeper=True
+    )
+]
+INSTANCES = [("hub", hub_nodes), ("spoke", spoke_nodes), ("single", single_nodes)]
+nodes = hub_nodes + spoke_nodes + single_nodes
 
 TABLE = "logs"
 INNER_DIST = "logs_dist"
@@ -39,10 +46,10 @@ QUERY = f"""
       AND (Timestamp >= '{WINDOW_START}') AND (Timestamp < '{WINDOW_END}')
     """
 
-# The hub holds 1000 matching rows with a body of 10 bytes, the spoke holds 3000 with a body of 20, so
-# an instance read twice or not at all moves both the count and the average:
-# (1000 * 10 + 3000 * 20) / 4000.
-EXPECTED = "4000\t17.5\n"
+# The hub holds 1000 matching rows with a body of 10 bytes, the spoke 3000 with a body of 20 and the
+# single-node instance 1000 with a body of 10, so an instance read twice or not at all moves both the
+# count and the average: (1000 * 10 + 3000 * 20 + 1000 * 10) / 5000.
+EXPECTED = "5000\t16\n"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -84,6 +91,7 @@ def create_tables():
 
     insert_data(hub_nodes[0], matching_rows=1000, body_length=10)
     insert_data(spoke_nodes[0], matching_rows=3000, body_length=20)
+    insert_data(single_nodes[0], matching_rows=1000, body_length=10)
 
     for node in nodes:
         node.query(f"SYSTEM SYNC REPLICA {TABLE}")
@@ -142,7 +150,7 @@ def test_parallel_replicas_over_distributed_over_distributed(
             query_id=query_id,
             settings={
                 "enable_parallel_replicas": 2,
-                "max_parallel_replicas": 2,
+                "max_parallel_replicas": 3,
                 "prefer_localhost_replica": prefer_localhost_replica,
                 # The automatic decision must not turn parallel replicas off on this small data, and
                 # one mark segment per granule lets the reading spread over both replicas.
@@ -153,9 +161,11 @@ def test_parallel_replicas_over_distributed_over_distributed(
         == EXPECTED
     )
 
-    # Each instance read with parallel replicas over its own `default` cluster of two replicas
+    # Every instance with more than one replica read with parallel replicas over its own `default`
+    # cluster, and the single-node one did not use them at all.
     coordinators = parallel_replicas_coordinators(query_id)
     for instance, instance_nodes in INSTANCES:
-        assert any(node.name in coordinators for node in instance_nodes), (
-            f"{instance} did not use parallel replicas, coordinators: {coordinators}"
+        used = any(node.name in coordinators for node in instance_nodes)
+        assert used == (len(instance_nodes) > 1), (
+            f"{instance}: parallel replicas used={used}, coordinators: {coordinators}"
         )
