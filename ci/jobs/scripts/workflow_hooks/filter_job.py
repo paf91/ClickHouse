@@ -134,6 +134,8 @@ _COVERAGE_PIPELINE_PATHS = (
     "ci/jobs/scripts/functional_tests/export_coverage.py",
     "ci/jobs/scripts/coverage_selection.py",
     "ci/jobs/scripts/workflow_hooks/filter_job.py",
+    # Narrows the `arm_binary` replacement jobs down to the batches containing a changed test.
+    "ci/jobs/scripts/find_tests.py",
     # Defines the `ci-coverage` label that switches between the coverage jobs and their replacements.
     "ci/jobs/scripts/workflow_hooks/pr_labels_and_category.py",
     # Both set LLVM_PROFILE_FILE for the servers, i.e. whether their profiles
@@ -150,6 +152,39 @@ _COVERAGE_PIPELINE_PATHS = (
     "tests/parallel_replicas_blacklist.txt",
     "tests/async_insert_blacklist.txt",
 )
+
+
+# The part of `_COVERAGE_PIPELINE_PATHS` used only by the LLVM coverage jobs: collecting,
+# merging and reporting the coverage. The `arm_binary` replacement jobs do not run this code,
+# so a pull request changing it runs the LLVM coverage jobs as if it had the `ci-coverage` label.
+_LLVM_COVERAGE_ONLY_PATHS = (
+    "ci/jobs/llvm_coverage_job.py",
+    "ci/jobs/scripts/merge_llvm_coverage.sh",
+    "ci/jobs/scripts/generate_diff_coverage_report.sh",
+    "ci/jobs/scripts/print_uncovered_code.py",
+    "ci/jobs/scripts/newly_covered_lines.py",
+    "ci/jobs/scripts/dedup_lcov_instantiations.py",
+    "ci/jobs/scripts/job_hooks/llvm_coverage_hook.py",
+    "ci/jobs/scripts/functional_tests/export_coverage.py",
+    "ci/jobs/scripts/coverage_selection.py",
+)
+
+
+def _has_llvm_coverage_only_changes(changed_files):
+    """True if any changed file is in `_LLVM_COVERAGE_ONLY_PATHS`."""
+    for f in changed_files:
+        p = f.removeprefix(".").removeprefix("/")
+        if any(p.startswith(path) for path in _LLVM_COVERAGE_ONLY_PATHS):
+            return True
+    return False
+
+
+def _llvm_coverage_requested():
+    """True if a pull request runs the LLVM coverage jobs instead of their `arm_binary`
+    replacements: it has the `ci-coverage` label or changes the coverage-only code."""
+    return Labels.CI_COVERAGE in _info_cache.pr_labels or _has_llvm_coverage_only_changes(
+        _info_cache.get_changed_files() or []
+    )
 
 
 def _has_coverage_pipeline_changes(changed_files):
@@ -493,7 +528,7 @@ _PIPELINE_NOTES = {
         "Label `ci-no-coverage` skips coverage jobs and the `LLVM Coverage` merge job."
     ),
     Labels.CI_COVERAGE: (
-        "Label `ci-coverage` runs the LLVM coverage jobs and the `LLVM Coverage` merge job."
+        "Label `ci-coverage` (or a change of the coverage code) runs the LLVM coverage jobs and the `LLVM Coverage` merge job."
     ),
 }
 
@@ -760,19 +795,20 @@ def should_skip_job(job_name):
             _add_pipeline_note(Labels.CI_NO_COVERAGE)
             return True, f"Skipped, labeled with '{Labels.CI_NO_COVERAGE}'"
         if _info_cache.pr_number > 0:
-            if Labels.CI_COVERAGE not in _info_cache.pr_labels:
-                return True, f"Skipped: pull requests run LLVM coverage only with the '{Labels.CI_COVERAGE}' label"
+            if not _llvm_coverage_requested():
+                return True, f"Skipped: pull requests run LLVM coverage only with the '{Labels.CI_COVERAGE}' label or when changing the coverage code"
             _add_pipeline_note(Labels.CI_COVERAGE)
 
-    # With `ci-coverage` the coverage jobs run these configurations themselves. `ci-no-coverage` wins
-    # over `ci-coverage` for the coverage jobs, so with both labels the replacement jobs still run.
+    # With `ci-coverage` (or changed coverage code) the coverage jobs run these configurations
+    # themselves. `ci-no-coverage` wins over `ci-coverage` for the coverage jobs, so with both labels
+    # the replacement jobs still run.
     if (
         job_name in COVERAGE_REPLACEMENT_JOBS
         and _info_cache.pr_number > 0
-        and Labels.CI_COVERAGE in _info_cache.pr_labels
+        and _llvm_coverage_requested()
         and Labels.CI_NO_COVERAGE not in _info_cache.pr_labels
     ):
-        return True, f"Skipped, labeled with '{Labels.CI_COVERAGE}' - the LLVM coverage jobs run this configuration"
+        return True, "Skipped: the LLVM coverage jobs run this configuration"
 
     # The replacement jobs keep the rule the coverage jobs had before they became opt-in: this also
     # fires whenever a PR has no build-digest-affecting changes (i.e. it only touches tests/docs/CI
