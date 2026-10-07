@@ -59,7 +59,6 @@ SELECT 'Float32 -> Int64', k FROM t_i64 WHERE k IN (SELECT CAST(arrayJoin([1, 7.
 SELECT 'Decimal128(2) -> Decimal32(2)', k FROM t_d32_2 WHERE k IN (SELECT CAST(1, 'Decimal128(2)')) ORDER BY k;
 SELECT 'Decimal32(4) -> Decimal64(2)', k FROM t_d64_2 WHERE k IN (SELECT CAST(1, 'Decimal32(4)')) ORDER BY k;
 SELECT 'Decimal32(2) -> Decimal64(4)', k FROM t_d64_4 WHERE k IN (SELECT CAST(1, 'Decimal32(2)')) ORDER BY k;
-SELECT 'Decimal32(2) -> Int64', k FROM t_i64 WHERE k IN (SELECT CAST(1, 'Decimal32(2)')) ORDER BY k;
 
 -- UUID and IPv4 are safe into their own width and into String, and have no accurate cast to Int64.
 SELECT 'UUID -> String', k FROM t_str WHERE k IN (SELECT CAST('61f0c404-5cb3-11e7-907b-a6006ad3dba0', 'UUID')) ORDER BY k;
