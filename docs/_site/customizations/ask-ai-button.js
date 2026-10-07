@@ -32,6 +32,20 @@
 
   // Wait briefly for Kapa to mount (it's loaded async), then open. Passing a
   // page query prefills context without submitting a synthetic question.
+  function clearKapaQuery() {
+    var widgetContainer = document.getElementById('kapa-widget-container');
+    var input = widgetContainer && widgetContainer.shadowRoot
+      && widgetContainer.shadowRoot.getElementById('kapa-ask-ai-input');
+    if (!input) return false;
+
+    // Kapa retains its prior draft when it is opened without a query. Update
+    // the native value and emit an input event so React also clears its state.
+    var setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(input, '');
+    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    return true;
+  }
+
   function openKapa(query, submit) {
     var opts = { mode: 'ai' };
     if (query) {
@@ -44,6 +58,13 @@
       if (window.Kapa && typeof window.Kapa.open === 'function') {
         clearInterval(iv);
         window.Kapa.open(opts);
+        if (!query) {
+          var clearAttempts = 0;
+          var clearInput = setInterval(function () {
+            clearAttempts++;
+            if (clearKapaQuery() || clearAttempts > 20) clearInterval(clearInput);
+          }, 50);
+        }
       } else if (attempts > 60) {
         clearInterval(iv);
       }

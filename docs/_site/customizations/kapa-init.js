@@ -92,6 +92,8 @@
       'data-submit-button-background-color-dark': '#FAFF69',
       'data-submit-button-color-dark': '#151515',
       'data-submit-button-hover-background-color-dark': '#FCFF9E',
+      'data-deep-thinking-button-text-color': '#161517',
+      'data-deep-thinking-button-text-color-dark': '#FAFF69',
       'data-example-question-button-border': '1px solid #E0E1E4',
       'data-example-question-button-border-dark': '1px solid #383838',
       'data-conversation-item-question-background-color': '#F3F4F6',
