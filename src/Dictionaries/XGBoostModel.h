@@ -55,6 +55,12 @@ public:
     /// the positional feature arguments of `predictXGBoost` to the columns the backend expects.
     const VectorWithMemoryTracking<String> & getFeatureNames() const { return feature_columns; }
 
+    /// The checks of the prediction parameters that do not need a trained model: the accepted keys and their
+    /// lower bounds. `predictXGBoost` runs them while analysing the query, so that an invalid call fails even when
+    /// it has no rows to predict and the model is never loaded. The upper bound of `iteration_begin` and
+    /// `iteration_end` depends on the trained model and is checked by `predict`.
+    static void validatePredictParams(const PredictParameters & params);
+
 private:
     void throwIfTypeIsInvalid(const ColumnWithTypeAndName & col);
 

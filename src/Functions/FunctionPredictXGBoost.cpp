@@ -17,6 +17,7 @@
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/IDataType.h>
 #include <Dictionaries/XGBoostDictionary.h>
+#include <Dictionaries/XGBoostModel.h>
 #include <Functions/FunctionFactory.h>
 #include <Functions/FunctionHelpers.h>
 #include <Functions/IFunction.h>
@@ -142,6 +143,23 @@ public:
         checkAccess(dictionary_name);
 
         validateDictionaryIsXGBoost(dictionary_name);
+
+        /// Validated here, from the dictionary structure and without loading the dictionary, rather than only in
+        /// `executeImpl`: a call over no rows never reaches the model, and must fail the same way as a call with rows.
+        const auto structure = context->getExternalDictionariesLoader().getDictionaryStructure(dictionary_name, context);
+        const size_t n_features = structure.key ? structure.key->size() : 0;
+        const size_t num_feature_args = feature_end - 1;
+        if (num_feature_args != n_features)
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "Function '{}': dictionary '{}' expects {} features but {} were supplied",
+                getName(),
+                dictionary_name,
+                n_features,
+                num_feature_args);
+
+        if (feature_end < arguments.size())
+            XGBoostModel::validatePredictParams(buildPredictParams(arguments.back()));
 
         return std::make_shared<DataTypeFloat64>();
     }
