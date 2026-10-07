@@ -2280,7 +2280,7 @@ TEST(KeeperDispatcher, SessionIDIsNotIssuedBeforeInitialization)
 
     try
     {
-        FAIL() << "getSessionID returned session id " << keeper_dispatcher.getSessionID(/*session_timeout_ms=*/ 100);
+        ADD_FAILURE() << "getSessionID returned session id " << keeper_dispatcher.getSessionID(/*session_timeout_ms=*/ 100);
     }
     catch (const DB::Exception & e)
     {
