@@ -10,6 +10,9 @@
 -- reached the DISTINCT step, which then ran distinct-in-order over unsorted
 -- data. The correlated scalar subquery below is decorrelated into exactly this
 -- shape (ORDER BY over an arrayJoin-derived column, re-array-joined above).
+--
+-- query_plan_lower_array_join_function = 0 keeps the arrayJoin inside the
+-- expression, which is the path under test (lowering moves it into an ARRAY JOIN step).
 
 -- enable_analyzer = 1: correlated scalar subqueries require the analyzer;
 -- the old analyzer rejects this shape with UNKNOWN_IDENTIFIER before it can form.
@@ -20,7 +23,7 @@ FROM
     WHERE isNotNull((SELECT DISTINCT s FROM (SELECT toFixedString(NULL, 16) ORDER BY s ASC NULLS LAST) LIMIT 1 SETTINGS optimize_distinct_in_order = 1))
 )
 ORDER BY s
-SETTINGS optimize_distinct_in_order = 1, enable_analyzer = 1;
+SETTINGS optimize_distinct_in_order = 1, enable_analyzer = 1, query_plan_lower_array_join_function = 0;
 
 -- The scan over the DAG outputs must skip (not abort on) the unsupported ARRAY JOIN output:
 -- an arrayJoin result listed before a preserved sorted key must not wipe the valid sort prefix
@@ -31,7 +34,7 @@ FROM
     EXPLAIN PIPELINE
     SELECT DISTINCT arrayJoin([1, 2]) AS x, a
     FROM (SELECT number AS a FROM numbers(5) ORDER BY a)
-    SETTINGS optimize_distinct_in_order = 1, optimize_read_in_order = 1
+    SETTINGS optimize_distinct_in_order = 1, optimize_read_in_order = 1, query_plan_lower_array_join_function = 0
 )
 WHERE explain ILIKE '%DistinctSortedStreamTransform%';
 
@@ -42,6 +45,6 @@ FROM
     SELECT arrayJoin([1, 2]) AS x, a
     FROM (SELECT number AS a FROM numbers(5) ORDER BY a)
     LIMIT 1 BY a
-    SETTINGS optimize_read_in_order = 1
+    SETTINGS optimize_read_in_order = 1, query_plan_lower_array_join_function = 0
 )
 WHERE explain ILIKE '%LimitBySortedStreamTransform%';
