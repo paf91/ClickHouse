@@ -37,6 +37,34 @@
     return major < 16 || (major === 16 && minor <= 4);
   }
 
+  function reasoningModeColor() {
+    return document.documentElement.classList.contains('dark') ? '#FAFF69' : '#161517';
+  }
+
+  function syncReasoningModeColor() {
+    var script = document.getElementById('kapa-widget-script');
+    if (!script) return;
+
+    var color = reasoningModeColor();
+    script.setAttribute('data-deep-thinking-button-text-color', color);
+    if (window.Kapa && typeof window.Kapa.updateConfig === 'function') {
+      window.Kapa.updateConfig({ 'data-deep-thinking-button-text-color': color });
+    }
+  }
+
+  function observeDocsTheme() {
+    var queued = false;
+    var observer = new MutationObserver(function () {
+      if (queued) return;
+      queued = true;
+      window.requestAnimationFrame(function () {
+        queued = false;
+        syncReasoningModeColor();
+      });
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  }
+
   function insertKapaWidget() {
     if (document.getElementById('kapa-widget-script')) return;
     if (isOldiOS()) {
@@ -92,8 +120,7 @@
       'data-submit-button-background-color-dark': '#FAFF69',
       'data-submit-button-color-dark': '#151515',
       'data-submit-button-hover-background-color-dark': '#FCFF9E',
-      'data-deep-thinking-button-text-color': '#161517',
-      'data-deep-thinking-button-text-color-dark': '#FAFF69',
+      'data-deep-thinking-button-text-color': reasoningModeColor(),
       'data-example-question-button-border': '1px solid #E0E1E4',
       'data-example-question-button-border-dark': '1px solid #383838',
       'data-conversation-item-question-background-color': '#F3F4F6',
@@ -113,6 +140,7 @@
     });
 
     document.head.appendChild(script);
+    observeDocsTheme();
   }
 
   if (document.readyState === 'loading') {
