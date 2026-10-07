@@ -23,6 +23,7 @@
 #include <boost/geometry/geometries/polygon.hpp>
 #include <boost/geometry/geometries/segment.hpp>
 #include <boost/geometry/index/rtree.hpp>
+#include <boost/geometry/strategy/cartesian/side_robust.hpp>
 
 #include <array>
 #include <vector>
@@ -325,14 +326,13 @@ private:
     {
         const Ring * ring = nullptr;
         size_t edge = 0;
-        Point middle{};
     };
 
     const UInt16 grid_size;
 
     Polygon polygon;
     VectorWithMemoryTracking<Cell> cells;
-    VectorWithMemoryTracking<MultiPolygon> polygons;
+    VectorWithMemoryTracking<Polygon> polygons;
 
     CoordinateType cell_width;
     CoordinateType cell_height;
@@ -358,9 +358,14 @@ private:
     /// No polygon edge enters the cell: the cell is inside or outside as its centre.
     inline void addCell(size_t index, const Box & empty_box);
 
-    /// True if the segment has a point strictly inside the box (an endpoint, or the midpoint of its part inside the closed
-    /// box when that part has positive length); the point is returned in `middle`.
-    static bool crossesBox(const Point & from, const Point & to, const Box & box, Point & middle);
+    /// True if the segment has a point strictly inside the box. Without `exact_sides`, true if their bounding boxes overlap.
+    static bool crossesBox(const Point & from, const Point & to, const Box & box, bool exact_sides);
+
+    /// Exact sign of the orientation of (a, b, c): positive if c is on the left of a -> b.
+    static int side(const Point & a, const Point & b, const Point & c);
+
+    /// Crossing number test, as for non-constant polygons: inside the outer ring and not inside any hole.
+    static bool isInside(const Polygon & polygon, CoordinateType x, CoordinateType y);
 
     /// Sutherland-Hodgman clip of a closed ring by a box (closed or empty result). The winding number
     /// of every point inside the box is unchanged.
@@ -374,11 +379,11 @@ UInt64 PointInPolygonWithGrid<CoordinateType>::getAllocatedBytes() const
     UInt64 size = sizeof(*this);
 
     size += cells.capacity() * sizeof(Cell);
-    size += polygons.capacity() * sizeof(MultiPolygon);
+    size += polygons.capacity() * sizeof(Polygon);
     size += getPolygonAllocatedBytes(polygon);
 
     for (const auto & elem : polygons)
-        size += getMultiPolygonAllocatedBytes(elem);
+        size += getPolygonAllocatedBytes(elem);
 
     return size;
 }
@@ -431,6 +436,19 @@ void PointInPolygonWithGrid<CoordinateType>::buildGrid()
 
     cells.assign(size_t(grid_size) * grid_size, {});
 
+    /// side() is exact unless products of coordinate differences overflow or underflow.
+    bool exact_sides = true;
+    auto check_ring = [&](const Ring & ring)
+    {
+        for (const Point & point : ring)
+            for (CoordinateType coordinate : {point.x(), point.y()})
+                if (coordinate != 0 && !(std::abs(coordinate) >= 0x1p-300 && std::abs(coordinate) <= 0x1p300))
+                    exact_sides = false;
+    };
+    check_ring(polygon.outer());
+    for (const auto & inner : polygon.inners())
+        check_ring(inner);
+
     const Point & min_corner = box.min_corner();
 
     for (size_t row = 0; row < grid_size; ++row)
@@ -452,11 +470,8 @@ void PointInPolygonWithGrid<CoordinateType>::buildGrid()
             auto add_crossings = [&](const Ring & ring)
             {
                 for (size_t i = 0; i + 1 < ring.size() && num_crossings < std::size(crossings); ++i)
-                {
-                    Point middle;
-                    if (crossesBox(ring[i], ring[i + 1], cell_box, middle))
-                        crossings[num_crossings++] = {&ring, i, middle};
-                }
+                    if (crossesBox(ring[i], ring[i + 1], cell_box, exact_sides))
+                        crossings[num_crossings++] = {&ring, i};
             };
             add_crossings(polygon.outer());
             for (const auto & inner : polygon.inners())
@@ -472,17 +487,21 @@ void PointInPolygonWithGrid<CoordinateType>::buildGrid()
             {
                 addCell(cell_index, cell_box);
             }
-            else if (num_crossings == 1)
+            else if (num_crossings == 1 && exact_sides)
             {
                 cell.type = CellType::singleLine;
                 cell.half_planes[0] = half_plane(crossings[0]);
             }
-            else if (num_crossings == 2)
+            else if (num_crossings == 2 && exact_sides)
             {
                 const Crossing & first = crossings[0];
                 const Crossing & second = crossings[1];
                 cell.half_planes[0] = half_plane(first);
                 cell.half_planes[1] = half_plane(second);
+                const Point & first_from = (*first.ring)[first.edge];
+                const Point & first_to = (*first.ring)[first.edge + 1];
+                const Point & second_from = (*second.ring)[second.edge];
+                const Point & second_to = (*second.ring)[second.edge + 1];
 
                 size_t edges_in_ring = first.ring->size() - 1;
                 bool first_then_second = first.ring == second.ring && (first.edge + 1) % edges_in_ring == second.edge;
@@ -493,15 +512,22 @@ void PointInPolygonWithGrid<CoordinateType>::buildGrid()
                     const Crossing & in = first_then_second ? first : second;
                     const Crossing & out = first_then_second ? second : first;
                     const Ring & ring = *in.ring;
-                    Point in_direction(ring[in.edge + 1].x() - ring[in.edge].x(), ring[in.edge + 1].y() - ring[in.edge].y());
-                    Point out_direction(ring[out.edge + 1].x() - ring[out.edge].x(), ring[out.edge + 1].y() - ring[out.edge].y());
-                    bool left_turn = in_direction.x() * out_direction.y() - in_direction.y() * out_direction.x() >= 0;
+                    bool left_turn = side(ring[in.edge], ring[out.edge], ring[out.edge + 1]) >= 0;
                     cell.type = left_turn ? CellType::pairOfLinesSingleConvexPolygon : CellType::pairOfLinesSingleNonConvexPolygons;
                 }
                 else
                 {
-                    bool strip_is_inner = cell.half_planes[0].contains(second.middle.x(), second.middle.y());
-                    cell.type = strip_is_inner ? CellType::pairOfLinesSingleConvexPolygon : CellType::pairOfLinesDifferentPolygons;
+                    /// The strip between the edges is inner if it is on the left of them. Unless the edges intersect, one
+                    /// of them is strictly on one side of the line of the other.
+                    int second_side = side(first_from, first_to, second_from) + side(first_from, first_to, second_to);
+                    int first_side = side(second_from, second_to, first_from) + side(second_from, second_to, first_to);
+                    if (std::abs(second_side) == 2 || std::abs(first_side) == 2)
+                    {
+                        bool strip_is_inner = std::abs(second_side) == 2 ? second_side > 0 : first_side > 0;
+                        cell.type = strip_is_inner ? CellType::pairOfLinesSingleConvexPolygon : CellType::pairOfLinesDifferentPolygons;
+                    }
+                    else
+                        addComplexPolygonCell(cell_index, cell_box);
                 }
             }
             else
@@ -549,66 +575,70 @@ bool PointInPolygonWithGrid<CoordinateType>::contains(CoordinateType x, Coordina
         case CellType::pairOfLinesSingleNonConvexPolygons:
             return cell.half_planes[0].contains(x, y) || cell.half_planes[1].contains(x, y);
         case CellType::complexPolygon:
-            return boost::geometry::within(Point(x, y), polygons[cell.index_of_inner_polygon]);
+            return isInside(polygons[cell.index_of_inner_polygon], x, y);
     }
 }
 
 
 template <typename CoordinateType>
 bool PointInPolygonWithGrid<CoordinateType>::crossesBox(
-        const Point & from, const Point & to, const Box & box, Point & middle)
+        const Point & from, const Point & to, const Box & box, bool exact_sides)
 {
-    auto strictly_inside = [&box](const Point & point)
-    {
-        return point.x() > box.min_corner().x() && point.x() < box.max_corner().x()
-            && point.y() > box.min_corner().y() && point.y() < box.max_corner().y();
-    };
+    const Point & low = box.min_corner();
+    const Point & high = box.max_corner();
 
-    for (const Point * endpoint : {&from, &to})
-    {
-        if (strictly_inside(*endpoint))
-        {
-            middle = *endpoint;
-            return true;
-        }
-    }
-
-    CoordinateType dx = to.x() - from.x();
-    CoordinateType dy = to.y() - from.y();
-
-    /// Liang-Barsky: the part inside the box is from + t * (dx, dy) for t in [t_min, t_max].
-    const CoordinateType p[4] = {-dx, dx, -dy, dy};
-    const CoordinateType q[4] = {
-        from.x() - box.min_corner().x(),
-        box.max_corner().x() - from.x(),
-        from.y() - box.min_corner().y(),
-        box.max_corner().y() - from.y()};
-
-    CoordinateType t_min = 0;
-    CoordinateType t_max = 1;
-    for (size_t k = 0; k < 4; ++k)
-    {
-        if (p[k] == 0)
-        {
-            if (q[k] < 0)
-                return false;
-            continue;
-        }
-
-        CoordinateType t = q[k] / p[k];
-        if (p[k] < 0)
-            t_min = std::max(t_min, t);
-        else
-            t_max = std::min(t_max, t);
-    }
-
-    if (!(t_min < t_max))
+    if (std::max(from.x(), to.x()) <= low.x() || std::min(from.x(), to.x()) >= high.x()
+        || std::max(from.y(), to.y()) <= low.y() || std::min(from.y(), to.y()) >= high.y())
         return false;
 
-    CoordinateType t = (t_min + t_max) / 2;
-    middle = Point(from.x() + t * dx, from.y() + t * dy);
+    /// A zero-length segment is strictly inside here.
+    if (!exact_sides || (from.x() == to.x() && from.y() == to.y()))
+        return true;
 
-    return strictly_inside(middle);
+    /// Otherwise the segment enters the open box if and only if its line strictly separates two corners.
+    bool left = false;
+    bool right = false;
+    for (const Point & corner : {low, Point(high.x(), low.y()), high, Point(low.x(), high.y())})
+    {
+        int corner_side = side(from, to, corner);
+        left |= corner_side > 0;
+        right |= corner_side < 0;
+    }
+
+    return left && right;
+}
+
+template <typename CoordinateType>
+int PointInPolygonWithGrid<CoordinateType>::side(const Point & a, const Point & b, const Point & c)
+{
+    using Side = boost::geometry::strategy::side::side_robust<CoordinateType, boost::geometry::strategy::side::fp_equals_policy>;
+    return Side::apply(a, b, c);
+}
+
+template <typename CoordinateType>
+bool PointInPolygonWithGrid<CoordinateType>::isInside(const Polygon & poly, CoordinateType x, CoordinateType y)
+{
+    auto inside_ring = [x, y](const Ring & ring)
+    {
+        bool inside = false;
+        for (size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++)
+        {
+            const Point & a = ring[i];
+            const Point & b = ring[j];
+            if ((a.y() > y) != (b.y() > y) && x < (b.x() - a.x()) * (y - a.y()) / (b.y() - a.y()) + a.x())
+                inside = !inside;
+        }
+        return inside;
+    };
+
+    if (!inside_ring(poly.outer()))
+        return false;
+
+    for (const auto & inner : poly.inners())
+        if (inside_ring(inner))
+            return false;
+
+    return true;
 }
 
 template <typename CoordinateType>
@@ -687,8 +717,7 @@ void PointInPolygonWithGrid<CoordinateType>::addComplexPolygonCell(
             clipped.inners().push_back(std::move(clipped_inner));
     }
 
-    polygons.emplace_back();
-    polygons.back().push_back(std::move(clipped));
+    polygons.push_back(std::move(clipped));
 }
 
 template <typename CoordinateType>
@@ -700,7 +729,7 @@ void PointInPolygonWithGrid<CoordinateType>::addCell(
 
     Point center((min_corner.x() + max_corner.x()) / 2, (min_corner.y() + max_corner.y()) / 2);
 
-    if (boost::geometry::within(center, polygon))
+    if (isInside(polygon, center.x(), center.y()))
         cells[index].type = CellType::inner;
     else
         cells[index].type = CellType::outer;
