@@ -5966,11 +5966,15 @@ void StorageReplicatedMergeTree::startup()
     /// logically shut-down table would keep doing periodic work until some later `shutdown()` stops it.
     /// Also stop right here: continuing into `attach_thread->start()` / `startupImpl` would pointlessly
     /// re-arm the attach/restarting threads that `flushAndPrepareForShutdown()` has already shut down.
-    /// `shutdown_called` is never reset, so this storage object is only going to be destroyed — there is
-    /// nothing to start up. This check is best-effort (the flag can flip right after it); whatever a
-    /// startup that slipped past it re-arms is torn down again by the `already_called` branch of
-    /// `shutdown`, either via the cleanup path of `startupImpl` or at the latest by the destructor.
-    if (shutdown_called.load())
+    /// The same applies when only `flushAndPrepareForShutdown()` has run so far (server or database
+    /// shutdown calls it for all tables before `shutdown()`): it has already stopped the attach and
+    /// restarting threads, and a late startup must not restart background work after that.
+    /// Neither `shutdown_called` nor `shutdown_prepared_called` is ever reset, so this storage object is
+    /// only going to be shut down and destroyed — there is nothing to start up. This check is best-effort
+    /// (the flags can flip right after it); whatever a startup that slipped past it re-arms is torn down
+    /// again by the `already_called` branch of `shutdown`, either via the cleanup path of `startupImpl` or
+    /// at the latest by the destructor.
+    if (shutdown_called.load() || shutdown_prepared_called.load())
     {
         if (refresh_parts_task)
             refresh_parts_task->deactivate();
