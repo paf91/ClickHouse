@@ -176,7 +176,7 @@ SCENARIOS = [
         free=19 * GIB,
         job_uses=GIB,
         expected_steps=["disk-check"],
-        expected_output="Out of disk space",
+        expected_output="blocks on rootfs",
     ),
     Scenario(
         name="macOS skips the Docker teardown and checks the disk before the next job",
@@ -196,12 +196,12 @@ SCENARIOS = [
         expected_output="exiting to re-provision",
     ),
     Scenario(
-        name="macOS leaves the rotation when a job leaves less than 20 GiB free",
+        name="macOS takes a job with exactly 20 GiB free and leaves the rotation below it",
         environment="macos",
-        free=25 * GIB,
-        job_uses=10 * GIB,
+        free=20 * GIB,
+        job_uses=1,
         expected_steps=["disk-check", "upgrade-check", "register", "job", "disk-check"],
-        expected_output="Out of disk space",
+        expected_output="blocks on rootfs",
     ),
     Scenario(
         name="Linux takes a job with 10 GiB free and tears Docker down after it",
@@ -219,12 +219,12 @@ SCENARIOS = [
         expected_output="Runner completed max number of jobs",
     ),
     Scenario(
-        name="Linux refuses a job when the host is out of disk space",
+        name="Linux refuses a job below 5% free",
         environment="production",
-        free=2 * GIB,
+        free=4 * GIB,
         job_uses=GIB,
         expected_steps=["disk-check", "terminate"],
-        expected_output="Out of disk space",
+        expected_output="4% of free space on rootfs",
     ),
 ]
 
@@ -258,6 +258,11 @@ def steps(state: Path) -> list:
         elif source == "aws" and detail.startswith(("ec2 terminate", "autoscaling")):
             result.append("terminate")
     return result
+
+
+def render(step_list: list) -> str:
+    shown = " -> ".join(step_list[:20])
+    return shown if len(step_list) <= 20 else f"{shown} -> ... ({len(step_list)} steps)"
 
 
 def kill_leftovers(token: str) -> None:
@@ -327,14 +332,16 @@ def run_scenario(scenario: Scenario, proxy: str, version: int) -> Result:
     observed = steps(state)
     output = (state / "output").read_text()
     if observed != scenario.expected_steps:
-        problems.append(f"steps {observed}, expected {scenario.expected_steps}")
+        problems.append(
+            f"steps: {render(observed)}, expected: {render(scenario.expected_steps)}"
+        )
     if scenario.expected_output not in output:
         problems.append(f"no '{scenario.expected_output}' in the output")
     marker = state / "home" / ".clickhouse-ci-runner-init-version"
     if scenario.environment == "macos" and marker.exists():
         problems.append("the provisioning marker survived the exit")
 
-    info = f"steps: {' -> '.join(observed)}"
+    info = f"steps: {render(observed)}"
     if problems:
         info = "\n".join(problems + [info, "output tail:", *output.splitlines()[-30:]])
     shutil.rmtree(state, ignore_errors=True)
