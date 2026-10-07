@@ -13,6 +13,7 @@ namespace DB
 {
 
 class JoinStepLogical;
+class ReadFromMergeTree;
 
 class FutureSetFromSubquery;
 using FutureSetFromSubqueryPtr = std::shared_ptr<FutureSetFromSubquery>;
@@ -70,6 +71,7 @@ struct Optimization
 
         bool enable_group_by_top_k_optimization{};
         UInt64 top_k_optimization_observation_rows{};
+        bool top_k_optimization_shared_boundary{};
         bool enable_group_by_top_k_dynamic_filtering{};
         bool use_query_condition_cache_for_top_k{};
         bool is_explain{};
@@ -244,6 +246,9 @@ size_t tryPushHavingPrefilterIntoAggregation(QueryPlan::Node * parent_node, Quer
 /// columns from the side preserved by the join (LEFT/RIGHT). Restricts how many rows
 /// the preserved-side input must produce before joining.
 size_t tryTopKThroughJoin(QueryPlan::Node * parent_node, QueryPlan::Nodes & nodes, const Optimization::ExtraSettings & settings);
+
+/// Whether the plan-based parallel replicas may make this `MergeTree` read part of a shipped fragment.
+bool mergeTreeReadCanBeShipped(const ReadFromMergeTree & read);
 
 inline const auto & getOptimizations()
 {
