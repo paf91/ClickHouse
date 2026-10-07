@@ -3590,13 +3590,17 @@ def test_catalog_oids_are_unique(started_cluster):
     assert not (set(oids) & set(relation_oids))
 
     # The join psql performs behind `\d` must match exactly one namespace per relation.
+    # Relations can appear between the two queries (the server creates `system.*_log`
+    # tables lazily on the first flush), so do not compare the row counts of separate
+    # snapshots: check instead that no relation is matched by more than one namespace.
     cur.execute(
-        "SELECT c.relname, n.nspname FROM pg_class AS c "
+        "SELECT c.oid, c.relname, n.nspname FROM pg_class AS c "
         "JOIN pg_namespace AS n ON n.oid = c.relnamespace WHERE c.relname != ''"
     )
     joined = cur.fetchall()
-    assert len(joined) == len(relations)
-    assert sorted(row[0] for row in joined if row[1] == "pg_oids_db") == sorted(
+    joined_oids = [int(row[0]) for row in joined]
+    assert len(joined_oids) == len(set(joined_oids))
+    assert sorted(row[1] for row in joined if row[2] == "pg_oids_db") == sorted(
         f"t_{i}" for i in range(16)
     )
 
