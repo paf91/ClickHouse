@@ -39532,6 +39532,10 @@
     "source": "/sql-reference/aggregate-functions/reference/meanztest"
   },
   {
+    "destination": "/reference/functions/aggregate-functions/mergedJSONPatch",
+    "source": "/sql-reference/aggregate-functions/reference/mergedJSONPatch"
+  },
+  {
     "destination": "/reference/functions/aggregate-functions/median",
     "source": "/sql-reference/aggregate-functions/reference/median"
   },
@@ -39640,6 +39644,42 @@
     "source": "/sql-reference/aggregate-functions/reference/rankCorr"
   },
   {
+    "destination": "/reference/functions/aggregate-functions/regr_avgx",
+    "source": "/sql-reference/aggregate-functions/reference/regr_avgx"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/regr_avgy",
+    "source": "/sql-reference/aggregate-functions/reference/regr_avgy"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/regr_count",
+    "source": "/sql-reference/aggregate-functions/reference/regr_count"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/regr_intercept",
+    "source": "/sql-reference/aggregate-functions/reference/regr_intercept"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/regr_r2",
+    "source": "/sql-reference/aggregate-functions/reference/regr_r2"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/regr_slope",
+    "source": "/sql-reference/aggregate-functions/reference/regr_slope"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/regr_sxx",
+    "source": "/sql-reference/aggregate-functions/reference/regr_sxx"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/regr_sxy",
+    "source": "/sql-reference/aggregate-functions/reference/regr_sxy"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/regr_syy",
+    "source": "/sql-reference/aggregate-functions/reference/regr_syy"
+  },
+  {
     "destination": "/reference/functions/aggregate-functions/simpleLinearRegression",
     "source": "/sql-reference/aggregate-functions/reference/simplelinearregression"
   },
@@ -39720,8 +39760,20 @@
     "source": "/sql-reference/aggregate-functions/reference/theilsu"
   },
   {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesAvgToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesAvgToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesBottomKMasks",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesBottomKMasks"
+  },
+  {
     "destination": "/reference/functions/aggregate-functions/timeSeriesChangesToGrid",
     "source": "/sql-reference/aggregate-functions/reference/timeSeriesChangesToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesCountToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesCountToGrid"
   },
   {
     "destination": "/reference/functions/aggregate-functions/timeSeriesDeltaToGrid",
@@ -39732,8 +39784,16 @@
     "source": "/sql-reference/aggregate-functions/reference/timeSeriesDerivToGrid"
   },
   {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesFirstToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesFirstToGrid"
+  },
+  {
     "destination": "/reference/functions/aggregate-functions/timeSeriesGroupArray",
     "source": "/sql-reference/aggregate-functions/reference/timeSeriesGroupArray"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesIncreaseToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesIncreaseToGrid"
   },
   {
     "destination": "/reference/functions/aggregate-functions/timeSeriesInstantDeltaToGrid",
@@ -39744,12 +39804,44 @@
     "source": "/sql-reference/aggregate-functions/reference/timeSeriesInstantRateToGrid"
   },
   {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesLastToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesLastToGrid"
+  },
+  {
     "destination": "/reference/functions/aggregate-functions/timeSeriesLastTwoSamples",
     "source": "/sql-reference/aggregate-functions/reference/timeSeriesLastTwoSamples"
   },
   {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesLimitKMasks",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesLimitKMasks"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesLinearRegressionToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesLinearRegressionToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesMadToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesMadToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesMaxToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesMaxToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesMinToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesMinToGrid"
+  },
+  {
     "destination": "/reference/functions/aggregate-functions/timeSeriesPredictLinearToGrid",
     "source": "/sql-reference/aggregate-functions/reference/timeSeriesPredictLinearToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesPresentToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesPresentToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesQuantileToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesQuantileToGrid"
   },
   {
     "destination": "/reference/functions/aggregate-functions/timeSeriesRateToGrid",
@@ -39762,6 +39854,38 @@
   {
     "destination": "/reference/functions/aggregate-functions/timeSeriesResetsToGrid",
     "source": "/sql-reference/aggregate-functions/reference/timeSeriesResetsToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesStddevToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesStddevToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesStdvarToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesStdvarToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesSumToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesSumToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesTimestampOfFirstToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesTimestampOfFirstToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesTimestampOfLastToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesTimestampOfLastToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesTimestampOfMaxToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesTimestampOfMaxToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesTimestampOfMinToGrid",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesTimestampOfMinToGrid"
+  },
+  {
+    "destination": "/reference/functions/aggregate-functions/timeSeriesTopKMasks",
+    "source": "/sql-reference/aggregate-functions/reference/timeSeriesTopKMasks"
   },
   {
     "destination": "/reference/functions/aggregate-functions/topK",
