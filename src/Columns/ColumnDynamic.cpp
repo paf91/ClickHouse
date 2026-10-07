@@ -322,7 +322,7 @@ Field ColumnDynamic::operator[](size_t n) const
 
 void ColumnDynamic::get(size_t n, Field & res) const
 {
-    /// Nesting is part of the value rather than of the query text, so no parser limit bounds it.
+    /// Object, Dynamic and Variant values nest into each other to a depth that comes from the data, not from the declared type.
     checkStackSize();
 
     const auto & variant_col = getVariantColumn();
