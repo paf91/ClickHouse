@@ -104,7 +104,12 @@
     if (document.documentElement.dataset.chAskAiShortcutBound) return;
     document.documentElement.dataset.chAskAiShortcutBound = 'true';
     document.addEventListener('keydown', function (event) {
-      if (event.defaultPrevented || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'i') return;
+      var hasShortcutModifier = (event.metaKey || event.ctrlKey) && !(event.metaKey && event.ctrlKey);
+      var target = event.target;
+      var isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+        || target.tagName === 'SELECT' || target.isContentEditable);
+      if (event.defaultPrevented || event.altKey || event.shiftKey || !hasShortcutModifier
+        || event.key.toLowerCase() !== 'i' || isTyping) return;
       event.preventDefault();
       trackDocsAi('keyboard-shortcut', false);
       openKapa();
