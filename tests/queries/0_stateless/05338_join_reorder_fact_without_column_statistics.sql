@@ -38,15 +38,20 @@ INSERT INTO t5 SELECT toString(number), concat('h', toString(number % 900)), toI
 
 CREATE VIEW v1 AS SELECT A.c1 AS c1, A.c2 AS c2, A.c5 AS c5, B.c12 AS c12, D.c13 AS c13, coalesce(multiIf(L.c14 = '', NULL, L.c14), 'z') AS c14, E.c17 AS c17, A.c7 AS c7, A.c8 AS c8, A.c9 AS c9, A.c10 AS c10, A.c11 AS c11 FROM t1 AS A LEFT JOIN t2 AS B ON (A.c3 = B.c3) AND (A.c5 = B.c5) LEFT JOIN t3 AS D ON (A.c4 = CAST(D.c4, 'Int64')) AND (A.c5 = D.c5) LEFT JOIN t4 AS L ON (A.c6 = L.c6) AND (A.c5 = L.c5) LEFT JOIN (SELECT any(c16) AS c17, c6, 'AE' AS c5 FROM t5 GROUP BY c6) AS E ON (E.c5 = A.c5) AND (E.c6 = A.c6);
 
+CREATE VIEW v2 AS WITH r AS ( SELECT c7 AS a, c8 AS b, c10 AS e, toDate(c1) AS d, uniqExact(c2) AS x1, quantileExactIf(0.5)(c9, NOT (c9 IS NULL)) AS x2, uniqExactIf(c2, NOT (c9 IS NULL)) AS x3, sum(CAST(c11, 'Nullable(Float64)')) AS x4, count(CAST(c11, 'Nullable(Float64)')) AS x5 FROM v1 WHERE (NOT (lower(c12) LIKE lower('X%'))) AND ((c1 >= dateTrunc('month', subtractMonths(toDate('2026-09-04'), 1))) AND (c1 < dateTrunc('month', toDate('2026-09-04')))) GROUP BY a, b, e, d ) SELECT a, b, e, round(CAST(sum(x1), 'Nullable(Float64)') / CAST(nullIf(dateDiff('day', dateTrunc('month', subtractMonths(toDate('2026-09-04'), 1)), dateTrunc('month', toDate('2026-09-04'))), 0), 'Nullable(Float64)')) AS y1, CAST(sum(CAST(x2, 'Nullable(Float64)') * CAST(x3, 'Nullable(Float64)')), 'Nullable(Float64)') / CAST(nullIf(sum(x3), 0), 'Nullable(Float64)') AS y2, CAST(sum(x4), 'Nullable(Float64)') / CAST(nullIf(sum(x5), 0), 'Nullable(Float64)') AS y3 FROM r GROUP BY a, b, e ORDER BY a ASC, y1 DESC, b ASC, e ASC LIMIT 10001;
+
 -- Expected: the join with t2 is INNER and the three dimension joins stay LEFT; a RIGHT join means the hash table
 -- is built on the fact table join.
 SELECT countIf(explain ILIKE '%Type: INNER%'), countIf(explain ILIKE '%Type: LEFT%'), countIf(explain ILIKE '%Type: RIGHT%')
-FROM
-(
-    EXPLAIN actions = 1
-    WITH r AS ( SELECT c7 AS a, c8 AS b, c10 AS e, toDate(c1) AS d, uniqExact(c2) AS x1, quantileExactIf(0.5)(c9, NOT (c9 IS NULL)) AS x2, uniqExactIf(c2, NOT (c9 IS NULL)) AS x3, sum(CAST(c11, 'Nullable(Float64)')) AS x4, count(CAST(c11, 'Nullable(Float64)')) AS x5 FROM v1 WHERE (NOT (lower(c12) LIKE lower('X%'))) AND ((c1 >= dateTrunc('month', subtractMonths(toDate('2026-09-04'), 1))) AND (c1 < dateTrunc('month', toDate('2026-09-04')))) GROUP BY a, b, e, d ) SELECT a, b, e, round(CAST(sum(x1), 'Nullable(Float64)') / CAST(nullIf(dateDiff('day', dateTrunc('month', subtractMonths(toDate('2026-09-04'), 1)), dateTrunc('month', toDate('2026-09-04'))), 0), 'Nullable(Float64)')) AS y1, CAST(sum(CAST(x2, 'Nullable(Float64)') * CAST(x3, 'Nullable(Float64)')), 'Nullable(Float64)') / CAST(nullIf(sum(x3), 0), 'Nullable(Float64)') AS y2, CAST(sum(x4), 'Nullable(Float64)') / CAST(nullIf(sum(x5), 0), 'Nullable(Float64)') AS y3 FROM r GROUP BY a, b, e ORDER BY a ASC, y1 DESC, b ASC, e ASC LIMIT 10001
-);
+FROM (EXPLAIN actions = 1 SELECT * FROM v2);
 
+-- Forcing the swap must flip the three outer joins; otherwise the optimizer skipped this join graph and the check
+-- above proves nothing.
+SET query_plan_join_swap_table = 'true';
+SELECT countIf(explain ILIKE '%Type: INNER%'), countIf(explain ILIKE '%Type: LEFT%'), countIf(explain ILIKE '%Type: RIGHT%')
+FROM (EXPLAIN actions = 1 SELECT * FROM v2);
+
+DROP VIEW v2;
 DROP VIEW v1;
 DROP TABLE t1;
 DROP TABLE t2;
