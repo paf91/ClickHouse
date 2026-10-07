@@ -3674,6 +3674,14 @@ PartitionCommandsResultInfo StorageMergeTree::attachPartition(
     PartsTemporaryRename renamed_parts(*this, DETACHED_DIR_NAME);
     MutableDataPartsVector loaded_parts = tryLoadPartsToAttach(command, local_context, renamed_parts);
 
+    /// The parts are committed one by one, so check the size limits of a temporary table for all of them
+    /// beforehand: an `ATTACH PARTITION` that does not fit is rejected as a whole instead of being half attached.
+    /// Each part is checked again below, in case the table has grown concurrently.
+    {
+        auto lock = lockParts();
+        throwIfTemporaryTableSizeLimitsExceededForReplacement(local_context, lock, loaded_parts, std::nullopt);
+    }
+
     for (size_t i = 0; i < loaded_parts.size(); ++i)
     {
         LOG_INFO(log, "Attaching part {} from {}", loaded_parts[i]->name, renamed_parts.old_and_new_names[i].new_dir);

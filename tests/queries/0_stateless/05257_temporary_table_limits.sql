@@ -98,6 +98,17 @@ DROP TEMPORARY TABLE tmp_mt;
 CREATE TEMPORARY TABLE tmp_mt ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '' CLONE AS source_mt; -- { serverError TOO_MANY_BYTES }
 SELECT count() FROM tmp_mt;
 DROP TEMPORARY TABLE tmp_mt;
+-- A detached partition of multiple parts is attached as a whole or not at all.
+CREATE TEMPORARY TABLE tmp_mt (x UInt64) ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '';
+SYSTEM STOP MERGES tmp_mt;
+INSERT INTO tmp_mt SELECT rand64() FROM numbers(8000) SETTINGS max_temporary_table_size_bytes_compressed = 0;
+INSERT INTO tmp_mt SELECT rand64() FROM numbers(8000) SETTINGS max_temporary_table_size_bytes_compressed = 0;
+ALTER TABLE tmp_mt DETACH PARTITION tuple();
+ALTER TABLE tmp_mt ATTACH PARTITION tuple(); -- { serverError TOO_MANY_BYTES }
+SELECT count() FROM tmp_mt;
+ALTER TABLE tmp_mt ATTACH PARTITION tuple() SETTINGS max_temporary_table_size_bytes_compressed = 0;
+SELECT count() FROM tmp_mt;
+DROP TEMPORARY TABLE tmp_mt;
 SELECT count() FROM source_mt;
 DROP TABLE source_mt;
 DROP TABLE source_mt_small;
