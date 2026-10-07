@@ -770,26 +770,46 @@ bool SchemaConverter::processSubtreeDynamic(TraversalNode & node)
     if (node.type_hint && !read_as_json && !isDynamic(node.type_hint))
         return false;
 
-    if (!schema_idx_of_role[Value].has_value())
-        throw Exception(
-            ErrorCodes::NOT_IMPLEMENTED,
-            "Parquet column {} is a shredded variant without a `value` field, which is not supported",
-            node.getNameForLogging());
+    /// Spark 4.0 writes variant columns without the `VARIANT` logical type, so they can only be
+    /// recognized by structure. Before this was supported, such groups were read as `Tuple`, hence
+    /// the setting. An explicit `Dynamic`/`JSON` request is not ambiguous and bypasses it.
+    if (!group_annotated_variant && !node.type_hint && !options.format.parquet.detect_variant_by_structure)
+        return false;
+
+    std::optional<String> unsupported;
+    if (group_annotated_variant && node.element->logicalType.VARIANT.__isset.specification_version
+        && node.element->logicalType.VARIANT.specification_version != 1)
+        unsupported = fmt::format(
+            "a variant with specification version {}, but only version 1 is supported",
+            Int16(node.element->logicalType.VARIANT.specification_version));
+    else if (schema_idx_of_role[TypedValue].has_value())
+        unsupported = "a shredded variant (it has a `typed_value` field), which is not supported yet";
 
     size_t primitive_start = primitive_columns.size();
     size_t output_start = output_columns.size();
 
+    /// Recurse even when the column is unsupported or not requested, to advance the traversal
+    /// past the group's children.
     std::array<std::optional<size_t>, NumRoles> output_idx_of_role;
     for (size_t i = 0; i < num_children; ++i)
     {
         TraversalNode subnode = node.prepareToRecurse(SchemaContext::None, nullptr);
-        subnode.requested = node.requested && role_of_child[i] != TypedValue;
+        subnode.requested = node.requested && !unsupported.has_value();
         processSubtree(subnode);
         output_idx_of_role[role_of_child[i]] = subnode.output_idx;
     }
 
     if (!node.requested)
         return true;
+
+    if (unsupported.has_value())
+    {
+        /// Like for unsupported primitive types, schema inference can skip the column. When reading,
+        /// a requested column must not silently come out empty.
+        if (!sample_block && options.format.parquet.skip_columns_with_unsupported_types_in_schema_inference)
+            return true;
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Parquet column {} is {}", node.getNameForLogging(), *unsupported);
+    }
 
     if (!output_idx_of_role[Metadata].has_value() || !output_idx_of_role[Value].has_value())
     {

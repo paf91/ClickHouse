@@ -32,7 +32,6 @@
 namespace DB::ErrorCodes
 {
     extern const int INCORRECT_DATA;
-    extern const int NOT_IMPLEMENTED;
     extern const int TOO_DEEP_RECURSION;
     extern const int TYPE_MISMATCH;
 }
@@ -473,6 +472,9 @@ void decodeValueIntoTypedPath(
         return;
     }
 
+    /// TODO: Add a fast path for simple conversions (number -> number, string -> number,
+    /// number -> string, etc.) that doesn't create a column and call castColumn: that is too
+    /// expensive to do per single value.
     const DataTypePtr type = getDataTypesCache().getType(type_name);
     auto value_column = type->createColumn();
     decodeValueIntoColumn(data, pos, context, depth, *value_column);
@@ -592,9 +594,12 @@ void decodeObjectIntoJSON(
         if (!tmp_dynamic_column)
             tmp_dynamic_column = ColumnDynamic::create(column.getMaxDynamicTypes());
         auto & tmp_dynamic = assert_cast<ColumnDynamic &>(*tmp_dynamic_column);
+        /// Keep only the value being serialized, not all values of all shared data paths.
+        if (!tmp_dynamic.empty())
+            tmp_dynamic.popBack(1);
         decodeValueIntoDynamic(data, value.pos, context, value.depth, tmp_dynamic);
         ColumnObject::serializePathAndValueIntoSharedData(
-            shared_data_paths, shared_data_values_column, value.path, tmp_dynamic, tmp_dynamic.size() - 1);
+            shared_data_paths, shared_data_values_column, value.path, tmp_dynamic, 0);
     }
     column.getSharedDataOffsets().push_back(shared_data_paths->size());
 
@@ -739,28 +744,26 @@ void decodeVariantColumn(
 
     for (size_t row = 0; row < num_rows; ++row)
     {
-        /// `metadata` is required by the spec, so it is null only if the whole variant is null.
-        if (metadata_nulls && (*metadata_nulls)[row])
-        {
-            output.insertDefault();
-            continue;
-        }
-
-        /// A null `value` means that the value is stored in the shredded `typed_value` field.
-        if (value_nulls && (*value_nulls)[row])
-        {
-            if (output_object)
-                throw Exception(
-                    ErrorCodes::NOT_IMPLEMENTED,
-                    "Cannot read Parquet variant column '{}' as {}: a row has no `value`, so it is stored in the "
-                    "shredded `typed_value` field, which is not supported",
-                    column_name, output_type->getName());
-            output.insertDefault();
-            continue;
-        }
-
         const std::string_view metadata_blob = metadata_strings.getDataAt(row);
         const std::string_view value_blob = value_strings.getDataAt(row);
+
+        /// `metadata` and `value` are one variant value, so they are null together, when the whole
+        /// variant is null. With `input_format_null_as_default` the leaves are read as non-nullable
+        /// and a null arrives as an empty blob, which is never a valid encoding (both start with a
+        /// header byte). A null in just one of the leaves is malformed: in the unshredded layout,
+        /// which is the only one read here, both fields are required.
+        const bool metadata_missing = (metadata_nulls && (*metadata_nulls)[row]) || metadata_blob.empty();
+        const bool value_missing = (value_nulls && (*value_nulls)[row]) || value_blob.empty();
+        if (metadata_missing && value_missing)
+        {
+            output.insertDefault();
+            continue;
+        }
+        if (metadata_missing || value_missing)
+            throw Exception(
+                ErrorCodes::INCORRECT_DATA,
+                "Malformed Parquet variant column '{}': a row has {} but no {}",
+                column_name, metadata_missing ? "`value`" : "`metadata`", metadata_missing ? "`metadata`" : "`value`");
 
         const Metadata parsed_metadata = parseMetadata(metadata_blob);
         const DecodeContext context{.metadata = parsed_metadata, .max_depth = format_settings.max_parser_depth};

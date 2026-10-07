@@ -21,3 +21,17 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DATA_FILE=$CUR_DIR/data_parquet/04928_variant_spark.parquet
 
 ${CLICKHOUSE_LOCAL} --stacktrace --query="SELECT n, v FROM file('${DATA_FILE}', Parquet) ORDER BY n" 
+
+# Without the `VARIANT` logical type the group is recognized by structure, which is what the setting
+# controls. Before variant support such a group was read as a Tuple of the raw blobs.
+echo '--- schema inference ---'
+${CLICKHOUSE_LOCAL} --query="DESCRIBE file('${DATA_FILE}', Parquet)"
+echo '--- input_format_parquet_detect_variant_by_structure = 0 ---'
+${CLICKHOUSE_LOCAL} --query="DESCRIBE file('${DATA_FILE}', Parquet) SETTINGS input_format_parquet_detect_variant_by_structure = 0"
+${CLICKHOUSE_LOCAL} --query="
+    SELECT n, length(v.value), length(v.metadata) FROM file('${DATA_FILE}', Parquet) ORDER BY n
+    SETTINGS input_format_parquet_detect_variant_by_structure = 0"
+echo '--- explicit Dynamic bypasses the setting ---'
+${CLICKHOUSE_LOCAL} --query="
+    SELECT n, v FROM file('${DATA_FILE}', Parquet, 'n Int32, v Dynamic') ORDER BY n
+    SETTINGS input_format_parquet_detect_variant_by_structure = 0"

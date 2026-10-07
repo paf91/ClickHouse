@@ -81,6 +81,9 @@ EXCLUDE=(
     05299_variant_read_as_json.parquet
     # Intentionally truncated variant blobs for the 05228 malformed-input test.
     05228_variant_malformed.parquet
+    # Unsupported `VARIANT` specification version and one-sided null leaves, on purpose.
+    05306_variant_unsupported_version.parquet
+    05307_variant_one_sided_null.parquet
 )
 
 for NAME in $(find "$DATA_DIR" -type f \( -iname '*.parquet' -o -iname '*.parquet.gz' \) -print0 | xargs -0 -n 1 basename | LC_ALL=C sort | grep -vFf <(printf '%s\n' "${EXCLUDE[@]}")); do
