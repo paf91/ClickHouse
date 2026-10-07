@@ -79,7 +79,7 @@ public:
     size_t getNumberOfArguments() const override { return 0; }
     ColumnNumbers getArgumentsThatAreAlwaysConstant() const override { return {0}; }
 
-    /// With all features constant, the model is evaluated once instead of once per row.
+    /// With all features constant, the model is evaluated once per block instead of once per row.
     bool useDefaultImplementationForConstants() const override { return true; }
 
     /// A NULL feature is passed to XGBoost as a missing value (NaN), which the model handles the way it was

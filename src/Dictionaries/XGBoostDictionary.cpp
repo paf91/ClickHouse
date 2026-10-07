@@ -291,7 +291,7 @@ The ground truth is `2*1 + 3*2 = 8`, so the model's prediction is close to `8`.
 **Training holds the entire training set in memory.** Reading the source in blocks is not out-of-core training: each block is accumulated rather than consumed, so the whole training set is memory resident before the first boosting round and stays memory resident until the last one.
 :::
 
-**Predicting (at query time).** To predict, the model takes the feature vector — in the same order as the key columns were declared — and runs it through the trained booster, returning a `Float64`. A `NULL` feature is passed to the model as a missing value, which XGBoost handles the way it learned to during training, so the prediction is never `NULL`. When every feature is a constant, the model is evaluated once for the whole query.
+**Predicting (at query time).** To predict, the model takes the feature vector — in the same order as the key columns were declared — and runs it through the trained booster, returning a `Float64`. A `NULL` feature is passed to the model as a missing value, which XGBoost handles the way it learned to during training, so the prediction is never `NULL`. When every feature is a constant, the model is evaluated once per block instead of once per row.
 
 **The model is not persisted.** It lives only in memory, for as long as the dictionary is loaded, and is trained again from the source on every load — including after a server restart.
 
@@ -372,14 +372,14 @@ The parameter names map to the prediction parameters of XGBoost's `XGBoosterPred
 | Parameter | Description | Default |
 | --- | --- | --- |
 | `type` | Prediction type. Only `0` (value) and `1` (margin) are accepted, because `predictXGBoost` returns a single `Float64` per row. Other XGBoost types (`2`/`3` SHAP contributions, `4`/`5` feature interactions, `6` leaf index) emit several values per row and are rejected. | `0` |
-| `iteration_begin` | First boosting iteration (tree) to include in the prediction. Must not exceed the number of boosting iterations the model was trained with (`num_iterations`). | `0` |
-| `iteration_end` | Last boosting iteration to include; `0` uses all trees. Bounded like `iteration_begin`. | `0` |
+| `iteration_begin` | First boosting round to include in the prediction, counted from `0` (inclusive). Must not exceed the number of boosting iterations the model was trained with (`num_iterations`). | `0` |
+| `iteration_end` | One past the last boosting round to include (exclusive), so `iteration_end 1` uses only the first round; `0` uses all rounds. Bounded like `iteration_begin`. | `0` |
 
 ## Notes {#notes}
 
 - **Computational dictionary semantics.** This is a *computational* dictionary: it holds a trained model, not rows, and `predictXGBoost` is the only way to query it. The generic dictionary interface is not supported and reports an error: `dictGet` (there is no stored attribute to look up — the "key" is a feature vector to predict from), `dictHas` (no keys are stored), `SELECT * FROM dict` and joining the dictionary as a table. Because `predictXGBoost` is the only entry point, the `enable_xgboost` setting must be enabled for every prediction.
 - **Numeric columns only.** Every feature (key) column must be a native numeric type and the target attribute must be `Float32` or `Float64`. Values are read as floats during training and prediction. The feature arguments of `predictXGBoost` may also be `Nullable`, see [How it works](#how-it-works).
-- **`system.dictionaries` reports no stored items.** The dictionary trains a model instead of storing rows, so `element_count` is `0`, as it is for a `direct` dictionary, and `bytes_allocated` is `0` too: the trained model belongs to XGBoost, which does not report how much memory it holds. `query_count` and `found_rate` count the rows passed to the model by `predictXGBoost`; a call whose features are all constant is evaluated once, so it counts as one row.
+- **`system.dictionaries` reports no stored items.** The dictionary trains a model instead of storing rows, so `element_count` is `0`, as it is for a `direct` dictionary, and `bytes_allocated` is `0` too: the trained model belongs to XGBoost, which does not report how much memory it holds. `query_count` and `found_rate` count the rows passed to the model by `predictXGBoost`; a call whose features are all constant is evaluated once per block, so it counts one row per block rather than one per row.
 - **A failed reload keeps the previous model.** If retraining fails — the source table is gone, its schema changed, a hyperparameter is no longer accepted — the dictionary does not start failing predictions. It keeps serving the last model that trained successfully, and records the error instead. Compare `last_successful_update_time` with `last_exception` in `system.dictionaries` to tell whether the model still reflects the current source data:
 
   ```sql

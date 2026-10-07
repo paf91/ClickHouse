@@ -2,7 +2,8 @@
 -- no-fasttest: needs the XGBoost contrib, which is not built in the fast test.
 
 -- `system.dictionaries.query_count` of an XGBoost dictionary counts the rows passed to the model by
--- `predictXGBoost`. A call whose features are all constant is evaluated once, so it counts as one row.
+-- `predictXGBoost`. A call whose features are all constant is evaluated once per block, so it counts one row
+-- per block. `max_block_size` is pinned so that the 1000 rows below are a single block.
 
 SET enable_xgboost = 1;
 
@@ -27,11 +28,11 @@ SELECT predictXGBoost('model_05264_xgb', toFloat64(number), 2.0) FROM numbers(0)
 SELECT query_count, found_rate FROM system.dictionaries WHERE database = currentDatabase() AND name = 'model_05264_xgb';
 
 SELECT 'One row per predicted row';
-SELECT sum(isFinite(predictXGBoost('model_05264_xgb', toFloat64(number), 2.0))) FROM numbers(1000);
+SELECT sum(isFinite(predictXGBoost('model_05264_xgb', toFloat64(number), 2.0))) FROM numbers(1000) SETTINGS max_block_size = 65536;
 SELECT query_count, found_rate FROM system.dictionaries WHERE database = currentDatabase() AND name = 'model_05264_xgb';
 
-SELECT 'All features constant: evaluated once';
-SELECT sum(isFinite(predictXGBoost('model_05264_xgb', 1.0, 2.0))) FROM numbers(1000);
+SELECT 'All features constant: evaluated once per block';
+SELECT sum(isFinite(predictXGBoost('model_05264_xgb', 1.0, 2.0))) FROM numbers(1000) SETTINGS max_block_size = 65536;
 SELECT query_count, found_rate FROM system.dictionaries WHERE database = currentDatabase() AND name = 'model_05264_xgb';
 
 DROP DICTIONARY model_05264_xgb;
