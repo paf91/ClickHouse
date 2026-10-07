@@ -2261,11 +2261,6 @@ def generate(
         content = transform_full_body(migrate, content, source_docu, dest, lk, title)
     else:
         content = transform_body(migrate, content, source_docu, dest, lk)
-    # The Markdown emitted by registrations may contain padding in table cells
-    # or blank lines. Whitespace-only trailing characters create noisy diffs and
-    # fail the repository whitespace check, so normalize them at the generator
-    # boundary for every generated documentation family.
-    content = "\n".join(line.rstrip() for line in content.split("\n"))
     if gen["name"] == "beta-and-experimental":
         content = _rewrite_setting_links_from_routes(
             content,
