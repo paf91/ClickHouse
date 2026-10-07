@@ -1868,7 +1868,20 @@ PostgreSQLHandler::CopyQueryResult PostgreSQLHandler::processCopyQuery(const Str
         catch (...)
         {
             executor->cancel();
-            throw;
+            io.onException();
+
+            /// The whole copy sub-protocol has been consumed up to `CopyDone` and nothing has been sent
+            /// since `CopyInResponse`, so the stream is at a statement boundary: an insert failure (a
+            /// constraint, a materialized view, the storage) is an ordinary error of this statement.
+            /// Report it with an `ErrorResponse` and keep the connection usable, as PostgreSQL does.
+            tryLogCurrentException(log, "Failed to insert the payload of COPY FROM STDIN");
+            const bool cancelled = getCurrentExceptionCode() == ErrorCodes::QUERY_WAS_CANCELLED;
+            message_transport->send(
+                PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse(
+                    PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse::ERROR, cancelled ? "57014" : "2F000",
+                    fmt::format("COPY FROM STDIN failed: {}", getCurrentExceptionMessage(/* with_stacktrace = */ false))),
+                true);
+            return CopyQueryResult::ErrorHandled;
         }
 
         /// PostgreSQL reports the number of rows the copy inserted in the command tag ("COPY n"), which
