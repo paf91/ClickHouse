@@ -3753,6 +3753,26 @@ td:has(> .integration-table-logo) {
     animation: ch-ask-ai-sheen 900ms ease-in-out 600ms both;
 }
 
+/* A faint glint travels along the gradient outline after the fill reflection.
+   It is masked to the one-pixel border so the content remains still. */
+.ch-ask-ai-button::before {
+    position: absolute;
+    inset: -1px;
+    z-index: 2;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(105deg, transparent 42%, #fff 50%, transparent 58%)
+        150% 0 / 300% 100% no-repeat;
+    content: "";
+    opacity: 0;
+    pointer-events: none;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: ch-ask-ai-gleam 900ms ease-in-out 600ms both;
+}
+
 .ch-ask-ai-button:hover {
     background:
         linear-gradient(var(--ch-ai-hover-fill), var(--ch-ai-hover-fill)) padding-box,
@@ -3796,6 +3816,7 @@ td:has(> .integration-table-logo) {
     border-color: transparent !important;
 }
 
+.ch-ask-ai-button:hover::before,
 .ch-ask-ai-button:hover::after {
     animation: none;
     opacity: 0;
@@ -3891,6 +3912,11 @@ td:has(> .integration-table-logo) {
     white-space: nowrap;
 }
 
+#ch-page-ask-btn::before,
+#ch-page-ask-btn::after {
+    animation-delay: 950ms;
+}
+
 @media (max-width: 768px) {
     #ch-page-ask-row {
         flex-wrap: wrap;
@@ -3903,6 +3929,13 @@ td:has(> .integration-table-logo) {
     100% { opacity: 0; transform: translateX(260%) skewX(-12deg); }
 }
 
+@keyframes ch-ask-ai-gleam {
+    0% { background-position: 150% 0; opacity: 1; }
+    99% { background-position: -50% 0; opacity: 1; }
+    100% { background-position: -50% 0; opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+    .ch-ask-ai-button::before,
     .ch-ask-ai-button::after { animation: none; }
 }
