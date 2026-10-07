@@ -205,4 +205,12 @@ SELECT countIf(s IN (SELECT map('a', toUInt8(1)))) FROM t_lossy_const_str_key; -
 SELECT count() FROM t_lossy_const_str_key WHERE s IN (SELECT map('a', CAST(toUInt8(1), 'Dynamic'))); -- { serverError TYPE_MISMATCH }
 SELECT countIf(s IN (SELECT map('a', CAST(toUInt8(1), 'Dynamic')))) FROM t_lossy_const_str_key; -- { serverError TYPE_MISMATCH }
 
+-- Nor does a top-level `Variant` or `JSON`: the key is converted into it, which can fail, and a `JSON`
+-- element matches every spelling of the same object, not only the rendered one.
+SELECT count() FROM t_lossy_const_str_key WHERE s IN (SELECT CAST(toDate('2024-01-01'), 'Variant(Date)')); -- { serverError CANNOT_CONVERT_TYPE }
+SELECT countIf(s IN (SELECT CAST(toDate('2024-01-01'), 'Variant(Date)'))) FROM t_lossy_const_str_key; -- { serverError CANNOT_CONVERT_TYPE }
+INSERT INTO t_lossy_const_str_key VALUES ('{"a" : 1}');
+SELECT count() FROM t_lossy_const_str_key WHERE s IN (SELECT CAST('{"a":1}', 'JSON'));
+SELECT countIf(s IN (SELECT CAST('{"a":1}', 'JSON'))) FROM t_lossy_const_str_key;
+
 DROP TABLE t_lossy_const_str_key;

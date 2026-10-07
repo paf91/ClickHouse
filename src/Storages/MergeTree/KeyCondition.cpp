@@ -3294,19 +3294,20 @@ static bool tryPrepareSetColumnsForIndex(
         /// set - a pruned row that the predicate keeps, which relaxing the atom cannot repair, because a
         /// relaxed atom still prunes on the points it holds. The index is not used for such a set. A
         /// `String` element is cast the other way only by padding a `FixedString` key, which keeps the
-        /// atom a superset; a top-level `Dynamic`, `Variant` or `JSON` element keeps its own carrier and is
-        /// handled above. A composite that merely contains one, such as `Map(String, Dynamic)`, gets no
-        /// such exemption: the key is still cast into the composite, which is a parse or a conversion error.
+        /// atom a superset. A `Dynamic`, `Variant` or `JSON` element gets no exemption either, top-level or
+        /// inside a composite such as `Map(String, Dynamic)`: the key is cast into it by parsing as well -
+        /// `JSON` accepts only objects, a `Variant` infers an alternative from the spelling (`CAST('42',
+        /// 'Variant(Date)')` throws), and a `Dynamic` does so under `cast_string_to_dynamic_use_inference` -
+        /// so the full scan may match another spelling or raise a conversion error that pruning would hide.
         if (membership_compares_carriers)
         {
             const DataTypePtr predicate_column_type = removeLowCardinalityAndNullable(
                 set_transforming_dags[indexes_mapping_index].has_value() ? set_transforming_dags[indexes_mapping_index]->input_type
                                                                          : key_column_type);
             const DataTypePtr element_type = removeLowCardinalityAndNullable(set_element_type);
-            const bool element_is_carrier = isDynamic(element_type) || isVariant(element_type) || isObject(element_type);
 
             if (isStringOrFixedString(predicate_column_type) && !isString(element_type) && !isNothing(element_type)
-                && !element_type->equals(*predicate_column_type) && !element_is_carrier)
+                && !element_type->equals(*predicate_column_type))
                 return false;
         }
 
