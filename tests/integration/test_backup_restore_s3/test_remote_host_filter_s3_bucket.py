@@ -79,3 +79,28 @@ def test_s3_table_function_respects_bucket():
         f"SELECT * FROM url('http://minio1:9001/root/data/{name}.csv', 'CSV', 'id UInt64, s String')"
     )
     assert "UNACCEPTABLE_URL" in error, error
+
+
+def test_database_s3_respects_bucket():
+    name = uuid.uuid4().hex
+    node.query(
+        f"INSERT INTO FUNCTION s3('http://minio1:9001/root/data/{name}.csv', 'minio', '{minio_secret_key}', 'CSV') "
+        "SELECT * FROM t"
+    )
+    node.query(
+        f"CREATE DATABASE db_{name} ENGINE = S3('http://minio1:9001/root', 'minio', '{minio_secret_key}')"
+    )
+    assert node.query(f"EXISTS TABLE db_{name}.`data/{name}.csv`") == "1\n"
+    assert node.query(f"SELECT count() FROM db_{name}.`data/{name}.csv`") == "2\n"
+
+    node.query(
+        f"CREATE DATABASE db_other_{name} ENGINE = S3('http://minio1:9001/other', 'minio', '{minio_secret_key}')"
+    )
+    assert node.query(f"EXISTS TABLE db_other_{name}.`data/{name}.csv`") == "0\n"
+    error = node.query_and_get_error(
+        f"SELECT * FROM db_other_{name}.`data/{name}.csv`"
+    )
+    assert "UNKNOWN_TABLE" in error, error
+
+    node.query(f"DROP DATABASE db_{name}")
+    node.query(f"DROP DATABASE db_other_{name}")
