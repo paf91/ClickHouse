@@ -15,14 +15,23 @@
     + '</g></svg>';
 
   function trackDocsAi(entryPoint, pageContext) {
+    var eventNames = {
+      home: 'docs.home.ask-ai',
+      sidebar: 'docs.docsai.sidebar',
+      'page-title': 'docs.docsai.page',
+      troubleshooting: 'docs.docsai.troubleshooting',
+      'mobile-header': 'docs.docsai.mobile',
+      'keyboard-shortcut': 'docs.docsai.keyboard'
+    };
     var properties = {
       entry_point: entryPoint,
       page_context: String(Boolean(pageContext)),
       interaction: 'click'
     };
+    if (pageContext) properties.page_path = window.location.pathname;
     var track = function () {
       if (window.galaxy && typeof window.galaxy.track === 'function') {
-        window.galaxy.track('docs.docsai.open', properties);
+        window.galaxy.track(eventNames[entryPoint] || 'docs.docsai.open', properties);
       }
     };
 
@@ -87,6 +96,11 @@
       + '). Use this page as context for my question:\n\n';
   }
 
+  function openDocsAi(entryPoint, pageTitle) {
+    trackDocsAi(entryPoint, Boolean(pageTitle));
+    openKapa(pageTitle ? pageContextQuery(pageTitle) : undefined, false);
+  }
+
   function makeButton(id, label, entryPoint, pageTitle) {
     var btn = document.createElement('button');
     btn.id = id;
@@ -97,10 +111,26 @@
     btn.innerHTML = sparkleSvg + '<span class="ch-ask-ai-label">' + label + '</span>';
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
-      trackDocsAi(entryPoint, Boolean(pageTitle));
-      openKapa(pageTitle ? pageContextQuery(pageTitle) : undefined, false);
+      openDocsAi(entryPoint, pageTitle);
     });
     return btn;
+  }
+
+  function bindTaggedEntries() {
+    if (document.documentElement.dataset.chAskAiEntriesBound) return;
+    document.documentElement.dataset.chAskAiEntriesBound = 'true';
+    document.addEventListener('click', function (event) {
+      var target = event.target;
+      var entry = target && typeof target.closest === 'function'
+        && target.closest('[data-docs-ai-entry]');
+      if (!entry) return;
+
+      // These entries live in MDX, including localized troubleshooting pages.
+      // Intercept their legacy Kapa handler so they use the shared flow.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openDocsAi(entry.getAttribute('data-docs-ai-entry'));
+    }, true);
   }
 
   function injectSidebarButton() {
@@ -150,8 +180,7 @@
     homeButton.addEventListener('click', function (event) {
       event.preventDefault();
       event.stopPropagation();
-      trackDocsAi('home', false);
-      openKapa();
+      openDocsAi('home');
     });
     return true;
   }
@@ -184,8 +213,7 @@
       if (event.defaultPrevented || event.altKey || event.shiftKey || !hasShortcutModifier
         || event.key.toLowerCase() !== 'i' || isTyping) return;
       event.preventDefault();
-      trackDocsAi('keyboard-shortcut', false);
-      openKapa();
+      openDocsAi('keyboard-shortcut');
     });
   }
 
@@ -194,6 +222,7 @@
     injectPageButton();
     enhanceHomeButton();
     injectMobileButton();
+    bindTaggedEntries();
     bindShortcut();
 
     var observer = new MutationObserver(function () {
