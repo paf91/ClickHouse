@@ -79,8 +79,8 @@ SELECT 'JSON -> String', k FROM t_str WHERE k IN (SELECT CAST('{"a":1}', 'JSON')
 SELECT k FROM t_i64 WHERE k IN (SELECT CAST('{"a":1}', 'JSON')); -- { serverError ILLEGAL_TYPE_OF_ARGUMENT }
 
 -- What the primary key does with each answer, one row per granule. An `Array` key has no accurate
--- fallback, so a `true` prunes and a `false` leaves `Condition: true`. Into `Int64` the fallback drops
--- 7.5 from the set, where a plain cast would keep it as 7.
+-- fallback, so a `true` prunes and a `false` leaves `Condition: true`. Into `Int64` both float types
+-- answer `false`, and the fallback drops 7.5 from the set where a plain cast would keep it as 7.
 SELECT extract(explain, 'Condition: .*|Granules: \\d+/\\d+') AS line FROM (EXPLAIN indexes = 1
     SELECT k FROM t_f64 WHERE k IN (SELECT CAST(1, 'Float32'))) WHERE line != '';
 SELECT extract(explain, 'Condition: .*|Granules: \\d+/\\d+') AS line FROM (EXPLAIN indexes = 1
