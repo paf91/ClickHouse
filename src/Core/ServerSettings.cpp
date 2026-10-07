@@ -1936,9 +1936,9 @@ In every mode but `disabled` the kernel also records the offending system call i
 
 A filter cannot be removed or relaxed once installed, and it is inherited across both `fork` and `execve`, so it also applies to executable dictionaries and executable user defined functions, to the library and ODBC bridges, and to the OOM canary. A script run by one of those is subject to the same policy, which is worth keeping in mind if it does something unusual.
 
-The policy is only implemented for x86-64 and AArch64, since it is a list of architecture-specific system call numbers. On any other architecture the server logs a warning at startup and runs without a filter, but `PR_SET_NO_NEW_PRIVS`, which does not depend on the architecture, is still set in every mode but `disabled`.
+The policy is only implemented for x86-64 and AArch64, since it is a list of architecture-specific system call numbers. On any other architecture the server logs a warning at startup and runs without a filter, but `PR_SET_NO_NEW_PRIVS`, which does not depend on the architecture, is still set in every mode but `disabled`. seccomp is a facility of the Linux kernel: on other operating systems the server logs a warning at startup for any mode but `disabled` and runs without a filter.
 
-`system.server_settings` reports the mode of the filter in force, not the configured one: `disabled` wherever the server runs without a filter - on an architecture without a policy, or in the `log` mode when the kernel cannot install its filter - and the mode set at startup otherwise, even after the configuration is reloaded with another value.
+`system.server_settings` reports the mode of the filter in force, not the configured one: `disabled` wherever the server runs without a filter - on an operating system other than Linux, on an architecture without a policy, or in the `log` mode when the kernel cannot install its filter - and the mode set at startup otherwise, even after the configuration is reloaded with another value.
 
 **Example**
 

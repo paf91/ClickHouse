@@ -23,7 +23,6 @@ std::atomic<int> requested_mode{-1};
 /// -1 if `installSeccompFilter` has not returned.
 std::atomic<int> installed_mode{-1};
 
-#if defined(OS_LINUX)
 void rememberRequestedMode(SeccompMode mode)
 {
     requested_mode.store(static_cast<int>(mode), std::memory_order_relaxed);
@@ -33,7 +32,6 @@ void rememberInstalledMode(SeccompMode mode)
 {
     installed_mode.store(static_cast<int>(mode), std::memory_order_relaxed);
 }
-#endif
 
 std::optional<SeccompMode> loadMode(const std::atomic<int> & mode_holder)
 {
@@ -1003,6 +1001,25 @@ SeccompFilterStatus installSeccompFilter(SeccompMode mode)
             "leave the process as it is");
 
     return {.allowed_syscalls = 0, .not_installed_reason = "the seccomp policy is not implemented for this architecture"};
+}
+
+}
+
+#else
+
+namespace DB
+{
+
+SeccompFilterStatus installSeccompFilter(SeccompMode mode)
+{
+    rememberRequestedMode(mode);
+    /// seccomp is a facility of the Linux kernel, so no filter is installed here, whatever the mode.
+    rememberInstalledMode(SeccompMode::Disabled);
+
+    if (mode == SeccompMode::Disabled)
+        return {};
+
+    return {.allowed_syscalls = 0, .not_installed_reason = "seccomp is available only on Linux"};
 }
 
 }

@@ -1862,7 +1862,6 @@ try
     JemallocMergeTreeArena::initialize(server_settings[ServerSetting::jemalloc_merge_tree_arenas]);
     addMergeTreeArenaPoolWarnings(global_context);
 
-#if defined(OS_LINUX)
     /// Restrict the server to the system calls it is known to use, as early in the startup as the
     /// configuration allows. That is after the ZooKeeper-include reload above, not before it: a
     /// filter cannot be removed or relaxed afterwards, so one installed from the configuration as it
@@ -1879,13 +1878,22 @@ try
             seccomp_status.allowed_syscalls,
             SettingFieldSeccompMode(seccomp_mode).toString());
     else if (seccomp_mode != SeccompMode::Disabled)
+#if defined(OS_LINUX)
         LOG_WARNING(
             log,
             "The `seccomp` server setting is set to `{}`, but {}, so the server is running without a seccomp policy. "
             "`PR_SET_NO_NEW_PRIVS` has been set anyway, so nothing this process runs can gain privileges through a setuid program",
             SettingFieldSeccompMode(seccomp_mode).toString(),
             seccomp_status.not_installed_reason);
+#else
+        LOG_WARNING(
+            log,
+            "The `seccomp` server setting is set to `{}`, but {}, so the server is running without a seccomp policy",
+            SettingFieldSeccompMode(seccomp_mode).toString(),
+            seccomp_status.not_installed_reason);
+#endif
 
+#if defined(OS_LINUX)
     if (server_settings[ServerSetting::skip_binary_checksum_checks])
     {
         LOG_WARNING(log, "Binary checksum checks disabled due to skip_binary_checksum_checks - not recommended for production deployments");
