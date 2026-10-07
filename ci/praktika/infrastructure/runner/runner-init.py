@@ -224,6 +224,8 @@ class Runner:
         if config.init_environment == Environment.MACOS:
             # Drop swap files and other accumulated state; the random offset staggers reboots across the fleet.
             config.max_life = 3600 * 24 * 3 + 900 * random.randint(0, 24)
+            # 20 GiB in `df -k` blocks; a Fast test job uses several GiB of the rootfs.
+            config.free_blocks_threshold = 20 * 1024 * 1024
 
         log(f"max jobs: {config.max_jobs}")
         log(f"max chill: {config.max_chill}")
