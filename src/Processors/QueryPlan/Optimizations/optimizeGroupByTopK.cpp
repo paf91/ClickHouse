@@ -128,6 +128,8 @@ static TopKThresholdTrackerPtr tryAttachDynamicFilter(
     /// the aggregation, `now`) changes which rows reach the heap, and so the boundary, but its contents are not
     /// part of the query condition cache key.
     bool has_non_deterministic_filter = false;
+    /// The expressions between the read and the aggregation, for the query condition cache salt below.
+    std::vector<const ActionsDAG *> path_expressions;
 
     while (!read_step)
     {
@@ -148,6 +150,7 @@ static TopKThresholdTrackerPtr tryAttachDynamicFilter(
                 return nullptr;
             }
             key_name = std::move(*input_name);
+            path_expressions.push_back(&expression_step->getExpression());
         }
         else if (auto * filter_step = typeid_cast<FilterStep *>(node->step.get()))
         {
@@ -167,6 +170,7 @@ static TopKThresholdTrackerPtr tryAttachDynamicFilter(
             }
             key_name = std::move(*input_name);
             closest_filter_step = filter_step;
+            path_expressions.push_back(&filter_step->getExpression());
 
             const auto * filter_node = filter_step->getExpression().tryFindInOutputs(filter_step->getFilterColumnName());
             if (!filter_node || !VirtualColumnUtils::isDeterministicAllowingTopKFilter(filter_node))
@@ -263,7 +267,10 @@ static TopKThresholdTrackerPtr tryAttachDynamicFilter(
     /// Unlike `ORDER BY`, the boundary on the first key column depends on every grouping key: the heap ranks
     /// groups, and the number of groups per value of the first key depends on the other keys (`GROUP BY a, b`
     /// and `GROUP BY a, c` reach different boundaries on `a` over the same rows). So the salt includes all the
-    /// grouping keys with their types and the order of every ranked key, not only the first one.
+    /// grouping keys with their types and the order of every ranked key, not only the first one. Only the first
+    /// key has to be passed through unchanged, the others may be computed between the read and the aggregation
+    /// (`GROUP BY a, b % {m:UInt64}`), and the name of a computed key does not identify its expression (an alias,
+    /// a query parameter), so the salt also includes every expression on the way from the read to the aggregation.
     SipHash hash;
     hash.update(std::string_view("group_by_top_k"));
     hash.update(info.column_name);
@@ -280,6 +287,10 @@ static TopKThresholdTrackerPtr tryAttachDynamicFilter(
         hash.update(aggregation_key);
         hash.update(aggregation_input_header.getByName(aggregation_key).type->getName());
     }
+
+    hash.update(path_expressions.size());
+    for (const auto * expression : path_expressions)
+        expression->updateHash(hash);
 
     hash.update(directions.size());
     for (size_t i = 0; i < directions.size(); ++i)
