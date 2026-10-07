@@ -11,7 +11,7 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$CUR_DIR"/../shell_config.sh
 
 # The user name must be unique per test run, so that concurrent runs do not collide.
-PG_USER="postgresql_user_05331_${CLICKHOUSE_DATABASE}"
+PG_USER="postgresql_user_05332_${CLICKHOUSE_DATABASE}"
 
 ${CLICKHOUSE_CLIENT} -q "
 DROP USER IF EXISTS ${PG_USER};
