@@ -617,6 +617,8 @@ struct ConverterJSON
 
     const ColumnObject & column;
     DataTypePtr data_type;
+    /// Created once: for `Object` it is not a cheap accessor, and `valueSize` is called per value.
+    SerializationPtr serialization;
     PODArray<parquet::ByteArray> buf;
     std::vector<String> stash;
     const FormatSettings & format_settings;
@@ -624,6 +626,7 @@ struct ConverterJSON
     explicit ConverterJSON(const ColumnPtr & c, const DataTypePtr & data_type_, const FormatSettings & format_settings_)
         : column(assert_cast<const ColumnObject &>(*c))
         , data_type(data_type_)
+        , serialization(data_type->getDefaultSerialization())
         , format_settings(format_settings_)
     {
     }
@@ -658,7 +661,6 @@ private:
     void materializeUpTo(size_t count)
     {
         chassert(count <= buf.size());
-        auto serialization = data_type->getDefaultSerialization();
 
         for (size_t i = stash.size(); i < count; ++i)
         {
