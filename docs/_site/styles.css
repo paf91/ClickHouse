@@ -3695,8 +3695,8 @@ td:has(> .integration-table-logo) {
 }
 
 .dark {
-    --ch-ai-fill: rgba(255, 255, 255, 0.06);
-    --ch-ai-hover-fill: rgba(255, 255, 255, 0.1);
+    --ch-ai-fill: #232323;
+    --ch-ai-hover-fill: #2c2c2c;
     --ch-ai-border-start: #faff69;
     --ch-ai-border-end: #2e2e2e;
     --ch-ai-border-hover-start: #fcff9e;
@@ -3845,23 +3845,36 @@ td:has(> .integration-table-logo) {
 
 #ch-page-ask-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 }
 
-#ch-page-ask-row > h1 {
+#ch-page-ask-row:has(> #page-title) {
+    flex-direction: row !important;
+    align-items: center !important;
+}
+
+#ch-page-ask-row > h1,
+#ch-page-ask-row:has(> #page-title) > #page-title {
     min-width: 0;
     flex: 1 1 auto;
+    width: auto !important;
 }
 
 #ch-page-ask-btn {
+    flex: 0 0 auto;
     height: 32px;
-    margin-top: 4px;
     padding: 0 12px;
     font-size: 13px;
     white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    #ch-page-ask-row {
+        flex-wrap: wrap;
+    }
 }
 
 @keyframes ch-ask-ai-sheen {
