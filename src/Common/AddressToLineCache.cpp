@@ -66,8 +66,6 @@ std::string_view AddressToLineCache::impl(uintptr_t addr)
         auto dwarf_it = dwarfs.try_emplace(object->name, object->dsym).first;
 #else
         auto dwarf_it = dwarfs.try_emplace(object->name, object->elf).first;
-        if (!std::filesystem::exists(object->name))
-            return {};
 #endif
 
         Dwarf::LocationInfo location;

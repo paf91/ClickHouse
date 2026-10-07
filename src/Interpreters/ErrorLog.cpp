@@ -18,6 +18,7 @@
 #include <Parsers/parseQuery.h>
 
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace DB
@@ -145,8 +146,6 @@ void ErrorLogElement::appendToBlock(MutableColumns & columns) const
     IColumn & symbols_column = *columns[column_idx++];
     IColumn & lines_column = *columns[column_idx++];
 
-    auto old_size = symbols_column.size();
-
 #if (defined(__ELF__) && !defined(OS_FREEBSD)) || defined(OS_DARWIN)
     if (!last_error_trace.empty())
     {
@@ -160,12 +159,10 @@ void ErrorLogElement::appendToBlock(MutableColumns & columns) const
         /// truncated `.dSYM`, ...) aborts the flush and drops every pending row of the batch.
         /// These two columns are diagnostic sugar, so symbolization is best-effort for this table:
         /// the failure is reported to the server log and the columns are left empty.
+        std::optional<std::pair<std::vector<String>, std::vector<String>>> symbolized;
         try
         {
-            auto [symbols, lines] = symbolizeTrace(frame_pointers.data(), frame_pointers.size(), /* need_symbols= */ true, /* need_lines= */ true);
-            symbols_column.insert(Array(symbols.begin(), symbols.end()));
-            lines_column.insert(Array(lines.begin(), lines.end()));
-            return;
+            symbolized = symbolizeTrace(frame_pointers.data(), frame_pointers.size(), /* need_symbols= */ true, /* need_lines= */ true);
         }
         catch (...)
         {
@@ -180,11 +177,18 @@ void ErrorLogElement::appendToBlock(MutableColumns & columns) const
                     "last_error_symbols and/or last_error_lines will be empty");
             });
         }
+
+        /// Insert outside of the `try`: `ColumnArray::insert` appends nested elements before the offset,
+        /// so an exception (e.g. `MEMORY_LIMIT_EXCEEDED`) thrown here must propagate, not leave a partial row.
+        if (symbolized)
+        {
+            symbols_column.insert(Array(symbolized->first.begin(), symbolized->first.end()));
+            lines_column.insert(Array(symbolized->second.begin(), symbolized->second.end()));
+            return;
+        }
     }
 #endif
-    /// Avoid a second insert if the code above already inserted real data before failing to insert into lines_column.
-    if (symbols_column.size() == old_size)
-        symbols_column.insertDefault();
+    symbols_column.insertDefault();
     lines_column.insertDefault();
 }
 
