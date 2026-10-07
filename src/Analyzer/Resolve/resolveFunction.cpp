@@ -2277,6 +2277,18 @@ ProjectionNames QueryAnalyzer::resolveFunction(QueryTreeNodePtr & node, Identifi
             if (function_lookup.resolved_identifier && function_lookup.resolved_identifier->getNodeType() == QueryTreeNodeType::LAMBDA)
                 return function_lookup.resolved_identifier->clone();
 
+            /// Mirroring the bare-function-name rewrite above, a column or an alias with the same
+            /// name keeps priority over a registered function (and over the placeholder syntax):
+            /// `WITH 10 AS negate SELECT arrayMap(negate | toString, [7])` is an error rather
+            /// than a composition of the function `negate`.
+            auto expression_lookup = tryResolveIdentifier({operand_identifier, IdentifierLookupContext::EXPRESSION}, scope, {});
+            if (expression_lookup.isResolved())
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                    "Each operand of the function composition operator `|` must be a function, but the identifier {} "
+                    "resolves to an expression. In scope {}",
+                    backQuote(operand_identifier.getFullName()),
+                    scope.scope_node->formatASTForErrorMessage());
+
             auto operand_arity = tryGetRegisteredFunctionArity(operand_identifier.getFullName(), scope.context);
             if (!operand_arity)
                 return nullptr;
