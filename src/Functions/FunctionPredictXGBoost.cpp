@@ -335,7 +335,7 @@ SELECT round(predictXGBoost('model', 1.0, 2.0, map('type', 1)), 1) AS margin;
 │      8 │
 └────────┘
         )"}},
-        .introduced_in = {26, 9},
+        .introduced_in = {26, 10},
         .category = FunctionDocumentation::Category::MachineLearning});
 }
 

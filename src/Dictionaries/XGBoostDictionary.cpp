@@ -392,7 +392,7 @@ The parameter names map to the prediction parameters of XGBoost's `XGBoosterPred
 - **Feature order matters.** `predictXGBoost` binds its positional feature arguments to the key columns in declaration order, and the number of feature arguments must match the number of key columns.
 )DOCS_MD",
             .syntax = "LAYOUT(XGBOOST([objective '...'] [num_iterations N] [max_depth N] [eta 0.3] [...]))",
-            .introduced_in = {26, 9}});
+            .introduced_in = {26, 10}});
 }
 
 }
