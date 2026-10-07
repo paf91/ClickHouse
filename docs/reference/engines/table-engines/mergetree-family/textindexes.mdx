@@ -760,7 +760,7 @@ SELECT count() FROM table WHERE multiSearchAny(comment, [' clickhouse ', ' suppo
 
 With the `splitByNonAlpha` or `array` tokenizer and [use_text_index_like_evaluation_by_dictionary_scan](/reference/settings/session-settings/use-text#use_text_index_like_evaluation_by_dictionary_scan) enabled, a `multiSearchAny` or `multiSearchAnyUTF8` call with a single needle, for example `multiSearchAny(comment, ['upport'])`, is evaluated as `comment LIKE '%upport%'` by the [dictionary scan](#like-ilike-queries-perf), so a needle inside a word can use the index too.
 The case-insensitive variants `multiSearchAnyCaseInsensitive` and `multiSearchAnyCaseInsensitiveUTF8` use the index only this way, as `comment ILIKE '%needle%'`.
-Calls with several needles keep the evaluation by complete tokens described above.
+Calls with several needles keep the evaluation described above; for them, the case-insensitive variants and the `array` tokenizer do not use the index.
 
 #### `startsWith` and `endsWith` {#functions-example-startswith-endswith}
 
