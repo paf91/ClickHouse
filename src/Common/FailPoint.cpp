@@ -450,6 +450,7 @@ static struct InitFiu
     PAUSEABLE_ONCE(totals_having_transform_totals_start_pause) \
     PAUSEABLE_ONCE(totals_having_transform_totals_before_expression_pause) \
     PAUSEABLE_ONCE(filling_transform_before_interpolate_pause) \
+    PAUSEABLE_ONCE(iejoin_residual_before_expression_pause) \
     PAUSEABLE_ONCE(storage_url_pause_before_empty_file_probe) \
     PAUSEABLE_ONCE(storage_url_pause_between_metadata_probes) \
     PAUSEABLE_ONCE(storage_url_pause_before_read_buffer_creation) \
