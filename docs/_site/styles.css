@@ -3832,6 +3832,7 @@ td:has(> .integration-table-logo) {
 #ch-ask-ai-btn kbd {
     margin-left: auto;
     font-family: inherit;
+    font-size: inherit;
 }
 
 .ch-ask-ai-mobile-button {
