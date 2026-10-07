@@ -46,6 +46,18 @@
     return true;
   }
 
+  function focusKapaQueryEnd() {
+    var widgetContainer = document.getElementById('kapa-widget-container');
+    var input = widgetContainer && widgetContainer.shadowRoot
+      && widgetContainer.shadowRoot.getElementById('kapa-ask-ai-input');
+    if (!input) return false;
+
+    input.focus({ preventScroll: true });
+    var end = input.value.length;
+    input.setSelectionRange(end, end);
+    return true;
+  }
+
   function openKapa(query, submit) {
     var opts = { mode: 'ai' };
     if (query) {
@@ -58,13 +70,12 @@
       if (window.Kapa && typeof window.Kapa.open === 'function') {
         clearInterval(iv);
         window.Kapa.open(opts);
-        if (!query) {
-          var clearAttempts = 0;
-          var clearInput = setInterval(function () {
-            clearAttempts++;
-            if (clearKapaQuery() || clearAttempts > 20) clearInterval(clearInput);
-          }, 50);
-        }
+        var inputAttempts = 0;
+        var prepareInput = setInterval(function () {
+          inputAttempts++;
+          var complete = query ? focusKapaQueryEnd() : clearKapaQuery();
+          if (complete || inputAttempts > 20) clearInterval(prepareInput);
+        }, 50);
       } else if (attempts > 60) {
         clearInterval(iv);
       }
