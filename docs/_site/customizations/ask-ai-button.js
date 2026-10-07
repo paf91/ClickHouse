@@ -101,6 +101,17 @@
     openKapa(pageTitle ? pageContextQuery(pageTitle) : undefined, false);
   }
 
+  function bindPointerFocusBehavior(btn) {
+    // Kapa restores focus to its trigger after closing. Preserve a focus
+    // indicator for keyboard users, but do not show it after a pointer click.
+    btn.addEventListener('pointerdown', function () {
+      btn.dataset.chAskAiPointerTrigger = 'true';
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Tab') delete btn.dataset.chAskAiPointerTrigger;
+    });
+  }
+
   function makeButton(id, label, entryPoint, pageTitle) {
     var btn = document.createElement('button');
     btn.id = id;
@@ -109,6 +120,7 @@
     btn.setAttribute('aria-label', pageTitle ? 'Ask AI about ' + pageTitle : 'Ask AI');
     btn.setAttribute('aria-keyshortcuts', 'Meta+I');
     btn.innerHTML = sparkleSvg + '<span class="ch-ask-ai-label">' + label + '</span>';
+    bindPointerFocusBehavior(btn);
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       openDocsAi(entryPoint, pageTitle);
@@ -176,6 +188,7 @@
     // behavior while using the shared analytics and Kapa flow.
     homeButton.dataset.chAskAiEnhanced = 'true';
     homeButton.removeAttribute('data-galaxy-event');
+    bindPointerFocusBehavior(homeButton);
     homeButton.addEventListener('click', function (event) {
       event.preventDefault();
       event.stopPropagation();

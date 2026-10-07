@@ -3825,6 +3825,15 @@ td:has(> .integration-table-logo) {
     outline-color: #faff69 !important;
 }
 
+/* Kapa restores focus to the triggering control when it closes. A pointer
+   activation should not suddenly acquire the keyboard-only yellow outline. */
+.ch-ask-ai-button[data-ch-ask-ai-pointer-trigger]:focus-visible,
+#home-assistant-entry[data-ch-ask-ai-pointer-trigger]:focus-visible,
+#ch-ask-ai-btn[data-ch-ask-ai-pointer-trigger]:focus-visible,
+#ch-page-ask-btn[data-ch-ask-ai-pointer-trigger]:focus-visible {
+    outline: none !important;
+}
+
 .ch-ask-ai-button .ch-ai-icon {
     color: var(--ch-ai-icon) !important;
 }
