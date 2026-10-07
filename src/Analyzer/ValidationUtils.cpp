@@ -6,6 +6,7 @@
 #include <Analyzer/ColumnNode.h>
 #include <Analyzer/ConstantNode.h>
 #include <Analyzer/FunctionNode.h>
+#include <Analyzer/HashUtils.h>
 #include <Analyzer/InDepthQueryTreeVisitor.h>
 #include <Analyzer/JoinNode.h>
 #include <Analyzer/QueryNode.h>
@@ -95,11 +96,17 @@ void validateFilters(const QueryTreeNodePtr & query_node)
 
         /// the totals are computed together with this filter, which cannot multiply rows
         if (query_node_typed.isGroupByWithTotals())
-            assertNoFunctionNodes(query_node_typed.getHaving(),
-                "arrayJoin",
-                ErrorCodes::ILLEGAL_COLUMN,
-                "ARRAY JOIN",
-                "in HAVING with TOTALS");
+        {
+            QueryTreeNodes group_by_keys;
+            for (const auto & node : query_node_typed.getGroupBy().getNodes())
+            {
+                if (query_node_typed.isGroupByWithGroupingSets())
+                    std::ranges::copy(node->as<ListNode &>().getNodes(), std::back_inserter(group_by_keys));
+                else
+                    group_by_keys.push_back(node);
+            }
+            assertNoArrayJoinOutside(query_node_typed.getHaving(), group_by_keys, ErrorCodes::ILLEGAL_COLUMN, "in HAVING with TOTALS");
+        }
     }
 
     if (query_node_typed.hasQualify())
@@ -481,6 +488,41 @@ void assertNoFunctionNodes(const QueryTreeNodePtr & node,
 {
     ValidateFunctionNodesVisitor visitor(function_name, exception_code, exception_function_name, exception_place_message);
     visitor.visit(node);
+}
+
+void assertNoArrayJoinOutside(const QueryTreeNodePtr & node,
+    const std::vector<QueryTreeNodePtr> & ready_columns,
+    int exception_code,
+    std::string_view exception_place_message)
+{
+    QueryTreeNodePtrWithHashIgnoreAliasesSet ready(ready_columns.begin(), ready_columns.end());
+    QueryTreeNodes nodes_to_process{node};
+    while (!nodes_to_process.empty())
+    {
+        auto current = std::move(nodes_to_process.back());
+        nodes_to_process.pop_back();
+        if (!current || ready.contains(current))
+            continue;
+
+        auto node_type = current->getNodeType();
+        if (node_type == QueryTreeNodeType::QUERY || node_type == QueryTreeNodeType::UNION)
+            continue;
+
+        if (const auto * function_node = current->as<FunctionNode>())
+        {
+            /// the query computes arguments of an aggregate or window function before the step
+            if (function_node->isAggregateFunction() || function_node->isWindowFunction())
+                continue;
+            if (function_node->getFunctionName() == "arrayJoin")
+                throw Exception(exception_code,
+                    "ARRAY JOIN function {} is found {} in query",
+                    function_node->formatASTForErrorMessage(),
+                    exception_place_message);
+        }
+
+        for (const auto & child : current->getChildren())
+            nodes_to_process.push_back(child);
+    }
 }
 
 void validateTreeSize(const QueryTreeNodePtr & node,

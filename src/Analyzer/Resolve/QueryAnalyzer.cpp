@@ -4668,6 +4668,12 @@ void QueryAnalyzer::resolveInterpolateColumnsNodeList(QueryTreeNodePtr & interpo
 {
     auto & interpolate_node_list_typed = interpolate_node_list->as<ListNode &>();
 
+    /// the fill reads the projection and the sort keys, computed before it
+    auto & query_node_typed = scope.scope_node->as<QueryNode &>();
+    QueryTreeNodes ready_columns = query_node_typed.getProjection().getNodes();
+    for (const auto & sort_node : query_node_typed.getOrderBy().getNodes())
+        ready_columns.push_back(sort_node->as<SortNode &>().getExpression());
+
     for (auto & interpolate_node : interpolate_node_list_typed.getNodes())
     {
         auto & interpolate_node_typed = interpolate_node->as<InterpolateNode &>();
@@ -4685,7 +4691,7 @@ void QueryAnalyzer::resolveInterpolateColumnsNodeList(QueryTreeNodePtr & interpo
         resolveExpressionNode(interpolation_to_resolve, interpolate_scope, false /*allow_lambda_expression*/, false /*allow_table_expression*/);
 
         /// a fill row is computed from one previous row, it cannot multiply rows
-        assertNoFunctionNodes(interpolation_to_resolve, "arrayJoin", ErrorCodes::UNSUPPORTED_METHOD, "ARRAY JOIN", "in INTERPOLATE");
+        assertNoArrayJoinOutside(interpolation_to_resolve, ready_columns, ErrorCodes::UNSUPPORTED_METHOD, "in INTERPOLATE");
     }
 }
 
