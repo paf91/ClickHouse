@@ -1815,7 +1815,6 @@ static NameToNameVector collectFilesForRenames(
             }
             else if (command.type == MutationCommand::Type::RENAME_COLUMN)
             {
-                /// The new part does not store the target, so the column is dropped from it.
                 if (!new_part_column_names.contains(command.rename_to))
                 {
                     if (columns_renamed_to_not_stored.insert(command.column_name).second)
