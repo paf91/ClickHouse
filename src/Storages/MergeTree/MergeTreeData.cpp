@@ -1028,7 +1028,6 @@ ConditionSelectivityEstimatorPtr MergeTreeData::getConditionSelectivityEstimator
     ProfileEventTimeIncrement<Microseconds> watch(ProfileEvents::LoadedStatisticsMicroseconds);
     for (const auto & part : parts)
     {
-        auto parts_lock = readLockParts();
         auto stats = part.data_part->loadStatistics(required_columns);
         estimator_builder.markDataPart(part.data_part);
         for (const auto & [column_name, stat] : stats)
@@ -3679,7 +3678,6 @@ try
     ConditionSelectivityEstimatorBuilder estimator_builder(getContext());
     for (const DataPartPtr & data_part : data_parts)
     {
-        auto parts_lock = readLockParts();
         auto stats = data_part->loadStatistics();
         estimator_builder.markDataPart(data_part);
         for (const auto & [column_name, stat] : stats)
