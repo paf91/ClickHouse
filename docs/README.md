@@ -45,7 +45,7 @@ To then see the updated docs files, you'll need to [build ClickHouse from source
 python3 ci/jobs/scripts/docs/autogenerate/autogenerate_docs.py --write --binary build/programs/clickhouse --docs-dir docs
 ```
 
-Building from source takes a while though, so for small changes it's fine to copy-paste your updates into the target `.mdx` file manually.
+Building from source takes a while though, so for small changes it's fine to copy-paste your updates into the target `.mdx` file manually, just to preview the changes with Mintlify. Make sure not to include these changes in your PR, as manual changes to the generated documentation will be automatically rejected.
 
 Once you've made your changes to the docs (either by manually editing or regenerating), use [`mint dev`](#run-docs-locally) from the `docs/` folder to preview your changes locally.
 
