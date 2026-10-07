@@ -51,7 +51,7 @@ INSERT INTO t_arr_str_str VALUES ([('a', '1')]), ([('z', '9')]);
 -- A narrower integer or float widens into the key type, and anything renders into String.
 SELECT 'Int32 -> String', k FROM t_str WHERE k IN (SELECT CAST(42, 'Int32')) ORDER BY k;
 SELECT 'BFloat16 -> Float64', k FROM t_f64 WHERE k IN (SELECT CAST(1, 'BFloat16')) ORDER BY k;
-SELECT 'BFloat16 -> Int64', k FROM t_i64 WHERE k IN (SELECT CAST(1, 'BFloat16')) ORDER BY k;
+SELECT 'BFloat16 -> Int64', k FROM t_i64 WHERE k IN (SELECT CAST(arrayJoin([1, 7.5]), 'BFloat16')) ORDER BY k;
 SELECT 'Float32 -> Float64', k FROM t_f64 WHERE k IN (SELECT CAST(1, 'Float32')) ORDER BY k;
 SELECT 'Float32 -> Int64', k FROM t_i64 WHERE k IN (SELECT CAST(arrayJoin([1, 7.5]), 'Float32')) ORDER BY k;
 
@@ -89,6 +89,8 @@ SELECT extract(explain, 'Condition: .*|Granules: \\d+/\\d+') AS line FROM (EXPLA
     SELECT k FROM t_arr_i64_str WHERE k IN (SELECT CAST(map('1', 'a'), 'Map(String, String)'))) WHERE line != '';
 SELECT extract(explain, 'Condition: .*|Granules: \\d+/\\d+') AS line FROM (EXPLAIN indexes = 1
     SELECT k FROM t_i64 WHERE k IN (SELECT CAST(arrayJoin([1, 7.5]), 'Float32'))) WHERE line != '';
+SELECT extract(explain, 'Condition: .*|Granules: \\d+/\\d+') AS line FROM (EXPLAIN indexes = 1
+    SELECT k FROM t_i64 WHERE k IN (SELECT CAST(arrayJoin([1, 7.5]), 'BFloat16'))) WHERE line != '';
 
 DROP TABLE t_str;
 DROP TABLE t_i64;

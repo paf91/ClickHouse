@@ -21,3 +21,5 @@ Condition: true
 Granules: 2/2
 Condition: (k in 1-element set)
 Granules: 1/2
+Condition: (k in 1-element set)
+Granules: 1/2
