@@ -62,14 +62,18 @@ struct HexImpl
         }
     }
 
-    static ALWAYS_INLINE inline void executeOneString(const UInt8 * pos, const UInt8 * end, char *& out, bool reverse_order = false)
+    /// Per-value path: a tiny inline loop, because the values are short and the runtime dispatch of `hexString`
+    /// would cost more than the encoding itself. Whole columns are encoded with `hexString` at once instead.
+    static void executeOneString(const UInt8 * pos, const UInt8 * end, char *& out, bool reverse_order = false)
     {
         if (!reverse_order)
         {
-            const auto raw_size = end - pos;
-            constexpr bool lower_case = false;
-            hexString<lower_case>(reinterpret_cast<UInt8*>(out), pos, raw_size);
-            out += 2 * raw_size;
+            while (pos < end)
+            {
+                writeHexByteUppercase(*pos, out);
+                ++pos;
+                out += word_size;
+            }
         }
         else
         {
@@ -97,16 +101,27 @@ struct HexImpl
         out_offsets.resize(size);
         out_vec.resize(size * hex_length);
 
-        size_t pos = 0;
-        char * out = reinterpret_cast<char *>(out_vec.data());
-        for (size_t i = 0; i < size; ++i)
+        if constexpr (std::endian::native == std::endian::little)
         {
-            const UInt8 * in_pos = reinterpret_cast<const UInt8 *>(&in_vec[i]);
-            bool reverse_order = (std::endian::native == std::endian::big);
-            executeOneString(in_pos, in_pos + type_size_in_bytes, out, reverse_order);
+            /// The values are stored contiguously in the memory order that we want to print,
+            /// so the entire buffer is encoded at once instead of dispatching per row.
+            constexpr bool lower_case = false;
+            hexString<lower_case>(out_vec.data(), reinterpret_cast<const UInt8 *>(in_vec.data()), size * type_size_in_bytes);
+            for (size_t i = 0; i < size; ++i)
+                out_offsets[i] = (i + 1) * hex_length;
+        }
+        else
+        {
+            size_t pos = 0;
+            char * out = reinterpret_cast<char *>(out_vec.data());
+            for (size_t i = 0; i < size; ++i)
+            {
+                const UInt8 * in_pos = reinterpret_cast<const UInt8 *>(&in_vec[i]);
+                executeOneString(in_pos, in_pos + type_size_in_bytes, out, /* reverse_order = */ true);
 
-            pos += hex_length;
-            out_offsets[i] = pos;
+                pos += hex_length;
+                out_offsets[i] = pos;
+            }
         }
         col_res = std::move(col_str);
     }
@@ -537,24 +552,39 @@ public:
 
         size_t size = in_vec.size();
         out_offsets.resize(size);
-        out_vec.resize(size * word_size + MAX_LENGTH);
 
-        size_t pos = 0;
-        for (size_t i = 0; i < size; ++i)
+        if constexpr (word_size == 2)
         {
-            /// Manual exponential growth, so as not to rely on the linear amortized work time of `resize` (no one guarantees it).
-            if (pos + MAX_LENGTH > out_vec.size())
-                out_vec.resize(out_vec.size() * word_size + MAX_LENGTH);
-
-            char * begin = reinterpret_cast<char *>(&out_vec[pos]);
-            char * end = begin;
-
-            Impl::executeOneString(reinterpret_cast<const UInt8 *>(&ip[i].toUnderType().items[0]), reinterpret_cast<const UInt8 *>(&ip[i].toUnderType().items[2]), end);
-
-            pos += end - begin;
-            out_offsets[i] = pos;
+            /// Every address is printed as its 16 bytes in memory order, and the addresses are stored contiguously,
+            /// so the entire buffer is encoded at once instead of dispatching per row.
+            static_assert(sizeof(IPv6) == 16);
+            out_vec.resize(size * MAX_LENGTH);
+            constexpr bool lower_case = false;
+            hexString<lower_case>(out_vec.data(), reinterpret_cast<const UInt8 *>(ip), size * sizeof(IPv6));
+            for (size_t i = 0; i < size; ++i)
+                out_offsets[i] = (i + 1) * MAX_LENGTH;
         }
-        out_vec.resize(pos);
+        else
+        {
+            out_vec.resize(size * word_size + MAX_LENGTH);
+
+            size_t pos = 0;
+            for (size_t i = 0; i < size; ++i)
+            {
+                /// Manual exponential growth, so as not to rely on the linear amortized work time of `resize` (no one guarantees it).
+                if (pos + MAX_LENGTH > out_vec.size())
+                    out_vec.resize(out_vec.size() * word_size + MAX_LENGTH);
+
+                char * begin = reinterpret_cast<char *>(&out_vec[pos]);
+                char * end = begin;
+
+                Impl::executeOneString(reinterpret_cast<const UInt8 *>(&ip[i].toUnderType().items[0]), reinterpret_cast<const UInt8 *>(&ip[i].toUnderType().items[2]), end);
+
+                pos += end - begin;
+                out_offsets[i] = pos;
+            }
+            out_vec.resize(pos);
+        }
 
         col_res = std::move(col_str);
         return true;
