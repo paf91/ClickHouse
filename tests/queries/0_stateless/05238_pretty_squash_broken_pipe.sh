@@ -48,9 +48,12 @@ fi
 # The same with the remote `clickhouse-client`, which formats the result itself. The query in its
 # process list is on the server, so the background thread has nothing to cancel there: the error is
 # reported by the client while it waits for packets from the server instead. `interactive_delay` is
-# raised so that the server sends no progress packets after the first rendered chunk: the client has to
-# notice the error while it polls the connection, not only when it processes a packet.
-timeout 60 $CLICKHOUSE_CLIENT --max_threads=1 --interactive_delay=3600000000 --output_format_pretty_squash_consecutive_ms=50 --output_format_pretty_max_rows=1000000000000 --max_rows_to_read=0 \
+# raised so that the server sends progress packets rarely: the client has to notice the error while it
+# polls the connection, not only when it processes a packet. It is not raised further, because the
+# server also checks for the `Cancel` packet only that often. The client has to cancel the query on the
+# server: the server would never notice the client has gone away, because it has nothing more to send.
+query_id="05238_${CLICKHOUSE_DATABASE}_$RANDOM$RANDOM"
+timeout 60 $CLICKHOUSE_CLIENT --query_id="$query_id" --max_threads=1 --interactive_delay=2000000 --output_format_pretty_squash_consecutive_ms=50 --output_format_pretty_max_rows=1000000000000 --max_rows_to_read=0 \
     --query "SELECT DISTINCT number % 100000 AS x FROM numbers(1e18) FORMAT PrettyCompact" 2>/dev/null | head -n 1 > /dev/null
 
 code=${PIPESTATUS[0]}
@@ -60,6 +63,20 @@ then
 elif [ "$code" -ne 75 ]
 then
     echo "Unexpected exit code $code"
+else
+    echo "OK"
+fi
+
+for _ in {1..600}
+do
+    [ "$($CLICKHOUSE_CLIENT --query "SELECT count() FROM system.processes WHERE query_id = '$query_id'")" -eq 0 ] && break
+    sleep 0.1
+done
+
+if [ "$($CLICKHOUSE_CLIENT --query "SELECT count() FROM system.processes WHERE query_id = '$query_id'")" -ne 0 ]
+then
+    echo "The query kept running on the server after the remote client stopped"
+    $CLICKHOUSE_CLIENT --query "KILL QUERY WHERE query_id = '$query_id' SYNC" > /dev/null
 else
     echo "OK"
 fi
