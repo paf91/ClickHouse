@@ -13,7 +13,7 @@ node1 = cluster.add_instance(
 # used when the configuration does not specify `engine` explicitly, hence a separate config.
 node2 = cluster.add_instance(
     "node2",
-    main_configs=["config/metric_log_bucketed_config.xml"],
+    main_configs=["config/metric_log_bucketed_config.xml", "config/union_merge.xml"],
     stay_alive=True,
 )
 node3 = cluster.add_instance(
@@ -208,6 +208,20 @@ def test_bucketed_schema(start_cluster):
 
     # the old wide table was rotated
     assert int(node2.query("select count() from system.metric_log_0").strip()) > 0
+
+    # The union table reads the per-metric columns from the rotated `wide` table as well,
+    # where they are ordinary columns and there is no `metrics` column.
+    for enable_analyzer in (0, 1):
+        assert node2.query(
+            "SELECT sum(ProfileEvent_Query) FROM system.all_metric_log WHERE _table = 'metric_log_0'",
+            settings={"enable_analyzer": enable_analyzer},
+        ) == node2.query("SELECT sum(ProfileEvent_Query) FROM system.metric_log_0")
+        assert int(
+            node2.query(
+                "SELECT sum(ProfileEvent_Query) FROM system.all_metric_log WHERE _table = 'metric_log'",
+                settings={"enable_analyzer": enable_analyzer},
+            ).strip()
+        ) > 0
 
     node2.replace_in_config(BUCKETED_LOG_PATH, ">bucketed<", ">wide<")
     node2.restart_clickhouse()

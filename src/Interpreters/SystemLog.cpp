@@ -1479,7 +1479,18 @@ ASTPtr SystemLog<LogElement>::getCreateUnionTableQuery()
     auto new_columns_list = make_intrusive<ASTColumns>();
     auto ordinary_columns = LogElement::getColumnsDescription();
     auto alias_columns = LogElement::getNamesAndAliases();
-    if (!flush_policy->shouldSkipAliasColumns())
+    if constexpr (std::is_same_v<LogElement, BucketedMetricLogElement>)
+    {
+        /// The per-metric columns of the `bucketed` schema are `ALIAS metrics['...']`, while the rotated
+        /// tables of the `wide` schema (which was the default before) have them as ordinary columns and
+        /// have no `metrics` column at all. An `ALIAS` in the union table would be expanded before reading
+        /// and give the default values for the rotated `wide` tables, so declare these columns as ordinary
+        /// ones: then every underlying table provides them on its own, either physically or as its `ALIAS`.
+        if (!flush_policy->shouldSkipAliasColumns())
+            for (auto & alias : alias_columns)
+                ordinary_columns.add(ColumnDescription(std::move(alias.name), std::move(alias.type), std::move(alias.comment)));
+    }
+    else if (!flush_policy->shouldSkipAliasColumns())
         ordinary_columns.setAliases(alias_columns);
     new_columns_list->set(new_columns_list->columns, InterpreterCreateQuery::formatColumns(ordinary_columns));
     create->set(create->columns_list, new_columns_list);
