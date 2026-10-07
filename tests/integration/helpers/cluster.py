@@ -5390,7 +5390,7 @@ class ClickHouseInstance:
         self.ipv4_address = ipv4_address
         self.ipv6_address = ipv6_address
         self.with_installed_binary = with_installed_binary
-        # The `seccomp` element stripped from the main config for the old version, see `create_dir`.
+        # The value of `seccomp` stripped from the main config for the old version, see `create_dir`.
         self.seccomp_config_for_latest_version = None
         self.is_up = False
         self.config_root_name = config_root_name
@@ -6421,7 +6421,7 @@ class ClickHouseInstance:
         if self.seccomp_config_for_latest_version is not None:
             with open(self.latest_version_seccomp_config_path(), "w") as f:
                 f.write(
-                    f"<clickhouse>{self.seccomp_config_for_latest_version}</clickhouse>\n"
+                    f"<{self.config_root_name}><seccomp>{self.seccomp_config_for_latest_version}</seccomp></{self.config_root_name}>\n"
                 )
         self.exec_in_container(
             ["bash", "-c", "cp /usr/bin/clickhouse /usr/share/clickhouse_original"],
@@ -6729,10 +6729,18 @@ class ClickHouseInstance:
             main_config_path = p.join(instance_config_dir, self.main_config_name)
             with open(main_config_path, "r") as f:
                 main_config = f.read()
-            seccomp_pattern = r"\n[ \t]*(<seccomp>[^<]*</seccomp>)"
+            if self.main_config_name.endswith(".xml"):
+                seccomp_pattern = r"\n[ \t]*<seccomp>([^<]*)</seccomp>"
+            elif self.main_config_name.endswith((".yaml", ".yml")):
+                # Only a top-level key, without indentation.
+                seccomp_pattern = r"\nseccomp:[ \t]*([^\s#]*)[^\n]*"
+            else:
+                raise Exception(
+                    f"with_installed_binary does not support the main config {self.main_config_name}"
+                )
             seccomp_match = re.search(seccomp_pattern, main_config)
             if seccomp_match:
-                self.seccomp_config_for_latest_version = seccomp_match.group(1)
+                self.seccomp_config_for_latest_version = seccomp_match.group(1).strip()
             main_config = re.sub(seccomp_pattern, "", main_config)
             with open(main_config_path, "w") as f:
                 f.write(main_config)
