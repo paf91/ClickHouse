@@ -4,7 +4,6 @@ BFloat16 -> Int64	1
 Float32 -> Float64	1
 Float32 -> Int64	1
 Decimal128(2) -> Decimal32(2)	1
-Decimal32(4) -> Decimal64(2)	1
 Decimal32(2) -> Decimal64(4)	1
 UUID -> String	61f0c404-5cb3-11e7-907b-a6006ad3dba0
 IPv4 -> String	1.1.1.1

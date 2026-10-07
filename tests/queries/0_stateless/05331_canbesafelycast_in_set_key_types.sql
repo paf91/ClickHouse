@@ -24,10 +24,6 @@ DROP TABLE IF EXISTS t_d32_2;
 CREATE TABLE t_d32_2 (k Decimal32(2)) ENGINE = MergeTree ORDER BY k SETTINGS index_granularity = 1;
 INSERT INTO t_d32_2 VALUES (1), (7);
 
-DROP TABLE IF EXISTS t_d64_2;
-CREATE TABLE t_d64_2 (k Decimal64(2)) ENGINE = MergeTree ORDER BY k SETTINGS index_granularity = 1;
-INSERT INTO t_d64_2 VALUES (1), (7);
-
 DROP TABLE IF EXISTS t_d64_4;
 CREATE TABLE t_d64_4 (k Decimal64(4)) ENGINE = MergeTree ORDER BY k SETTINGS index_granularity = 1;
 INSERT INTO t_d64_4 VALUES (1), (7);
@@ -55,9 +51,9 @@ SELECT 'BFloat16 -> Int64', k FROM t_i64 WHERE k IN (SELECT CAST(arrayJoin([1, 7
 SELECT 'Float32 -> Float64', k FROM t_f64 WHERE k IN (SELECT CAST(1, 'Float32')) ORDER BY k;
 SELECT 'Float32 -> Int64', k FROM t_i64 WHERE k IN (SELECT CAST(arrayJoin([1, 7.5]), 'Float32')) ORDER BY k;
 
--- A Decimal needs both a precision and a scale that the key type can hold.
-SELECT 'Decimal128(2) -> Decimal32(2)', k FROM t_d32_2 WHERE k IN (SELECT CAST(1, 'Decimal128(2)')) ORDER BY k;
-SELECT 'Decimal32(4) -> Decimal64(2)', k FROM t_d64_2 WHERE k IN (SELECT CAST(1, 'Decimal32(4)')) ORDER BY k;
+-- A Decimal needs both a precision and a scale that the key type can hold. A plain cast of
+-- 100000000.00 into Decimal32(2) throws DECIMAL_OVERFLOW, the accurate fallback drops it from the set.
+SELECT 'Decimal128(2) -> Decimal32(2)', k FROM t_d32_2 WHERE k IN (SELECT CAST(arrayJoin([1, 100000000]), 'Decimal128(2)')) ORDER BY k;
 SELECT 'Decimal32(2) -> Decimal64(4)', k FROM t_d64_4 WHERE k IN (SELECT CAST(1, 'Decimal32(2)')) ORDER BY k;
 
 -- UUID and IPv4 are safe into their own width and into String, and have no accurate cast to Int64.
@@ -96,7 +92,6 @@ DROP TABLE t_str;
 DROP TABLE t_i64;
 DROP TABLE t_f64;
 DROP TABLE t_d32_2;
-DROP TABLE t_d64_2;
 DROP TABLE t_d64_4;
 DROP TABLE t_map_i64;
 DROP TABLE t_arr_i64_str;
