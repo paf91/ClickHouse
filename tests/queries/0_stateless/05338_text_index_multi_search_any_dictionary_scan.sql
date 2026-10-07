@@ -92,6 +92,16 @@ SELECT 'separator, no index', groupArray(id) FROM tab WHERE multiSearchAny(msg, 
 SELECT 'wildcard', groupArray(id) FROM tab WHERE multiSearchAny(msg, ['Poi%']) SETTINGS log_comment = 'ss_wildcard';
 SELECT 'wildcard, no index', groupArray(id) FROM tab WHERE multiSearchAny(msg, ['Poi%']) SETTINGS use_skip_indexes = 0;
 
+-- With use_text_index_like_evaluation_by_dictionary_scan = 0 a needle inside one token does not use the index.
+SET use_text_index_like_evaluation_by_dictionary_scan = 0;
+SELECT 'scan off', groupArray(id) FROM tab WHERE multiSearchAny(msg, ['PointerExc']) SETTINGS log_comment = 'ss_scan_off';
+SELECT 'scan off, no index', groupArray(id) FROM tab WHERE multiSearchAny(msg, ['PointerExc']) SETTINGS use_skip_indexes = 0;
+SELECT 'scan off, case-insensitive', groupArray(id) FROM tab WHERE multiSearchAnyCaseInsensitive(msg, ['OUTOFMEMORY']) SETTINGS log_comment = 'ss_scan_off_ci';
+SELECT 'scan off, case-insensitive, no index', groupArray(id) FROM tab WHERE multiSearchAnyCaseInsensitive(msg, ['OUTOFMEMORY']) SETTINGS use_skip_indexes = 0;
+SELECT 'scan off', countIf(explain LIKE '%\_\_text\_index\_%') > 0, countIf(explain LIKE '%FUNCTION multiSearchAny(%') > 0
+FROM (EXPLAIN actions = 1 SELECT count() FROM tab WHERE multiSearchAny(msg, ['PointerExc']));
+SET use_text_index_like_evaluation_by_dictionary_scan = 1;
+
 -- optimize_or_like_chain rewrites the chain into multiSearchAny with 4 needles.
 SELECT 'like chain', groupArray(id) FROM tab
     WHERE msg LIKE '%OutOfMemory%' OR msg LIKE '%PointerExc%' OR msg LIKE '%imeou%' OR msg LIKE '%heap%'
