@@ -3799,23 +3799,6 @@ td:has(> .integration-table-logo) {
     border-color: transparent !important;
 }
 
-/* The homepage supplies its own hero entry point. Give it the same distinct
-   Ask AI treatment without forcing it into the page-title layout. */
-#home-assistant-entry.ch-home-ask-ai-button {
-    background:
-        linear-gradient(var(--ch-ai-fill), var(--ch-ai-fill)) padding-box,
-        radial-gradient(70% 130% at 0 0, var(--ch-ai-border-start), var(--ch-ai-border-end)) border-box !important;
-    border-color: transparent !important;
-    color: var(--ch-ai-text) !important;
-}
-
-#home-assistant-entry.ch-home-ask-ai-button:hover {
-    background:
-        linear-gradient(var(--ch-ai-hover-fill), var(--ch-ai-hover-fill)) padding-box,
-        radial-gradient(70% 130% at 0 0, var(--ch-ai-border-hover-start), var(--ch-ai-border-hover-end)) border-box !important;
-    border-color: transparent !important;
-}
-
 .ch-ask-ai-button:hover::before,
 .ch-ask-ai-button:hover::after {
     animation: none;

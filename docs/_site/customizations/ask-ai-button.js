@@ -172,11 +172,10 @@
     if (!homeButton || homeButton.dataset.chAskAiEnhanced) return Boolean(homeButton);
 
     // The homepage has a purpose-built hero CTA, rather than a conventional
-    // document heading. Keep it context-free, but make it use the same Kapa
-    // behavior, analytics event, and visual treatment as the other entries.
+    // document heading. Keep its existing appearance and context-free
+    // behavior while using the shared analytics and Kapa flow.
     homeButton.dataset.chAskAiEnhanced = 'true';
     homeButton.removeAttribute('data-galaxy-event');
-    homeButton.classList.add('ch-ask-ai-button', 'ch-home-ask-ai-button');
     homeButton.addEventListener('click', function (event) {
       event.preventDefault();
       event.stopPropagation();
