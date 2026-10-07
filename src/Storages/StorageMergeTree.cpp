@@ -3676,7 +3676,8 @@ PartitionCommandsResultInfo StorageMergeTree::attachPartition(
 
     /// The parts are committed one by one, so check the size limits of a temporary table for all of them
     /// beforehand: an `ATTACH PARTITION` that does not fit is rejected as a whole instead of being half attached.
-    /// Each part is checked again below, in case the table has grown concurrently.
+    /// The parts are not checked again one by one, because that could leave the partition half attached if the table
+    /// grows concurrently. The check is not atomic with concurrent writes, so they may exceed the limits slightly.
     {
         auto lock = lockParts();
         throwIfTemporaryTableSizeLimitsExceededForReplacement(local_context, lock, loaded_parts, std::nullopt);
@@ -3695,7 +3696,6 @@ PartitionCommandsResultInfo StorageMergeTree::attachPartition(
         MergeTreeData::Transaction transaction(*this, local_context->getCurrentTransaction().get());
         {
             auto lock = lockParts();
-            throwIfTemporaryTableSizeLimitsExceededForReplacement(local_context, lock, {loaded_parts[i]}, std::nullopt);
             auto block_holder = fillNewPartNameAndResetLevel(loaded_parts[i], lock);
             renameTempPartAndAdd(loaded_parts[i], transaction, lock, /*rename_in_transaction=*/ false);
             transaction.commit(lock);

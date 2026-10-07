@@ -5,14 +5,12 @@
 #include <Interpreters/InsertDeduplication.h>
 #include <Interpreters/PartLog.h>
 #include <Interpreters/Context.h>
-#include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/ProcessList.h>
 #include <Processors/Transforms/DeduplicationTokenTransforms.h>
 #include <Common/logger_useful.h>
 #include <Common/ProfileEventsScope.h>
 #include <Common/ElapsedTimeProfileEventIncrement.h>
 #include <Common/FailPoint.h>
-#include <Common/formatReadable.h>
 #include <Common/thread_local_rng.h>
 #include <Core/Settings.h>
 #include <base/sleep.h>
@@ -35,15 +33,12 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int INSERT_WAS_DEDUPLICATED;
-    extern const int TOO_MANY_BYTES;
 }
 
 namespace Setting
 {
     extern const SettingsUInt64 input_format_max_block_wait_ms;
     extern const SettingsUInt64 max_insert_delayed_streams_for_parallel_write;
-    extern const SettingsUInt64 max_temporary_table_size_bytes_compressed;
-    extern const SettingsUInt64 max_temporary_table_size_bytes_uncompressed;
     extern const SettingsBool wait_for_part_commit_in_dependent_materialized_views;
 }
 
@@ -86,14 +81,6 @@ MergeTreeSink::MergeTreeSink(
     , deduplicate((*storage.getSettings())[MergeTreeSetting::non_replicated_deduplication_window] > 0 && storage.getDeduplicationLog() != nullptr)
 {
     LOG_TEST(storage.log, "Create MergeTreeSink, deduplicate={}", deduplicate);
-
-    /// Only `CREATE TEMPORARY TABLE` creates `MergeTree` tables in the temporary database.
-    if (storage.getStorageID().database_name == DatabaseCatalog::TEMPORARY_DATABASE)
-    {
-        const auto & settings = context->getSettingsRef();
-        max_temporary_table_size_bytes_compressed = settings[Setting::max_temporary_table_size_bytes_compressed];
-        max_temporary_table_size_bytes_uncompressed = settings[Setting::max_temporary_table_size_bytes_uncompressed];
-    }
 
     /// It's only allowed to throw "too many parts" before write,
     /// because interrupting long-running INSERT query in the middle is not convenient for users.
@@ -327,8 +314,6 @@ void MergeTreeSink::finishDelayedChunk()
 
             auto & part = partition.temp_part->part;
             auto deduplication_hashes = partition.deduplication_info->getDeduplicationHashes(part->info.getPartitionId(), deduplicate);
-            checkTemporaryTableSize(*part, deduplication_hashes);
-
             auto conflicts = commitPart(part, deduplication_hashes);
 
             if (conflicts.empty())
@@ -419,40 +404,6 @@ void MergeTreeSink::finishDelayedChunk()
     delayed_chunk.reset();
 }
 
-void MergeTreeSink::checkTemporaryTableSize(const IMergeTreeDataPart & part, const std::vector<DeduplicationHash> & deduplication_hashes) const
-{
-    if (!max_temporary_table_size_bytes_compressed && !max_temporary_table_size_bytes_uncompressed)
-        return;
-
-    /// A block that is already in the deduplication log is not committed as is: `commitPart` reports the conflict,
-    /// and the part is either skipped or rewritten from the remaining rows, which is checked on the next try.
-    if (!deduplication_hashes.empty())
-    {
-        auto * deduplication_log = storage.getDeduplicationLog();
-        if (deduplication_log && deduplication_log->containsAny(getDeduplicationBlockIds(deduplication_hashes)))
-            return;
-    }
-
-    /// The check is not atomic with the commit, so concurrent inserts may exceed the limits slightly.
-    if (max_temporary_table_size_bytes_compressed)
-    {
-        const UInt64 total_bytes = storage.totalBytes(context).value_or(0) + part.getBytesOnDisk();
-        if (total_bytes > max_temporary_table_size_bytes_compressed)
-            throw Exception(ErrorCodes::TOO_MANY_BYTES,
-                "The temporary table would take {} of compressed data, the maximum is {} (the `max_temporary_table_size_bytes_compressed` setting)",
-                ReadableSize(total_bytes), ReadableSize(max_temporary_table_size_bytes_compressed));
-    }
-
-    if (max_temporary_table_size_bytes_uncompressed)
-    {
-        const UInt64 total_bytes = storage.totalBytesUncompressed(context->getSettingsRef()).value_or(0) + part.getBytesUncompressedOnDisk();
-        if (total_bytes > max_temporary_table_size_bytes_uncompressed)
-            throw Exception(ErrorCodes::TOO_MANY_BYTES,
-                "The temporary table would take {} of uncompressed data, the maximum is {} (the `max_temporary_table_size_bytes_uncompressed` setting)",
-                ReadableSize(total_bytes), ReadableSize(max_temporary_table_size_bytes_uncompressed));
-    }
-}
-
 MergeTreeTemporaryPartPtr MergeTreeSink::writeNewTempPart(BlockWithPartition & block)
 {
     return storage.writer.writeTempPart(block, metadata_snapshot, context);
@@ -467,11 +418,21 @@ std::vector<std::string> MergeTreeSink::commitPart(MergeTreeMutableDataPartPtr &
         auto lock = storage.lockParts();
         auto block_holder = storage.fillNewPartName(part, lock);
 
+        /// Check the size limits of a temporary table under the same lock as the deduplication and the commit,
+        /// so that concurrent inserts cannot make the table exceed them. A block that is already in
+        /// the deduplication log is not committed as is: `addPart` reports the conflict, and the part is either
+        /// skipped or rewritten from the remaining rows, which is checked on the next try.
+        std::vector<std::string> block_ids;
         if (!deduplication_hashes.empty())
+            block_ids = getDeduplicationBlockIds(deduplication_hashes);
+
+        auto * deduplication_log = storage.getDeduplicationLog();
+        if (block_ids.empty() || !deduplication_log || !deduplication_log->containsAny(block_ids))
+            storage.throwIfTemporaryTableSizeLimitsExceededForReplacement(context, lock, {part}, std::nullopt);
+
+        if (!block_ids.empty())
         {
-            auto * deduplication_log = storage.getDeduplicationLog();
             chassert(deduplication_log);
-            auto block_ids = getDeduplicationBlockIds(deduplication_hashes);
             auto result = deduplication_log->addPart(block_ids, part->info);
 
             std::vector<std::string> conflict_block_ids;

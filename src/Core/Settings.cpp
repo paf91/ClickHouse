@@ -4616,7 +4616,8 @@ error during an `INSERT` of multiple blocks. The value is taken from the setting
 The operations that add existing parts to the table are limited in the same way, with the value from the settings of
 their query: `ATTACH PART`, `ATTACH PARTITION`, `ATTACH PARTITION ... FROM`, `REPLACE PARTITION ... FROM`
 and `CREATE TEMPORARY TABLE ... CLONE AS`. They are rejected as a whole, unless they do
-not increase the size of the table.
+not increase the size of the table. For `ATTACH PARTITION`, the check is done once for all its parts before they are
+attached, so writes running concurrently with it may make the table exceed the limit slightly.
 
 The parts written by background merges and mutations (`ALTER TABLE ... UPDATE`,
 `MATERIALIZE COLUMN`, etc.) are not checked, so a mutation that makes the data larger can make the table exceed the limit.

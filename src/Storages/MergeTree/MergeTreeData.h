@@ -921,8 +921,8 @@ public:
     /// For a table created with `CREATE TEMPORARY TABLE`, throws if adding 'added_parts' and removing the active parts
     /// covered by 'drop_range' would make the table exceed the `max_temporary_table_size_bytes_compressed` or
     /// `max_temporary_table_size_bytes_uncompressed` settings of 'query_context'. Used by the operations that add
-    /// parts without `INSERT`: `ATTACH PART`, `ATTACH PARTITION FROM`, `REPLACE PARTITION FROM`, `MOVE PARTITION TO TABLE`
-    /// and `CREATE TEMPORARY TABLE ... CLONE AS`. `INSERT` is checked in `MergeTreeSink`.
+    /// parts: `INSERT` (in `MergeTreeSink`), `ATTACH PART`, `ATTACH PARTITION FROM`, `REPLACE PARTITION FROM`,
+    /// `MOVE PARTITION TO TABLE` and `CREATE TEMPORARY TABLE ... CLONE AS`.
     void throwIfTemporaryTableSizeLimitsExceededForReplacement(
         const ContextPtr & query_context,
         const DataPartsLock & parts_lock,
