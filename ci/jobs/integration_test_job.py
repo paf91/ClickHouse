@@ -1948,6 +1948,7 @@ tar -czf ./ci/tmp/logs.tar.gz \
                 Targeting.is_functional_test_file(f)
                 or Targeting.is_integration_test_file(f)
                 or Targeting.is_ci_job_script(f)
+                or Targeting.is_documentation_file(f)
                 for f in changed_files
             )
         ):
