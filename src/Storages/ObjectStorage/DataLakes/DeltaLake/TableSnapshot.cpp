@@ -66,7 +66,7 @@ namespace DB::FailPoints
 namespace DeltaLake
 {
 
-class TableSnapshot::Iterator final : public DB::IObjectIterator
+class TableSnapshot::Iterator final : public DB::IObjectIterator, private DB::WithContext
 {
 private:
     /// Struct to hold ObjectInfo along with FFI handles for lazy parsing
@@ -106,7 +106,8 @@ public:
         DB::ContextPtr query_context_,
         UpdateStatsFunc update_stats_func_,
         LoggerPtr log_)
-        : kernel_snapshot_state(kernel_snapshot_state_)
+        : DB::WithContext(query_context_)
+        , kernel_snapshot_state(kernel_snapshot_state_)
         , captured_credentials_fingerprint(helper_->getCredentialsFingerprint())
         , helper(helper_)
         , read_schema(read_schema_)
@@ -119,7 +120,6 @@ public:
         , enable_expression_visitor_logging(enable_expression_visitor_logging_)
         , throw_on_engine_predicate_error(throw_on_engine_predicate_error_)
         , enable_engine_predicate(enable_engine_predicate_)
-        , query_context(query_context_)
         , update_stats_func(update_stats_func_)
     {
         if (filter_)
@@ -183,7 +183,7 @@ public:
     {
         if (filter.has_value() && enable_engine_predicate)
         {
-            auto predicate = getEnginePredicate(filter.value(), engine_predicate_exception, query_context);
+            auto predicate = getEnginePredicate(filter.value(), engine_predicate_exception, getContext());
             scan = KernelUtils::unwrapResult(
                 ffi::scan(
                     kernel_snapshot_state->snapshot.get(),
@@ -646,9 +646,6 @@ private:
     const bool enable_expression_visitor_logging;
     const bool throw_on_engine_predicate_error;
     const bool enable_engine_predicate;
-    /// Query context whose settings (e.g. `date_time_overflow_behavior`) the engine predicate must
-    /// see, so stats pruning coerces comparison literals exactly as the real comparison does.
-    const DB::ContextPtr query_context;
     const UpdateStatsFunc update_stats_func;
 
     std::exception_ptr scan_exception;
