@@ -5,6 +5,7 @@
   var ROW_ID = 'ch-ask-ai-row';
   var PAGE_ROW_ID = 'ch-page-ask-row';
   var PAGE_BTN_ID = 'ch-page-ask-btn';
+  var MOBILE_BTN_ID = 'ch-ask-ai-btn-mobile';
 
   var sparkleSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"'
     + ' class="ch-ai-icon size-4 shrink-0 text-gray-700">'
@@ -100,6 +101,23 @@
     return true;
   }
 
+  function injectMobileButton() {
+    var mobileButton = document.getElementById(MOBILE_BTN_ID);
+    if (document.getElementById(PAGE_BTN_ID)) {
+      if (mobileButton) mobileButton.remove();
+      return true;
+    }
+    if (mobileButton) return true;
+
+    var mobileSearchButton = document.getElementById('search-bar-entry-mobile');
+    if (!mobileSearchButton || !mobileSearchButton.parentNode) return false;
+
+    mobileButton = makeButton(MOBILE_BTN_ID, '', 'mobile-header', '');
+    mobileButton.classList.add('ch-ask-ai-mobile-button');
+    mobileSearchButton.parentNode.insertBefore(mobileButton, mobileSearchButton.nextSibling);
+    return true;
+  }
+
   function bindShortcut() {
     if (document.documentElement.dataset.chAskAiShortcutBound) return;
     document.documentElement.dataset.chAskAiShortcutBound = 'true';
@@ -119,11 +137,13 @@
   function init() {
     injectSidebarButton();
     injectPageButton();
+    injectMobileButton();
     bindShortcut();
 
     var observer = new MutationObserver(function () {
       injectSidebarButton();
       injectPageButton();
+      injectMobileButton();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
   }

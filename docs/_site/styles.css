@@ -3832,6 +3832,17 @@ td:has(> .integration-table-logo) {
     font-family: inherit;
 }
 
+.ch-ask-ai-mobile-button {
+    width: 32px;
+    height: 32px;
+    justify-content: center;
+    padding: 0;
+}
+
+.ch-ask-ai-mobile-button .ch-ask-ai-label {
+    display: none;
+}
+
 #ch-page-ask-row {
     display: flex;
     align-items: flex-start;
