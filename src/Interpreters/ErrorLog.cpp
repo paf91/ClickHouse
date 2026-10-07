@@ -155,15 +155,14 @@ void ErrorLogElement::appendToBlock(MutableColumns & columns) const
         for (UInt64 addr : last_error_trace)
             frame_pointers.push_back(reinterpret_cast<const void *>(addr));
 
-        /// Unlike `system.errors`, which is materialized while answering a query, `system.error_log`
-        /// is filled by a background flush that builds the whole batch inside `SystemLog::flushImpl`:
-        /// a single exception here (`CANNOT_PARSE_DWARF` while reading debug info, a missing or
+        /// `system.error_log` is filled by a background flush that builds the whole batch inside
+        /// `SystemLog::flushImpl`: a single exception here (`CANNOT_PARSE_DWARF` while reading debug info, a missing or
         /// truncated `.dSYM`, ...) aborts the flush and drops every pending row of the batch.
         /// These two columns are diagnostic sugar, so symbolization is best-effort for this table:
         /// the failure is reported to the server log and the columns are left empty.
         try
         {
-            auto [symbols, lines] = symbolizeTrace(frame_pointers.data(), frame_pointers.size());
+            auto [symbols, lines] = symbolizeTrace(frame_pointers.data(), frame_pointers.size(), /* need_symbols= */ true, /* need_lines= */ true);
             symbols_column.insert(Array(symbols.begin(), symbols.end()));
             lines_column.insert(Array(lines.begin(), lines.end()));
             return;

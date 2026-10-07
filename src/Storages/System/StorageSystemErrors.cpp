@@ -1,15 +1,20 @@
+#include <Storages/System/StorageSystemErrors.h>
+
+#include <Core/Settings.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeDateTime.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeString.h>
-#include <Storages/System/SystemTableSourceRegistry.h>
 #include <DataTypes/DataTypesNumber.h>
-#include <Storages/System/StorageSystemErrors.h>
 #include <Interpreters/Context.h>
-#include <Common/SymbolsHelper.h>
+#include <Storages/System/SystemTableSourceRegistry.h>
 #include <Common/ErrorCodes.h>
+#include <Common/Exception.h>
 #include <Common/StackTrace.h>
-#include <Core/Settings.h>
+#include <Common/SymbolsHelper.h>
+#include <Common/logger_useful.h>
+
+#include <mutex>
 
 namespace DB
 {
@@ -79,23 +84,47 @@ void StorageSystemErrors::fillData(MutableColumns & res_columns, ContextPtr cont
             const bool need_lines = columns_mask[src_index++];
             if (need_symbols || need_lines)
             {
+                IColumn * symbols_column = need_symbols ? res_columns[res_index++].get() : nullptr;
+                IColumn * lines_column = need_lines ? res_columns[res_index++].get() : nullptr;
+                const size_t symbols_old_size = symbols_column ? symbols_column->size() : 0;
+                const size_t lines_old_size = lines_column ? lines_column->size() : 0;
+
 #if (defined(__ELF__) && !defined(OS_FREEBSD)) || defined(OS_DARWIN)
+                /// These two columns are diagnostic sugar: a symbolization failure (`CANNOT_PARSE_DWARF`
+                /// while reading debug info, a missing or truncated `.dSYM`, ...) must not make the whole
+                /// `system.errors` table unreadable, so the failure is reported to the server log and
+                /// the columns are left empty.
                 if (!error.trace.empty())
                 {
-                    auto [symbols, lines] = symbolizeTrace(error.trace.data(), error.trace.size(), need_symbols, need_lines);
-                    if (need_symbols)
-                        res_columns[res_index++]->insert(Array(symbols.begin(), symbols.end()));
-                    if (need_lines)
-                        res_columns[res_index++]->insert(Array(lines.begin(), lines.end()));
+                    try
+                    {
+                        auto [symbols, lines] = symbolizeTrace(error.trace.data(), error.trace.size(), need_symbols, need_lines);
+                        if (symbols_column)
+                            symbols_column->insert(Array(symbols.begin(), symbols.end()));
+                        if (lines_column)
+                            lines_column->insert(Array(lines.begin(), lines.end()));
+                    }
+                    catch (...)
+                    {
+                        /// Symbolization fails for the whole binary rather than for a single address,
+                        /// so report it only once instead of flooding the log on every query.
+                        static std::once_flag reported;
+                        std::call_once(reported, []
+                        {
+                            tryLogCurrentException(
+                                getLogger("StorageSystemErrors"),
+                                "Cannot symbolize the stack trace for system.errors, "
+                                "last_error_symbols and/or last_error_lines will be empty");
+                        });
+                    }
                 }
-                else
 #endif
-                {
-                    if (need_symbols)
-                        res_columns[res_index++]->insertDefault();
-                    if (need_lines)
-                        res_columns[res_index++]->insertDefault();
-                }
+                /// Fill whatever was not inserted above (no trace, unsupported platform, or a failure),
+                /// keeping all columns of the row the same size.
+                if (symbols_column && symbols_column->size() == symbols_old_size)
+                    symbols_column->insertDefault();
+                if (lines_column && lines_column->size() == lines_old_size)
+                    lines_column->insertDefault();
             }
         }
     };
