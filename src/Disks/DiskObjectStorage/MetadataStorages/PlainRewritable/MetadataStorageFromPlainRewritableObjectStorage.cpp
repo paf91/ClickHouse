@@ -1400,6 +1400,12 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::planFileMove(co
     const bool metadata_only = isMetadataOnlyMove(snapshot, *directory_from, *directory_to, *blob_key_from, getBlobKeyIfExists(snapshot, path_to));
     if (metadata_only)
     {
+        /// A metadata-only move rewrites the `prefix.path` of both directories, even when only one of them is in the
+        /// explicit form or only the source blob is shared, so both directories must be locked: `addAffectedFilePath`
+        /// locks the directory of a path only by the state of that path. For a file in the root, this is the lock of the root.
+        affected_paths.push_back(path_from.parent_path().string());
+        affected_paths.push_back(path_to.parent_path().string());
+
         uncommitted_state.markDirectoryExplicit(path_from.parent_path());
         uncommitted_state.markDirectoryExplicit(path_to.parent_path());
     }
