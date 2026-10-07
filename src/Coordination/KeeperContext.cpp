@@ -21,6 +21,7 @@
 #include <Common/formatReadable.h>
 #include <Common/saturatedWaitDuration.h>
 #include <base/getMemoryAmount.h>
+#include <base/scope_guard.h>
 
 #include <boost/algorithm/string.hpp>
 
@@ -845,7 +846,7 @@ void KeeperContext::setLastCommitIndex(uint64_t commit_index)
         std::lock_guard lock(last_committed_log_idx_cv_mutex);
         last_committed_log_idx.store(commit_index, std::memory_order_relaxed);
 
-        should_notify = wait_commit_upto_idx.has_value() && commit_index >= wait_commit_upto_idx;
+        should_notify = !wait_commit_upto_indexes.empty() && commit_index >= *wait_commit_upto_indexes.begin();
     }
 
     if (should_notify)
@@ -855,14 +856,25 @@ void KeeperContext::setLastCommitIndex(uint64_t commit_index)
 bool KeeperContext::waitCommittedUpto(uint64_t log_idx, uint64_t wait_timeout_ms)
 {
     std::unique_lock lock(last_committed_log_idx_cv_mutex);
-    wait_commit_upto_idx = log_idx;
-    bool success = last_committed_log_idx_cv.wait_for(
+    auto it = wait_commit_upto_indexes.insert(log_idx);
+    SCOPE_EXIT({ wait_commit_upto_indexes.erase(it); });
+
+    return last_committed_log_idx_cv.wait_for(
         lock,
         saturatedWaitMilliseconds(wait_timeout_ms),
-        [&] { return shutdown_called || lastCommittedIndex() >= wait_commit_upto_idx; });
+        [&] { return shutdown_called || lastCommittedIndex() >= log_idx; });
+}
 
-    wait_commit_upto_idx.reset();
-    return success;
+std::optional<uint64_t> KeeperContext::commitIndexAtInitialization() const
+{
+    std::lock_guard lock(last_committed_log_idx_cv_mutex);
+    return commit_index_at_initialization;
+}
+
+void KeeperContext::setCommitIndexAtInitialization(uint64_t commit_index)
+{
+    std::lock_guard lock(last_committed_log_idx_cv_mutex);
+    commit_index_at_initialization = commit_index;
 }
 
 bool KeeperContext::shouldLogRequests() const

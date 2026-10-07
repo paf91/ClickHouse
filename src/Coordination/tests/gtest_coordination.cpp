@@ -1496,6 +1496,12 @@ TEST(KeeperMemorySoftLimitAdmission, ReadsAndRemovesAreNotMemoryIncreasing)
 namespace DB
 {
 
+namespace ErrorCodes
+{
+    extern const int ABORTED;
+    extern const int TIMEOUT_EXCEEDED;
+}
+
 /// The in-flight batch queue and the SessionID error path are private, so the tests below reach them
 /// through these friend accessors.
 class KeeperRequestDispatcherTestAccessor
@@ -1590,6 +1596,17 @@ public:
     }
 };
 
+class KeeperContextTestAccessor
+{
+public:
+    /// Callers of waitCommittedUpto that are in the wait.
+    static size_t commitWaiters(KeeperContext & keeper_context)
+    {
+        std::lock_guard lock(keeper_context.last_committed_log_idx_cv_mutex);
+        return keeper_context.wait_commit_upto_indexes.size();
+    }
+};
+
 class KeeperDispatcherTestAccessor
 {
 public:
@@ -1601,6 +1618,11 @@ public:
     static void setServer(KeeperDispatcher & dispatcher, std::unique_ptr<KeeperServer> server)
     {
         dispatcher.server = std::move(server);
+    }
+
+    static void setRequestDispatcher(KeeperDispatcher & dispatcher, std::unique_ptr<KeeperRequestDispatcher> request_dispatcher)
+    {
+        dispatcher.dispatcher = std::move(request_dispatcher);
     }
 
     static KeeperServer * server(KeeperDispatcher & dispatcher) { return dispatcher.server.get(); }
@@ -1730,6 +1752,33 @@ DB::KeeperRequestForSession makeSessionIDRequest(int32_t server_id, int64_t inte
     return request_for_session;
 }
 
+/// Built the way KeeperStateMachine::commit builds the response of a committed SessionID entry.
+DB::KeeperResponseForSession makeCommittedSessionIDResponse(int64_t internal_id, int64_t session_id)
+{
+    auto request = makeSessionIDRequest(/*server_id=*/ 1, internal_id);
+    auto response = std::dynamic_pointer_cast<Coordination::ZooKeeperSessionIDResponse>(request.request->makeResponse());
+    response->session_id = session_id;
+    DB::KeeperResponseForSession response_for_session;
+    response_for_session.session_id = DB::keeper_internal_get_session_id;
+    response_for_session.response = response;
+    response_for_session.request = request.request;
+    return response_for_session;
+}
+
+/// Polls, for states that have no notification. False if `predicate` does not hold within `timeout`.
+template <typename Predicate>
+bool becomesTrueWithin(Predicate predicate, std::chrono::milliseconds timeout)
+{
+    Stopwatch watch;
+    while (!predicate())
+    {
+        if (watch.elapsedMilliseconds() >= static_cast<UInt64>(timeout.count()))
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
 DB::KeeperRequestForSession makeWriteRequest(int64_t session_id, int32_t xid, const std::string & path)
 {
     auto request = std::make_shared<Coordination::ZooKeeperCreateRequest>();
@@ -1767,6 +1816,7 @@ HistogramMetrics::Metric::Counter waitForWriteObservations()
 using RequestDispatcherAccessor = DB::KeeperRequestDispatcherTestAccessor;
 using RequestDispatcherOldAccessor = DB::KeeperRequestDispatcherOldTestAccessor;
 using DispatcherAccessor = DB::KeeperDispatcherTestAccessor;
+using ContextAccessor = DB::KeeperContextTestAccessor;
 
 }
 
@@ -2090,8 +2140,8 @@ TEST(KeeperDispatcher, SessionIDErrorReachesRealWaiter)
     EXPECT_EQ(DispatcherAccessor::sessionIDWaiterCount(keeper_dispatcher, internal_id), 0u) << "the waiter entry leaked";
 }
 
-/// After an unclean restart a server commits again the SessionID entries that its previous process
-/// wrote, while it already serves clients. Such an entry must not answer a request of the new process.
+/// The leader can append a SessionID request of the previous process after the index that getSessionID
+/// waits for. Its entry must not answer a request of the new process either.
 TEST(KeeperDispatcher, SessionIDFromBeforeRestartDoesNotAnswerNewRequest)
 {
     DispatcherFixture fixture;
@@ -2109,26 +2159,134 @@ TEST(KeeperDispatcher, SessionIDFromBeforeRestartDoesNotAnswerNewRequest)
     auto & future = *waiter;
 
     auto router = DispatcherAccessor::router(after_restart);
-    /// Built the way KeeperStateMachine::commit builds the response of a committed SessionID entry.
-    auto commit_session_id = [&](int64_t internal_id, int64_t session_id)
-    {
-        auto request = makeSessionIDRequest(/*server_id=*/ 1, internal_id);
-        auto response = std::dynamic_pointer_cast<Coordination::ZooKeeperSessionIDResponse>(request.request->makeResponse());
-        response->session_id = session_id;
-        DB::KeeperResponseForSession response_for_session;
-        response_for_session.session_id = DB::keeper_internal_get_session_id;
-        response_for_session.response = response;
-        response_for_session.request = request.request;
-        ASSERT_TRUE(router(response_for_session));
-    };
 
-    commit_session_id(old_internal_id, /*session_id=*/ 8);
+    ASSERT_TRUE(router(makeCommittedSessionIDResponse(old_internal_id, /*session_id=*/ 8)));
     ASSERT_EQ(future.wait_for(std::chrono::seconds(0)), std::future_status::timeout)
         << "a SessionID entry written before the restart answered a request made after it";
 
-    commit_session_id(new_internal_id, /*session_id=*/ 21);
+    ASSERT_TRUE(router(makeCommittedSessionIDResponse(new_internal_id, /*session_id=*/ 21)));
     ASSERT_EQ(future.wait_for(std::chrono::seconds(0)), std::future_status::ready);
     EXPECT_EQ(future.get(), 21);
+}
+
+namespace
+{
+
+/// A KeeperDispatcher whose getSessionID runs for real up to waiting for its response, on a server
+/// that has applied index 5.
+struct SessionIDFixture
+{
+    DispatcherFixture fixture;
+    DB::KeeperContext & keeper_context = *fixture.keeper_context;
+    DB::KeeperDispatcher keeper_dispatcher;
+
+    /// Empty `commit_index_at_initialization` is a server that is not initialized yet.
+    explicit SessionIDFixture(std::optional<uint64_t> commit_index_at_initialization)
+    {
+        fixture.dispatcher.reset();
+        auto * server = fixture.server.get();
+        DispatcherAccessor::setKeeperContext(keeper_dispatcher, fixture.keeper_context);
+        DispatcherAccessor::setServer(keeper_dispatcher, std::move(fixture.server));
+        DispatcherAccessor::setRequestDispatcher(
+            keeper_dispatcher, std::make_unique<DB::KeeperRequestDispatcher>(server, DispatcherAccessor::router(keeper_dispatcher)));
+
+        keeper_context.setLastCommitIndex(5);
+        if (commit_index_at_initialization)
+            keeper_context.setCommitIndexAtInitialization(*commit_index_at_initialization);
+    }
+
+    /// The shutdown of the dispatcher needs a started Raft instance, and is skipped once the flag is set.
+    ~SessionIDFixture() { keeper_context.setShutdownCalled(); }
+
+    bool registered(int64_t internal_id) { return DispatcherAccessor::sessionIDWaiterCount(keeper_dispatcher, internal_id) != 0; }
+    bool waitingForCommit() { return ContextAccessor::commitWaiters(keeper_context) == 1; }
+};
+
+}
+
+/// The entries up to the commit index at initialization include the SessionID requests of the previous
+/// process. getSessionID must wait for them to be applied before it takes an internal id, so that
+/// one with the same internal id cannot answer it.
+TEST(KeeperDispatcher, SessionIDWaitsForCommitIndexAtInitialization)
+{
+    SessionIDFixture setup(/*commit_index_at_initialization=*/ 10);
+    auto & keeper_dispatcher = setup.keeper_dispatcher;
+    auto router = DispatcherAccessor::router(keeper_dispatcher);
+
+    const int64_t internal_id = DispatcherAccessor::nextInternalSessionID(keeper_dispatcher);
+    auto session_id = std::async(std::launch::async, [&] { return keeper_dispatcher.getSessionID(/*session_timeout_ms=*/ 10000); });
+    auto answered_or_registered = [&] { return setup.registered(internal_id) || session_id.wait_for(std::chrono::seconds(0)) == std::future_status::ready; };
+
+    ASSERT_TRUE(becomesTrueWithin([&] { return setup.waitingForCommit() || answered_or_registered(); }, std::chrono::seconds(10)));
+    EXPECT_TRUE(setup.waitingForCommit()) << "the request was issued before the commit index at initialization was reached";
+    EXPECT_EQ(DispatcherAccessor::nextInternalSessionID(keeper_dispatcher), internal_id)
+        << "the request took an internal id before the commit index at initialization was reached";
+
+    /// The previous process's entry with the same internal id is applied, then the index is reached.
+    ASSERT_TRUE(router(makeCommittedSessionIDResponse(internal_id, /*session_id=*/ 8)));
+    setup.keeper_context.setLastCommitIndex(10);
+
+    ASSERT_TRUE(becomesTrueWithin(answered_or_registered, std::chrono::seconds(10)))
+        << "the request was not issued after the commit index at initialization was reached";
+    ASSERT_TRUE(router(makeCommittedSessionIDResponse(internal_id, /*session_id=*/ 21)));
+    ASSERT_EQ(session_id.wait_for(std::chrono::seconds(10)), std::future_status::ready);
+    EXPECT_EQ(session_id.get(), 21) << "a SessionID entry of the previous process answered the new request";
+}
+
+/// The session timeout bounds the wait, and shutdown fails it the way it fails the waiters for a response.
+TEST(KeeperDispatcher, SessionIDWaitForCommitIndexAtInitializationEnds)
+{
+    SessionIDFixture setup(/*commit_index_at_initialization=*/ 10);
+    auto & keeper_dispatcher = setup.keeper_dispatcher;
+    const int64_t internal_id = DispatcherAccessor::nextInternalSessionID(keeper_dispatcher);
+
+    try
+    {
+        FAIL() << "getSessionID returned session id " << keeper_dispatcher.getSessionID(/*session_timeout_ms=*/ 100);
+    }
+    catch (const DB::Exception & e)
+    {
+        EXPECT_EQ(e.code(), DB::ErrorCodes::TIMEOUT_EXCEEDED);
+    }
+    EXPECT_EQ(DispatcherAccessor::nextInternalSessionID(keeper_dispatcher), internal_id)
+        << "the request was issued without waiting for the commit index at initialization";
+
+    auto session_id = std::async(std::launch::async, [&] { return keeper_dispatcher.getSessionID(/*session_timeout_ms=*/ 20000); });
+    ASSERT_TRUE(becomesTrueWithin([&] { return setup.waitingForCommit() || setup.registered(internal_id); }, std::chrono::seconds(10)));
+    EXPECT_TRUE(setup.waitingForCommit());
+
+    /// What KeeperDispatcher::shutdown does before it fails the waiters for a response.
+    setup.keeper_context.setShutdownCalled();
+
+    ASSERT_EQ(session_id.wait_for(std::chrono::seconds(5)), std::future_status::ready) << "shutdown did not end the wait";
+    try
+    {
+        FAIL() << "getSessionID returned session id " << session_id.get() << " instead of the error";
+    }
+    catch (const Coordination::Exception & e)
+    {
+        EXPECT_EQ(e.code, Coordination::Error::ZSESSIONEXPIRED);
+    }
+    EXPECT_EQ(DispatcherAccessor::nextInternalSessionID(keeper_dispatcher), internal_id);
+}
+
+/// Before initialization the commit index to wait for is not known yet. The TCP handler does not
+/// ask then, but the HTTP control API does.
+TEST(KeeperDispatcher, SessionIDIsNotIssuedBeforeInitialization)
+{
+    SessionIDFixture setup(/*commit_index_at_initialization=*/ std::nullopt);
+    auto & keeper_dispatcher = setup.keeper_dispatcher;
+    const int64_t internal_id = DispatcherAccessor::nextInternalSessionID(keeper_dispatcher);
+
+    try
+    {
+        FAIL() << "getSessionID returned session id " << keeper_dispatcher.getSessionID(/*session_timeout_ms=*/ 100);
+    }
+    catch (const DB::Exception & e)
+    {
+        EXPECT_EQ(e.code(), DB::ErrorCodes::ABORTED);
+    }
+    EXPECT_EQ(DispatcherAccessor::nextInternalSessionID(keeper_dispatcher), internal_id);
 }
 
 /// A request accepted before the shutdown flag was set is discarded without a response: the drains
@@ -2254,6 +2412,33 @@ TEST(KeeperContext, WaitCommittedUptoKeepsHugeTimeout)
         EXPECT_TRUE(committed);
         EXPECT_GE(elapsed_ms, static_cast<UInt64>(notify_after_ms) / 2);
     }
+}
+
+/// Clients in getSessionID wait for the same index, and the old dispatcher waits at the same time for another one.
+TEST(KeeperContext, WaitCommittedUptoWakesEveryWaiter)
+{
+    auto keeper_context = std::make_shared<DB::KeeperContext>(true, std::make_shared<DB::CoordinationSettings>());
+    keeper_context->setLastCommitIndex(1);
+
+    auto wait_for_index = [&](uint64_t log_idx) { return keeper_context->waitCommittedUpto(log_idx, /*wait_timeout_ms=*/ 60000); };
+    auto low = std::async(std::launch::async, wait_for_index, 10);
+    auto low_too = std::async(std::launch::async, wait_for_index, 10);
+    auto high = std::async(std::launch::async, wait_for_index, 20);
+    /// Ends the waits if an assertion fails, instead of leaving them to the timeout.
+    SCOPE_EXIT({ keeper_context->setShutdownCalled(); });
+
+    ASSERT_TRUE(becomesTrueWithin([&] { return ContextAccessor::commitWaiters(*keeper_context) == 3; }, std::chrono::seconds(10)));
+
+    keeper_context->setLastCommitIndex(10);
+    ASSERT_EQ(low.wait_for(std::chrono::seconds(5)), std::future_status::ready) << "a waiter for index 10 was not woken";
+    ASSERT_EQ(low_too.wait_for(std::chrono::seconds(5)), std::future_status::ready) << "a waiter for index 10 was not woken";
+    EXPECT_TRUE(low.get());
+    EXPECT_TRUE(low_too.get());
+    EXPECT_EQ(high.wait_for(std::chrono::seconds(0)), std::future_status::timeout);
+
+    keeper_context->setLastCommitIndex(20);
+    ASSERT_EQ(high.wait_for(std::chrono::seconds(5)), std::future_status::ready) << "the waiter for index 20 was not woken";
+    EXPECT_TRUE(high.get());
 }
 
 /// All three callers of interruptibleSleep build the period from a coordination setting, so this

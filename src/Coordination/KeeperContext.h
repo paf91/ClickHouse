@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <variant>
 
 namespace DB
@@ -29,6 +30,8 @@ using DiskPtr = std::shared_ptr<IDisk>;
 
 class KeeperContext
 {
+    friend class KeeperContextTestAccessor;
+
 public:
     KeeperContext(bool standalone_keeper_, CoordinationSettingsPtr coordination_settings_);
 
@@ -104,6 +107,11 @@ public:
     void setLastCommitIndex(uint64_t commit_index);
     /// returns true if the log is committed, false if timeout happened
     bool waitCommittedUpto(uint64_t log_idx, uint64_t wait_timeout_ms);
+
+    /// The leader commit index when the server became initialized, empty before. Up to it the log
+    /// can hold SessionID requests that this server wrote before a restart.
+    std::optional<uint64_t> commitIndexAtInitialization() const;
+    void setCommitIndexAtInitialization(uint64_t commit_index);
 
     /// Settings that were loaded on startup. Can be used for non-hot-reloadable settings.
     /// Returns a reference that remains valid for the lifetime of KeeperContext.
@@ -184,9 +192,11 @@ private:
 
     std::atomic<UInt64> last_committed_log_idx = 0;
 
-    /// will be set by dispatcher when waiting for certain commits
-    std::optional<UInt64> wait_commit_upto_idx = 0;
-    std::mutex last_committed_log_idx_cv_mutex;
+    /// Guarded by last_committed_log_idx_cv_mutex
+    std::optional<UInt64> commit_index_at_initialization;
+    /// Indexes that callers of waitCommittedUpto wait for
+    std::multiset<UInt64> wait_commit_upto_indexes;
+    mutable std::mutex last_committed_log_idx_cv_mutex;
     std::condition_variable last_committed_log_idx_cv;
 
     int64_t precommit_sleep_ms_for_testing = 0;
