@@ -314,6 +314,29 @@ bool astContainsNullLiteral(const ASTPtr & node)
     return false;
 }
 
+/// The value of a literal or of a `tuple(...)` of literals at any depth.
+std::optional<Field> tryGetLiteralTupleValue(const ASTPtr & node)
+{
+    checkStackSize();
+
+    if (const auto * literal = node->as<ASTLiteral>())
+        return literal->value;
+
+    const auto * function = node->as<ASTFunction>();
+    if (!function || function->name != "tuple" || !function->arguments)
+        return {};
+
+    Tuple elements;
+    for (const auto & argument : function->arguments->children)
+    {
+        auto element = tryGetLiteralTupleValue(argument);
+        if (!element)
+            return {};
+        elements.push_back(std::move(*element));
+    }
+    return Field(std::move(elements));
+}
+
 /// ClickHouse leaves the `NULL` members of an `IN` set (and the rows with a `NULL` element of a multi-column set) out of
 /// the set, while the three-valued logic does not. Returns false if the set has no `NULL`-free form to push down.
 bool removeNullMembersFromINSet(ASTFunction & function)
@@ -321,11 +344,13 @@ bool removeNullMembersFromINSet(ASTFunction & function)
     auto & arguments = function.arguments->children;
     auto & rhs = arguments[1];
 
+    std::optional<Field> function_set;
     const auto * rhs_literal = rhs->as<ASTLiteral>();
-    if (!rhs_literal)
+    if (!rhs_literal && !(function_set = tryGetLiteralTupleValue(rhs)))
         return !astContainsNullLiteral(rhs);
+    const Field & set = rhs_literal ? rhs_literal->value : *function_set;
 
-    if (!fieldContainsNull(rhs_literal->value))
+    if (!fieldContainsNull(set))
         return true;
 
     bool multi_column = false;
@@ -337,10 +362,10 @@ bool removeNullMembersFromINSet(ASTFunction & function)
         multi_column = true;
     }
 
-    if (rhs_literal->value.getType() != Field::Types::Tuple)
+    if (set.getType() != Field::Types::Tuple)
         return false;
 
-    const auto & members = rhs_literal->value.safeGet<Tuple>();
+    const auto & members = set.safeGet<Tuple>();
     if (multi_column && !members.empty() && members[0].getType() != Field::Types::Tuple)
         return false;
 
