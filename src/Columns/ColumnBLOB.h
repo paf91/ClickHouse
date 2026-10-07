@@ -6,6 +6,8 @@
 #include <Compression/ICompressionCodec.h>
 #include <Core/ColumnWithTypeAndName.h>
 #include <Core/Field.h>
+#include <Core/ProtocolDefines.h>
+#include <DataTypes/DataTypeAggregateFunction.h>
 #include <DataTypes/Serializations/ISerialization.h>
 #include <Formats/NativeReader.h>
 #include <Formats/NativeWriter.h>
@@ -124,6 +126,8 @@ public:
     {
         WriteBufferFromVector<BLOB> wbuf(blob);
         CompressedWriteBuffer compressed_buffer(wbuf, codec);
+        /// The type announced on the wire gets the state version of a versioned aggregate function derived from the negotiated revision,
+        /// and the reader parses the payload according to the announced type, so derive it the same way as `NativeWriter::write` does.
         NativeWriter::setAggregateFunctionStateVersions(wrapped_column.type, client_revision);
         auto [serialization, _, column_to_write] = NativeWriter::getSerializationAndColumn(client_revision, wrapped_column);
         NativeWriter::writeData(
