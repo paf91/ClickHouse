@@ -14,3 +14,11 @@ Map -> Array(Tuple(Int64, String))	[(1,'a')]
 Map -> Array(Tuple(String, Int64))	[('a',1)]
 Map -> Array(Tuple(String, String))	[('a','1')]
 JSON -> String	{"a":1}
+Condition: (k in 1-element set)
+Granules: 1/2
+Condition: (k in 1-element set)
+Granules: 1/2
+Condition: true
+Granules: 2/2
+Condition: (k in 1-element set)
+Granules: 1/2
