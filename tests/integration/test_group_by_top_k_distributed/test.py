@@ -516,6 +516,7 @@ def test_remote_partial_aggregation_top_k(start_cluster):
         "enable_parallel_replicas": 2,
         "max_parallel_replicas": 2,
         "cluster_for_parallel_replicas": "one_shard_two_replicas",
+        "parallel_replicas_local_plan": 1,
         "query_plan_max_limit_for_top_k_optimization": 1000,
     }
     for serialize in (0, 1):
@@ -532,10 +533,16 @@ def test_remote_partial_aggregation_top_k(start_cluster):
                 assert "Top-K:" in plan, (
                     f"serialize_query_plan={serialize}, opt={opt}\nFull plan:\n{plan}"
                 )
-                assert "Top-K:" in _remote_replicas_subplan(plan), (
+                followers_plan = _remote_replicas_subplan(plan)
+                assert "Top-K:" in followers_plan, (
                     f"serialize_query_plan={serialize}: the followers' plan has no Top-K\n"
                     f"Full plan:\n{plan}"
                 )
+                if serialize:
+                    assert "ReadFromTable" in followers_plan, (
+                        "serialize_query_plan=1: the followers did not get a serialized plan\n"
+                        f"Full plan:\n{plan}"
+                    )
             else:
                 assert "Top-K:" not in plan, (
                     f"serialize_query_plan={serialize}, opt={opt}\nFull plan:\n{plan}"
