@@ -1377,16 +1377,18 @@ nuraft::cb_func::ReturnCode KeeperServer::callbackFunc(nuraft::cb_func::Type typ
         commited_store = true;
 
     /// `request_commit_idx`: the leader commit index of an append request that NuRaft has not stored yet.
-    auto set_initialized = [this](uint64_t request_commit_idx = 0)
+    auto set_initialized = [this](uint64_t request_commit_idx = 0, bool only_if_leader = false)
     {
         {
             std::lock_guard lock(initialized_mutex);
             if (!initialized_flag)
             {
+                const bool is_leader = raft_instance->is_leader();
+                if (only_if_leader && !is_leader)
+                    return;
                 /// A new leader commits every entry already in its log, a follower up to the leader commit index.
                 keeper_context->setCommitIndexAtInitialization(std::max(
-                    request_commit_idx,
-                    raft_instance->is_leader() ? raft_instance->get_last_log_idx() : raft_instance->get_leader_committed_log_idx()));
+                    request_commit_idx, is_leader ? raft_instance->get_last_log_idx() : raft_instance->get_leader_committed_log_idx()));
                 initialized_flag = true;
             }
         }
@@ -1425,9 +1427,11 @@ nuraft::cb_func::ReturnCode KeeperServer::callbackFunc(nuraft::cb_func::Type typ
         }
         case nuraft::cb_func::InitialBatchCommited:
         {
-            if (param->myId == param->leaderId) /// We have committed our log store and we are leader, ready to serve requests.
-                set_initialized();
+            /// Set first: if we are not the leader below, a later BecomeLeader initializes instead.
             initial_batch_committed = true;
+            /// `leaderId` is still our id after `update_term` has made us a follower.
+            if (param->myId == param->leaderId) /// We have committed our log store and we are leader, ready to serve requests.
+                set_initialized(/*request_commit_idx=*/ 0, /*only_if_leader=*/ true);
             return nuraft::cb_func::ReturnCode::Ok;
         }
         case nuraft::cb_func::PreAppendLogLeader:
