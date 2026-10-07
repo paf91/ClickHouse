@@ -3426,6 +3426,19 @@ DataPartsVector StorageMergeTree::renameAndCommitEmptyParts(MutableDataPartsVect
                 if (!part)
                     continue;
                 String part_name = part->name;
+
+                /// `createEmptyPart` opened a part storage transaction, which is still active unless `commit` reached it.
+                /// On object storage its operations and uploaded blobs are only staged, so the removal below would not see
+                /// them and they would be stranded. Undo it first (it is a no-op for an already committed transaction).
+                try
+                {
+                    part->getDataPartStorage().undoTransaction();
+                }
+                catch (...)
+                {
+                    tryLogCurrentException(log, fmt::format("while undoing the transaction of the rolled back empty part {}", part_name));
+                }
+
                 try
                 {
                     if (!tryRemovePartImmediately(std::move(part)))
