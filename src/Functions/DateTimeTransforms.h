@@ -2251,9 +2251,8 @@ public:
     using FactorTransform = ZeroTransform;
 };
 
-/// The local day, the UTC offset and the instant at which the clock showed the start of the current local `period`
-/// (a day or an hour). Within one UTC offset of one local day the clock only moves forward (DateLUT repeats the hour 23
-/// by moving this factor), so equal factors mean the field did not go back between them.
+/// Within one UTC offset of one local day the clock only moves forward, and the hour 23 that DateLUT repeats moves
+/// `t - since_start`, so equal factors mean the clock did not go back between two points.
 template <Int64 period>
 struct ToClockPeriodStartFactorImpl
 {
