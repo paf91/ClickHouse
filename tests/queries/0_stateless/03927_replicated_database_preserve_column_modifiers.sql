@@ -28,6 +28,8 @@ FROM system.columns
 WHERE database = currentDatabase() AND table = 't_not_null'
 ORDER BY position;
 
+-- The oldest DDL entry format forwards no settings, so the worker sees only the type resolved on the initiator.
+SET distributed_ddl_entry_format_version = 1;
 ALTER TABLE t_not_null ADD COLUMN added Int32, ADD COLUMN added_not_null Int32 NOT NULL FORMAT Null;
 
 SELECT name, type
