@@ -43,10 +43,11 @@ SETTINGS log_comment = '05331_not_lazy';
 
 -- Both searches of each lazy query must be read from the index as `__text_index_*` columns, or the lazy reader is
 -- never reached. Parallel replicas are disabled because without a local plan EXPLAIN shows only the remote read.
+-- Unused-column pruning is pinned because CI randomizes it.
 SELECT 'or, index columns', uniqExactArray(extractAll(explain, '__text_index_\\w+'))
-FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE hasAllTokens(s, ['alpha', 'beta']) OR hasAllTokens(s, ['alpha', 'gamma']) SETTINGS enable_parallel_replicas = 0);
+FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE hasAllTokens(s, ['alpha', 'beta']) OR hasAllTokens(s, ['alpha', 'gamma']) SETTINGS enable_parallel_replicas = 0, query_plan_remove_unused_columns = 1);
 SELECT 'not, index columns', uniqExactArray(extractAll(explain, '__text_index_\\w+'))
-FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE hasToken(s, 'alpha') AND NOT hasAllTokens(s, ['alpha', 'beta']) SETTINGS enable_parallel_replicas = 0);
+FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE hasToken(s, 'alpha') AND NOT hasAllTokens(s, ['alpha', 'beta']) SETTINGS enable_parallel_replicas = 0, query_plan_remove_unused_columns = 1);
 
 -- The materialize mode reads the same columns, so check that both lazy queries iterated lazy cursors.
 -- Under parallel replicas without a local plan the counters land on the replicas' rows, so sum over every row of each query.
