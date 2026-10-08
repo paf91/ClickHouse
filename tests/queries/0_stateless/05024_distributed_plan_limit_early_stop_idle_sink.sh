@@ -52,7 +52,7 @@ CREATE TABLE t_dp_idle_sink_dim (x UInt64) ENGINE = MergeTree ORDER BY tuple();
 INSERT INTO t_dp_idle_sink_dim SELECT number FROM numbers(1000);
 "
 
-# The lookups match by query id over a full day of rows, so the id has to be unique per run.
+# The lookups match by query id over the last 600 seconds of rows, so the id has to be unique per run.
 # `CLICKHOUSE_TEST_UNIQUE_NAME` only varies with the database, and a run can be given a fixed
 # database for a whole pass over the suite, which would let an earlier run of this test answer them.
 QUERY_ID="${CLICKHOUSE_TEST_UNIQUE_NAME}_idle_sink_$(random_str 8)"
@@ -78,7 +78,7 @@ $CLICKHOUSE_CLIENT --query "SYSTEM FLUSH LOGS query_log"
 # The rows are counted, so all lookups read them locally rather than through parallel replicas.
 INITIATOR_ROWS=$($CLICKHOUSE_CLIENT --query "
     SELECT count() FROM system.query_log
-    WHERE event_date >= yesterday() AND type = 'QueryFinish' AND is_initial_query
+    WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish' AND is_initial_query
       AND current_database = currentDatabase() AND query_id = '$QUERY_ID'
     SETTINGS enable_parallel_replicas = 0, automatic_parallel_replicas_mode = 0")
 
@@ -91,7 +91,7 @@ else
     $CLICKHOUSE_CLIENT --query "
     SELECT 'idle exchanges', 'StreamingExchangeEarlyCloses >= 3', query AS task, early_closes >= 3
     FROM system.query_log
-    WHERE event_date >= yesterday() AND type = 'QueryFinish' AND NOT is_initial_query
+    WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish' AND NOT is_initial_query
       AND initial_query_id = '$QUERY_ID' AND (ProfileEvents['StreamingExchangeEarlyCloses'] AS early_closes) > 0
     ORDER BY task
     SETTINGS max_rows_to_read = 0, enable_parallel_replicas = 0, automatic_parallel_replicas_mode = 0"
@@ -101,7 +101,7 @@ else
     $CLICKHOUSE_CLIENT --query "
     SELECT 'idle exchanges', 'reader stopped early', query AS task, read_rows < $PROBE_ROWS / 3
     FROM system.query_log
-    WHERE event_date >= yesterday() AND type = 'QueryFinish' AND NOT is_initial_query
+    WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish' AND NOT is_initial_query
       AND initial_query_id = '$QUERY_ID' AND startsWith(query, 'stage_0_')
     ORDER BY task
     SETTINGS max_rows_to_read = 0, enable_parallel_replicas = 0, automatic_parallel_replicas_mode = 0"

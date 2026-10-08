@@ -70,7 +70,7 @@ function assert_stop_propagated()
     local initiator_rows
     initiator_rows=$($CLICKHOUSE_CLIENT --query "
         SELECT count() FROM system.query_log
-        WHERE event_date >= yesterday() AND type = 'QueryFinish' AND is_initial_query
+        WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish' AND is_initial_query
           AND current_database = currentDatabase() AND query_id = '$query_id'
         SETTINGS enable_parallel_replicas = 0, automatic_parallel_replicas_mode = 0")
     if [ "$initiator_rows" != 1 ]; then
@@ -84,7 +84,7 @@ function assert_stop_propagated()
     $CLICKHOUSE_CLIENT --query "
     SELECT '$label', 'StreamingExchangeEarlyCloses >= 3', query AS task, early_closes >= 3
     FROM system.query_log
-    WHERE event_date >= yesterday() AND type = 'QueryFinish' AND NOT is_initial_query
+    WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish' AND NOT is_initial_query
       AND initial_query_id = '$query_id' AND (ProfileEvents['StreamingExchangeEarlyCloses'] AS early_closes) > 0
     ORDER BY task
     SETTINGS max_rows_to_read = 0, enable_parallel_replicas = 0, automatic_parallel_replicas_mode = 0"
@@ -94,13 +94,13 @@ function assert_stop_propagated()
     $CLICKHOUSE_CLIENT --query "
     SELECT '$label', 'reader stopped early', query AS task, read_rows < $PROBE_ROWS / 3
     FROM system.query_log
-    WHERE event_date >= yesterday() AND type = 'QueryFinish' AND NOT is_initial_query
+    WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish' AND NOT is_initial_query
       AND initial_query_id = '$query_id' AND startsWith(query, 'stage_0_')
     ORDER BY task
     SETTINGS max_rows_to_read = 0, enable_parallel_replicas = 0, automatic_parallel_replicas_mode = 0"
 }
 
-# The lookups match by query id over a full day of rows, so the id has to be unique per run.
+# The lookups match by query id over the last 600 seconds of rows, so the id has to be unique per run.
 # `CLICKHOUSE_TEST_UNIQUE_NAME` only varies with the database, and a run can be given a fixed
 # database for a whole pass over the suite, which would let an earlier run of this test answer them.
 RUN_ID="${CLICKHOUSE_TEST_UNIQUE_NAME}_$(random_str 8)"
