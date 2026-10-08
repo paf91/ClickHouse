@@ -222,6 +222,11 @@ def test_bucketed_schema(start_cluster):
                 settings={"enable_analyzer": enable_analyzer},
             ).strip()
         ) > 0
+        # Like the `ALIAS` columns of the log table, the per-metric columns are not expanded by an asterisk.
+        assert "ProfileEvent_Query" not in node2.query(
+            "SELECT * FROM system.all_metric_log LIMIT 1 FORMAT TSVWithNames",
+            settings={"enable_analyzer": enable_analyzer},
+        ).split("\n")[0].split("\t")
 
     node2.replace_in_config(BUCKETED_LOG_PATH, ">bucketed<", ">wide<")
     node2.restart_clickhouse()

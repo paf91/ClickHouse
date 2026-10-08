@@ -1484,11 +1484,20 @@ ASTPtr SystemLog<LogElement>::getCreateUnionTableQuery()
         /// The per-metric columns of the `bucketed` schema are `ALIAS metrics['...']`, while the rotated
         /// tables of the `wide` schema (which was the default before) have them as ordinary columns and
         /// have no `metrics` column at all. An `ALIAS` in the union table would be expanded before reading
-        /// and give the default values for the rotated `wide` tables, so declare these columns as ordinary
+        /// and give the default values for the rotated `wide` tables, so declare these columns as physical
         /// ones: then every underlying table provides them on its own, either physically or as its `ALIAS`.
+        /// They are `MATERIALIZED` rather than ordinary, so that, like the `ALIAS` columns of the log table,
+        /// they are not expanded by an asterisk: `SELECT *` would otherwise compute a thousand of them.
         if (!flush_policy->shouldSkipAliasColumns())
-            for (auto & alias : alias_columns)
-                ordinary_columns.add(ColumnDescription(std::move(alias.name), std::move(alias.type), std::move(alias.comment)));
+        {
+            ColumnsDescription materialized_columns;
+            materialized_columns.setAliases(std::move(alias_columns));
+            for (auto column : materialized_columns)
+            {
+                column.default_desc.kind = ColumnDefaultKind::Materialized;
+                ordinary_columns.add(std::move(column));
+            }
+        }
     }
     else if (!flush_policy->shouldSkipAliasColumns())
         ordinary_columns.setAliases(alias_columns);
