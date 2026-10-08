@@ -46,9 +46,7 @@ void checkAllTypesAreAllowedInTable(const NamesAndTypesList & names_and_types)
 }
 
 
-/// Whether the definition is replayed (attach, DDL replay, Keeper recovery, Shared Catalog replay)
-/// rather than written by the user now. Refusing a replayed definition would block loading or retry forever.
-static bool isReplayedTableDefinition(
+bool isReplayedTableDefinition(
     LoadingStrictnessLevel mode, const ASTCreateQuery & query, const ContextPtr & local_context)
 {
     return !isFreshTableDefinition(mode, query.attach_short_syntax) || isSecondaryDDLReplay(local_context)
