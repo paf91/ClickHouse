@@ -86,23 +86,29 @@ def _last_exception(fuzzer_log: Path, error_code: int, error_name: str) -> str:
     found = ""
     # A closed block, kept once the next line turns out empty
     pending = ""
-    # Open candidate blocks; one gives up after 100 lines without its suffix
-    candidates: list[list[str]] = []
+    # The block of the newest marker, so a marker quoted shortly before cannot swallow the message.
+    # It is dropped past `max_bytes` without its suffix, which bounds memory, not lines.
+    block: list[str] | None = None
+    block_bytes = 0
+    max_bytes = 1 << 20
     with open(fuzzer_log, "r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.rstrip("\n")
             if pending:
                 found = found if line else pending
                 pending = ""
-            for block in candidates:
-                block.append(line)
             if marker in line:
-                candidates.append([line[line.index(marker) :]])
+                block, block_bytes = [], 0
+                line = line[line.index(marker) :]
+            if block is None:
+                continue
+            block.append(line)
+            block_bytes += len(line) + 1
             if line.endswith(endings):
-                # The newest open block, so a marker quoted shortly before cannot swallow the message
-                pending = "\n".join(candidates[-1]).strip() if candidates else ""
-                candidates = []
-            candidates = [block for block in candidates if len(block) < 100]
+                pending = "\n".join(block).strip()
+                block = None
+            elif block_bytes > max_bytes:
+                block = None
     return found
 
 
