@@ -84,6 +84,8 @@ def system_query_log_contains_search_pattern(search_pattern):
         int(
             node.query(
                 f"{base_search_query}'%{search_pattern}%' AND query NOT LIKE '{base_search_query}%'",
+                # Moves the LIKE alone to PREWHERE, whose log lines print the searched string without the rest of the probe.
+                settings={"apply_string_filters_during_scan": 1},
                 query_id=f"{probe_query_id_prefix}{uuid.uuid4()}",
             ).strip()
         )
