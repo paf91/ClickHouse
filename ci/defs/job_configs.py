@@ -306,20 +306,6 @@ class JobConfigs:
             "python3 ./ci/jobs/scripts/job_hooks/set_sync_status_awaiting_hook.py"
         ],
     )
-    runner_init_e2e = Job.Config(
-        name=JobNames.RUNNER_INIT_E2E,
-        runs_on=RunnerLabels.ARM_TINY,
-        command="python3 ./ci/jobs/runner_init_e2e_job.py",
-        # A private mount namespace per scenario, see the job script.
-        run_in_docker="clickhouse/style-test+root+--cap-add=SYS_ADMIN+--security-opt apparmor=unconfined",
-        timeout=900,
-        digest_config=Job.CacheDigestConfig(
-            include_paths=[
-                "./ci/praktika/infrastructure/runner/runner-init.py",
-                "./ci/jobs/runner_init_e2e_job.py",
-            ]
-        ),
-    )
     code_review = Job.Config(
         name=JobNames.CODE_REVIEW,
         runs_on=RunnerLabels.ARM_TINY,

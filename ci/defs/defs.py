@@ -474,7 +474,6 @@ class JobNames:
     BUILD_TOOLCHAIN = "Build Toolchain (PGO, BOLT)"
     UPDATE_TOOLCHAIN_DOCKERFILE = "Update Toolchain Dockerfile"
     COLLECT_CLICKHOUSE_PROFILES = "Collect ClickHouse Profiles (PGO, BOLT)"
-    RUNNER_INIT_E2E = "Runner init E2E"
 
 
 class ToolSet:
