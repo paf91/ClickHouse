@@ -5,6 +5,8 @@
 -- other keys, so a group must still be returned once.
 
 SET group_by_two_level_threshold = 1, group_by_two_level_threshold_bytes = 1;
+SET max_bytes_before_external_group_by = 10000000000, max_bytes_ratio_before_external_group_by = 0;
+SET optimize_aggregation_in_order = 0, distributed_aggregation_memory_efficient = 1;
 
 CREATE TABLE t_a (id UInt64, a UInt8, s String) ENGINE = MergeTree ORDER BY id;
 CREATE TABLE t_b (id UInt64) ENGINE = MergeTree ORDER BY id;
@@ -34,3 +36,14 @@ CREATE TABLE u_dist_b AS u_b ENGINE = Distributed(test_shard_localhost, currentD
 
 SELECT 'common type', id, s, count() FROM merge(currentDatabase(), '^u_(a|dist_b)$') GROUP BY id, s ORDER BY ALL;
 SELECT 'common type LowCardinality', s, count() FROM merge(currentDatabase(), '^u_(c|dist_b)$') GROUP BY s ORDER BY ALL;
+
+CREATE TABLE v_x (x UInt64, y UInt64 ALIAS x, z UInt64 ALIAS x) ENGINE = MergeTree ORDER BY x;
+INSERT INTO v_x SELECT number FROM numbers(10);
+CREATE TABLE v_dist AS v_x ENGINE = Distributed(test_cluster_two_shards, currentDatabase(), v_x);
+
+-- The shards group by `x` alone: the first one stays single-level, the second one becomes two-level.
+SELECT 'alias keys', y, z, count() FROM merge(currentDatabase(), '^v_dist$') WHERE x = 0 OR shardNum() = 2
+GROUP BY y, z ORDER BY ALL SETTINGS group_by_two_level_threshold = 2, group_by_two_level_threshold_bytes = 50000000;
+SELECT 'alias keys not memory efficient', y, z, count() FROM merge(currentDatabase(), '^v_dist$') WHERE x = 0 OR shardNum() = 2
+GROUP BY y, z ORDER BY ALL SETTINGS group_by_two_level_threshold = 2, group_by_two_level_threshold_bytes = 50000000,
+    distributed_aggregation_memory_efficient = 0;
