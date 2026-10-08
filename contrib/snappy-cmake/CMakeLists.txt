@@ -27,6 +27,12 @@ else ()
     set (SNAPPY_HAVE_X86_CRC32 0)
 endif ()
 
+if (ARCH_AMD64 AND X86_ARCH_LEVEL VERSION_GREATER_EQUAL 3)
+    set (SNAPPY_HAVE_BMI2 1)
+else ()
+    set (SNAPPY_HAVE_BMI2 0)
+endif ()
+
 if (ARCH_AARCH64 AND NOT NO_ARMV81_OR_HIGHER)
     set (SNAPPY_HAVE_NEON 1)
 else ()
