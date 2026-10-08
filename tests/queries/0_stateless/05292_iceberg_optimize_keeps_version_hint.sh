@@ -11,12 +11,16 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TABLE="t_${CLICKHOUSE_DATABASE}_${RANDOM}"
 TABLE_PATH="${USER_FILES_PATH}/${TABLE}/"
 
-# Compaction requires format version 2, pinned explicitly.
 ${CLICKHOUSE_CLIENT} --query "
     CREATE TABLE ${TABLE} (id Int64)
     ENGINE = IcebergLocal('${TABLE_PATH}', 'Parquet')
-    SETTINGS iceberg_format_version = 2
+    SETTINGS iceberg_format_version = 2,
+             allow_experimental_iceberg_compaction = 1,
+             iceberg_compaction_delay_bias = 86400
 "
+
+VERSION_HINT="${TABLE_PATH}metadata/version-hint.text"
+printf '1' > "${VERSION_HINT}" || exit 1
 
 ${CLICKHOUSE_CLIENT} --allow_insert_into_iceberg=1 --query \
     "INSERT INTO ${TABLE} VALUES (1), (2), (3)"
@@ -26,11 +30,15 @@ ${CLICKHOUSE_CLIENT} --allow_insert_into_iceberg=1 --mutations_sync=2 --query \
 ${CLICKHOUSE_CLIENT} --query "SELECT arraySort(groupArray(id)) FROM ${TABLE}"
 test -f "${TABLE_PATH}metadata/v3.metadata.json"; echo $?
 
-
-VERSION_HINT="${TABLE_PATH}metadata/version-hint.text"
-printf '3' > "${VERSION_HINT}" || exit 1
-
 ${CLICKHOUSE_CLIENT} --allow_experimental_iceberg_compaction=1 --query "OPTIMIZE TABLE ${TABLE}" >/dev/null || exit 1
+
+# Cloud can return from `OPTIMIZE TABLE` before the new metadata and hint become visible.
+for ((attempt = 0; attempt < 30; ++attempt)); do
+    if test -f "${TABLE_PATH}metadata/v4.metadata.json" && test -f "${VERSION_HINT}" && test "$(<"${VERSION_HINT}")" = 4; then
+        break
+    fi
+    sleep 1
+done
 
 test -f "${VERSION_HINT}"; echo $?
 printf '%s\n' "$(<"${VERSION_HINT}")"
