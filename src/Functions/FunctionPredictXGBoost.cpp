@@ -248,7 +248,10 @@ private:
         {
             const Tuple & key_value = entry.safeGet<Tuple>();
             const String & key = key_value[0].safeGet<String>();
-            params.emplace(key, getIntegerParamValue(key, key_value[1]));
+            /// A `Map` may repeat a key, and silently keeping one of the values would hide a contradictory call.
+            if (!params.emplace(key, getIntegerParamValue(key, key_value[1])).second)
+                throw Exception(
+                    ErrorCodes::BAD_ARGUMENTS, "Prediction parameter '{}' of function '{}' is given more than once", key, name);
         }
         return params;
     }

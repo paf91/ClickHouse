@@ -2,8 +2,8 @@
 -- no-fasttest: needs the XGBoost contrib, which is not built in the fast test.
 
 -- `system.dictionaries.query_count` of an XGBoost dictionary counts the rows passed to the model by
--- `predictXGBoost`. A call whose features are all constant is evaluated once per block, so it counts one row
--- per block. `max_block_size` is pinned so that the 1000 rows below are a single block.
+-- `predictXGBoost`. A call whose features are all constant is evaluated at most once per block, so it counts
+-- at most one row per block, never one per row. `max_block_size` is pinned to make the block count known.
 
 SET enable_xgboost = 1;
 
@@ -31,9 +31,11 @@ SELECT 'One row per predicted row';
 SELECT sum(isFinite(predictXGBoost('model_05264_xgb', toFloat64(number), 2.0))) FROM numbers(1000) SETTINGS max_block_size = 65536;
 SELECT query_count, found_rate FROM system.dictionaries WHERE database = currentDatabase() AND name = 'model_05264_xgb';
 
-SELECT 'All features constant: evaluated once per block';
-SELECT sum(isFinite(predictXGBoost('model_05264_xgb', 1.0, 2.0))) FROM numbers(1000) SETTINGS max_block_size = 65536;
-SELECT query_count, found_rate FROM system.dictionaries WHERE database = currentDatabase() AND name = 'model_05264_xgb';
+SELECT 'All features constant: evaluated at most once per block';
+-- 1000 rows in blocks of 100 are 10 blocks. The planner may also fold the call into a single evaluation for the
+-- whole query, so the increase is checked to be between one and the number of blocks, rather than an exact count.
+SELECT sum(isFinite(predictXGBoost('model_05264_xgb', 1.0, 2.0))) FROM numbers(1000) SETTINGS max_block_size = 100;
+SELECT query_count - 1000 BETWEEN 1 AND 10, found_rate FROM system.dictionaries WHERE database = currentDatabase() AND name = 'model_05264_xgb';
 
 DROP DICTIONARY model_05264_xgb;
 DROP TABLE training_05264;

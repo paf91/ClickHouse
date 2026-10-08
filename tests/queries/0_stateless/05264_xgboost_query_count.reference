@@ -5,6 +5,6 @@ No rows to predict
 One row per predicted row
 1000
 1000	1
-All features constant: evaluated once per block
+All features constant: evaluated at most once per block
 1000
-1001	1
+1	1

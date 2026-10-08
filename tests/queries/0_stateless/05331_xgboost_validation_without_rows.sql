@@ -25,6 +25,7 @@ SELECT predictXGBoost('model_05331_xgb', toFloat64(number), 2.0, 3.0) FROM numbe
 SELECT predictXGBoost('model_05331_xgb', toFloat64(number), 2.0, map('type', 2)) FROM numbers(0); -- { serverError BAD_ARGUMENTS }
 SELECT predictXGBoost('model_05331_xgb', toFloat64(number), 2.0, map('not_a_predict_param', 1)) FROM numbers(0); -- { serverError BAD_ARGUMENTS }
 SELECT predictXGBoost('model_05331_xgb', toFloat64(number), 2.0, map('iteration_end', -1)) FROM numbers(0); -- { serverError BAD_ARGUMENTS }
+SELECT predictXGBoost('model_05331_xgb', toFloat64(number), 2.0, map('iteration_end', 0, 'iteration_end', 1)) FROM numbers(0); -- { serverError BAD_ARGUMENTS }
 
 SELECT 'A valid call over no rows returns nothing and does not load the dictionary';
 SELECT predictXGBoost('model_05331_xgb', toFloat64(number), 2.0, map('type', 1)) FROM numbers(0);
@@ -36,6 +37,7 @@ SELECT predictXGBoost('model_05331_xgb', 1.0, 2.0, 3.0); -- { serverError BAD_AR
 SELECT predictXGBoost('model_05331_xgb', 1.0, 2.0, map('type', 2)); -- { serverError BAD_ARGUMENTS }
 SELECT predictXGBoost('model_05331_xgb', 1.0, 2.0, map('not_a_predict_param', 1)); -- { serverError BAD_ARGUMENTS }
 SELECT predictXGBoost('model_05331_xgb', 1.0, 2.0, map('iteration_end', -1)); -- { serverError BAD_ARGUMENTS }
+SELECT predictXGBoost('model_05331_xgb', 1.0, 2.0, map('iteration_end', 0, 'iteration_end', 1)); -- { serverError BAD_ARGUMENTS }
 
 -- The upper bound of `iteration_end` needs the trained model, so it is checked when there are rows to predict.
 SELECT predictXGBoost('model_05331_xgb', 1.0, 2.0, map('iteration_end', 11)); -- { serverError BAD_ARGUMENTS }
