@@ -4561,8 +4561,7 @@ ActionsDAG::NodeRawConstPtrs ActionsDAG::extractConjunctionAtoms(const Node * pr
 ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter_node, const NameSet & available_inputs) const
 {
     /// The projection evaluates the filter on rows the main read may skip, and a weakened `AND` evaluates its later
-    /// operands on more rows. So the result of walking `OR` is used only if nothing in it can throw or give another
-    /// value when evaluated again: `AND`, `OR`, and comparisons or `IN` over native numbers.
+    /// operands on more rows, so the `OR` walk is kept only if its result cannot throw or change on re-evaluation.
     auto restricted = restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/true);
 
     auto is_number = [](const Node * node) { return isNativeNumber(removeLowCardinalityAndNullable(node->result_type)); };
@@ -4600,7 +4599,7 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputsImpl(
       * branch condition the weakened `AND` makes the whole predicate stronger - `NOT (a AND b)` becomes
       * `NOT (a)` - and rows that do match the filter are then pruned away.
       *
-      * So collect the `AND`s reached from the filter through `AND`s and `OR`s only, which is where the
+      * So collect the `AND`s reached from the filter through `AND`s (and `OR`s with `walk_or`) only, which is where the
       * polarity is known to be positive. A node with more than one parent may also be reachable through
       * some other function, so require a single parent while descending. The substitution is recorded
       * against the child, so the child must have a single parent too.
