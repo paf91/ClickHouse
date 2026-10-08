@@ -2026,7 +2026,16 @@ PostgreSQLHandler::CopyQueryResult PostgreSQLHandler::processCopyQuery(const Str
             /// catalog probe for a table that does not exist) never enters the loop, and a `WriteBuffer` must
             /// not reach its destructor neither finalized nor canceled. `finalize` is idempotent, so this is
             /// a no-op when the last row already finalized the buffer.
+            ///
+            /// With no rows the output format has not written its prefix either - for the `*WithNames`
+            /// formats that is the column names line a `HEADER` asks for, which must be sent even for an
+            /// empty result. Finalizing the format writes it (and nothing at all for the formats without a
+            /// prefix).
+            if (rows_count == 0)
+                format_ptr->finalize();
             output_buffer.finalize();
+            if (rows_count == 0 && !result_buf.empty())
+                message_transport->send(PostgreSQLProtocol::Messaging::CopyOutData(result_buf));
         }
         catch (...)
         {
