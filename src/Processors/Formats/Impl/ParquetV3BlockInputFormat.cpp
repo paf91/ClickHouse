@@ -184,6 +184,13 @@ std::vector<std::pair<size_t, Field>> ParquetV3BlockInputFormat::getTopKBestValu
     return res;
 }
 
+bool ParquetV3BlockInputFormat::isTopKFilterApplied() const
+{
+    /// The reader installs `__topKFilter` only for a file that stores the sort column.
+    return reader && reader->reader.format_filter_info && reader->reader.format_filter_info->top_k_filter
+        && reader->reader.top_k_column_is_read;
+}
+
 void ParquetV3BlockInputFormat::setBucketsToRead(const FileBucketInfoPtr & buckets_to_read_)
 {
     if (reader)
