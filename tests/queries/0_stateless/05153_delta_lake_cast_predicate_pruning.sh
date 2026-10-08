@@ -343,6 +343,8 @@ check t "toDate(d) = toDate32('2026-01-01')"
 check t "toDate(d) != toDate32('2026-01-01')"
 check t "toDate32(d) < toDate('2026-01-02')"
 check t "toDate(d) = toDate32('2205-06-08')"
+check t "toDate(d) != toDate32('2205-06-08')"
+check t "toDate(d) < toDate32('2205-06-08')"
 
 # The snapshot scan must build the engine predicate with the query's overflow settings. A nullable
 # source hides the out-of-range RHS parse from zero-row header analysis, so if pruning coerced the
