@@ -314,6 +314,13 @@ endif()
 list(APPEND AWS_SOURCES ${AWS_IO_SRC} ${AWS_IO_OS_SRC})
 list(APPEND AWS_PUBLIC_INCLUDES "${AWS_IO_DIR}/include/")
 
+# Since aws-c-io 0.27 the TLS channel handler installs a backend vtable at library init and aborts
+# ("No TLS implementation available.") when neither s2n, SecureTransport nor SChannel is compiled in.
+# ClickHouse does TLS through Poco (PocoHTTPClientFactory, tlsConnectionOptions_create_fn returns nullptr),
+# so build this one file in BYO_CRYPTO mode: init/cleanup become no-ops and the TLS context/handler
+# constructors are never reached. The remaining TLS symbols come from aws_stubs.cpp.
+set_source_files_properties("${AWS_IO_DIR}/source/tls_channel_handler.c" PROPERTIES COMPILE_DEFINITIONS BYO_CRYPTO)
+
 
 # aws-crt-cpp
 file(GLOB AWS_CRT_SRC
