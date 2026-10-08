@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstring>
 #include <string>
 
@@ -35,7 +36,9 @@ void decodeHexStrings(
     UInt64 * dst_offsets,
     size_t row_count);
 
-/// Encode 16 bytes stored in little-endian order to 32 hex chars (used for CityHash128).
+/// Encode the in-memory representation of `CityHash_v1_0_2::uint128` (`low64` followed by `high64`,
+/// each in native byte order) to 32 hex chars: `high64` first, then `low64`. On big-endian hosts
+/// the scalar implementation reads both halves as native integers, which matches that layout.
 void encodeHex16LEUpper(uint8_t * dst, const uint8_t * src);
 void encodeHex16LELower(uint8_t * dst, const uint8_t * src);
 
@@ -236,6 +239,8 @@ namespace impl
         template <bool Upper>
         static void hex(const CityHashUInt128 & uint_, char * out)
         {
+            static_assert(sizeof(CityHashUInt128) == 16);
+            static_assert(offsetof(CityHashUInt128, low64) == 0 && offsetof(CityHashUInt128, high64) == 8);
             auto * dst = reinterpret_cast<uint8_t *>(out);
             const auto * input = reinterpret_cast<const uint8_t *>(&uint_);
             if constexpr (Upper)
