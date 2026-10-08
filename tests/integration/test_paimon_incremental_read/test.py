@@ -730,7 +730,10 @@ def test_paimon_incremental_read_transient_error_does_not_burn_snapshot(started_
     # cannot have been expired.
     _run_writer(writer_container_id, warehouse_uri=warehouse_uri, start_id=1, rows_per_commit=10, commit_times=2)
     snapshot_file = f"{table_path}/snapshot/snapshot-2"
-    _warehouse_shell(writer_container_id, f"cp {snapshot_file} {snapshot_file}.bak")
+    # The backup is kept outside `snapshot/`, so that listing the snapshot directory never
+    # sees it as a snapshot.
+    snapshot_backup = f"{table_path}/snapshot-2.bak"
+    _warehouse_shell(writer_container_id, f"cp {snapshot_file} {snapshot_backup}")
     _warehouse_shell(writer_container_id, f"echo not-json > {snapshot_file}")
 
     zk = cluster.get_kazoo_client("zoo1")
@@ -756,7 +759,7 @@ def test_paimon_incremental_read_transient_error_does_not_burn_snapshot(started_
         )
 
         # The snapshot becomes readable again: nothing was lost.
-        _warehouse_shell(writer_container_id, f"mv {snapshot_file}.bak {snapshot_file}")
+        _warehouse_shell(writer_container_id, f"mv {snapshot_backup} {snapshot_file}")
         _wait_until_query_result(count_query, "20\n", database="default", retries=120)
         assert zk.get(f"{keeper_path}/committed_snapshot")[0] == b"3"
     finally:
@@ -996,6 +999,9 @@ def test_paimon_incremental_read_missing_snapshot_is_not_expiration(started_clus
     warehouse_dir = f"{USER_FILES_PATH}/{warehouse_name}"
     table_path = f"{warehouse_dir}/test.db/test_table"
     snapshot_file = f"{table_path}/snapshot/snapshot-3"
+    # The backup is kept outside `snapshot/`, so that listing the snapshot directory never
+    # sees it as a snapshot.
+    snapshot_backup = f"{table_path}/snapshot-3.bak"
     keeper_path = f"/clickhouse/paimon_hole_{uuid.uuid4().hex}"
 
     _clean_warehouse(writer_container_id, warehouse_dir)
@@ -1009,7 +1015,7 @@ def test_paimon_incremental_read_missing_snapshot_is_not_expiration(started_clus
     # Snapshots 2, 3 and 4. Snapshot 1 stays, so earliest is 1 and the missing snapshot 3
     # sits above it - it cannot be explained by expiration.
     _run_writer(writer_container_id, warehouse_uri=warehouse_uri, start_id=1, rows_per_commit=10, commit_times=3)
-    _warehouse_shell(writer_container_id, f"cp {snapshot_file} {snapshot_file}.bak")
+    _warehouse_shell(writer_container_id, f"cp {snapshot_file} {snapshot_backup}")
     _warehouse_shell(writer_container_id, f"rm -f {snapshot_file}")
 
     zk = cluster.get_kazoo_client("zoo1")
@@ -1031,7 +1037,7 @@ def test_paimon_incremental_read_missing_snapshot_is_not_expiration(started_clus
         )
 
         # Put it back: nothing was lost, all three snapshots are delivered.
-        _warehouse_shell(writer_container_id, f"mv {snapshot_file}.bak {snapshot_file}")
+        _warehouse_shell(writer_container_id, f"mv {snapshot_backup} {snapshot_file}")
         _wait_until_query_result(count_query, "30\n", database="default", retries=120)
         assert zk.get(f"{keeper_path}/committed_snapshot")[0] == b"4"
     finally:
