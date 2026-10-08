@@ -23,6 +23,7 @@
 #include <Functions/indexHint.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/castColumn.h>
+#include <Interpreters/convertFieldToType.h>
 #include <Interpreters/ArrayJoinAction.h>
 #include <Interpreters/SetSerialization.h>
 #include <IO/WriteBufferFromString.h>
@@ -4580,12 +4581,20 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter
         /// another DAG of which this one is a clone. Only a parent inside the subgraph can observe a
         /// substitution anyway, because that is all Phase 2 copies.
         std::stack<const Node *> to_visit;
+        bool filter_may_throw = false;
         std::unordered_set<const Node *> visited{filter_node};
         to_visit.push(filter_node);
         while (!to_visit.empty())
         {
             const auto * node = to_visit.top();
             to_visit.pop();
+            if (node->type == ActionType::FUNCTION && node->function_base)
+            {
+                DataTypesWithConstInfo arguments;
+                for (const auto * child : node->children)
+                    arguments.push_back({child->result_type, child->column != nullptr});
+                filter_may_throw |= node->function_base->isSuitableForShortCircuitArgumentsExecution(arguments);
+            }
             for (const auto * child : node->children)
             {
                 ++num_parents[child];
@@ -4601,9 +4610,10 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter
         };
 
         /// `OR` is monotone in each operand like `AND`, also with NULLs, so an `AND` under it keeps the polarity.
+        /// A weakened `AND` evaluates its later operands on more rows, so a filter that may throw is not walked through `OR`.
         auto is_and_or_or = [&](const Node * candidate)
         {
-            return is_function(candidate, "and") || is_function(candidate, "or");
+            return is_function(candidate, "and") || (!filter_may_throw && is_function(candidate, "or"));
         };
 
         /// An alias is the same value under a new name, so it keeps the polarity of what it wraps. A filter
@@ -4668,14 +4678,18 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter
                     {
                         const auto & name = frame.node->function_base->getName();
 
-                        /// Replace non-computable child in "and" with constant true.
+                        /// Replace non-computable child in "and" with constant true. `Nullable(Nothing)` has no true value.
                         if (name == "and" && conjuncts_safe_to_drop.contains(frame.node) && num_parents[child] == 1)
                         {
-                            auto const_column = child->result_type->createColumnConst(0, 1);
-                            copy_map[child] = &actions.addColumn(std::move(const_column), child->result_type, child->result_name);
+                            Field true_value = convertFieldToType(Field(static_cast<UInt64>(1)), *child->result_type);
+                            if (!true_value.isNull())
+                            {
+                                auto const_column = child->result_type->createColumnConst(0, true_value);
+                                copy_map[child] = &actions.addColumn(std::move(const_column), child->result_type, child->result_name);
 
-                            /// Mark as now computable (since we substituted it)
-                            it->second = true;
+                                /// Mark as now computable (since we substituted it)
+                                it->second = true;
+                            }
                         }
                     }
                 }

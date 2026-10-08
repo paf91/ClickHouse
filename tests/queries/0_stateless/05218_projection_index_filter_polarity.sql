@@ -31,6 +31,11 @@ SELECT count() FROM t_projection_polarity WHERE a = 1 AND multiIf(a = 1 AND b = 
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND b AND b = 7;
 -- A `NOT` under an `OR` is still not weakened.
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND (x = 5 OR NOT (a = 1 AND b = 2));
+-- A conjunct whose type has no true value stays in place; a float conjunct is replaced with a float true.
+SELECT count() FROM t_projection_polarity WHERE (a = 1 AND if(b = 1, NULL, NULL)) OR a = 2;
+SELECT count() FROM t_projection_polarity WHERE a = 1 AND toFloat64(b);
+-- `throwIf` runs only where `b = 1`, so `b = 1` must not be weakened under the `OR`.
+SELECT count() FROM t_projection_polarity WHERE (a <= 2 AND b = 1 AND throwIf(a = 0) = 0) OR a = 2;
 
 -- A conjunct of an `AND` read with positive polarity must still be weakened, or the index stops pruning.
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND b = 7;
