@@ -4568,7 +4568,7 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter
       * branch condition the weakened `AND` makes the whole predicate stronger - `NOT (a AND b)` becomes
       * `NOT (a)` - and rows that do match the filter are then pruned away.
       *
-      * So collect the chain of `AND`s hanging directly off the filter, which is the only place where the
+      * So collect the `AND`s reached from the filter through `AND`s and `OR`s only, which is where the
       * polarity is known to be positive. A node with more than one parent may also be reachable through
       * some other function, so require a single parent while descending. The substitution is recorded
       * against the child, so the child must have a single parent too.
@@ -4594,10 +4594,16 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter
             }
         }
 
-        auto is_and = [](const Node * candidate)
+        auto is_function = [](const Node * candidate, std::string_view name)
         {
             return candidate->type == ActionType::FUNCTION && candidate->function_base
-                && candidate->function_base->getName() == "and";
+                && candidate->function_base->getName() == name;
+        };
+
+        /// `OR` is monotone in each operand like `AND`, also with NULLs, so an `AND` under it keeps the polarity.
+        auto is_and_or_or = [&](const Node * candidate)
+        {
+            return is_function(candidate, "and") || is_function(candidate, "or");
         };
 
         /// An alias is the same value under a new name, so it keeps the polarity of what it wraps. A filter
@@ -4609,20 +4615,20 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter
             return node;
         };
 
-        if (const auto * root = skip_aliases(filter_node); is_and(root))
+        if (const auto * root = skip_aliases(filter_node); is_and_or_or(root))
             to_visit.push(root);
 
         while (!to_visit.empty())
         {
-            const auto * and_node = to_visit.top();
+            const auto * node = to_visit.top();
             to_visit.pop();
 
-            if (!conjuncts_safe_to_drop.insert(and_node).second)
-                continue;
+            if (is_function(node, "and"))
+                conjuncts_safe_to_drop.insert(node);
 
-            for (const auto * child : and_node->children)
+            for (const auto * child : node->children)
                 if (num_parents[child] == 1)
-                    if (const auto * nested = skip_aliases(child); is_and(nested))
+                    if (const auto * nested = skip_aliases(child); is_and_or_or(nested))
                         to_visit.push(nested);
         }
     }

@@ -29,6 +29,8 @@ SELECT count() FROM t_projection_polarity WHERE a = 1 AND (a = 1 AND b = 2) = 0;
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND multiIf(a = 1 AND b = 2, 0, 1);
 -- `b` is read as a condition by one conjunct and as a value by another, through the same input node.
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND b AND b = 7;
+-- A `NOT` under an `OR` is still not weakened.
+SELECT count() FROM t_projection_polarity WHERE a = 1 AND (x = 5 OR NOT (a = 1 AND b = 2));
 
 -- A conjunct of an `AND` read with positive polarity must still be weakened, or the index stops pruning.
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND b = 7;
@@ -40,6 +42,11 @@ SETTINGS log_comment = '05218_pruning_off', optimize_use_projection_filtering = 
 -- nested `AND` weakens `b = 7`; dropping that whole conjunct instead is still correct but stops pruning.
 SELECT count() FROM (SELECT * FROM t_projection_polarity WHERE x = 5 AND b = 7) WHERE a = 1
 SETTINGS log_comment = '05218_pruning_alive_nested', query_plan_merge_filters = 0;
+-- `OR` is monotone too, so an `AND` under it must still be weakened.
+SELECT count() FROM t_projection_polarity WHERE (a = 1 AND x = 5 AND b = 7) OR (a = 2 AND x = 6 AND b = 8)
+SETTINGS log_comment = '05218_pruning_alive_or';
+SELECT count() FROM t_projection_polarity WHERE a = 1 AND ((x = 5 AND b = 7) OR (x = 6 AND b = 8))
+SETTINGS log_comment = '05218_pruning_alive_or_nested';
 
 SYSTEM FLUSH LOGS query_log;
 
@@ -49,9 +56,12 @@ SYSTEM FLUSH LOGS query_log;
 SELECT
     maxIf(read_rows, log_comment = '05218_pruning_alive') <= 2 * 8192 AS pruned,
     minIf(read_rows, log_comment = '05218_pruning_off') >= 2000000 AS not_pruned,
-    maxIf(read_rows, log_comment = '05218_pruning_alive_nested') <= 2 * 8192 AS pruned_nested
+    maxIf(read_rows, log_comment = '05218_pruning_alive_nested') <= 2 * 8192 AS pruned_nested,
+    maxIf(read_rows, log_comment = '05218_pruning_alive_or') <= 2 * 8192 AS pruned_or,
+    maxIf(read_rows, log_comment = '05218_pruning_alive_or_nested') <= 2 * 8192 AS pruned_or_nested
 FROM system.query_log
 WHERE current_database = currentDatabase() AND type = 'QueryFinish'
-  AND log_comment IN ('05218_pruning_alive', '05218_pruning_off', '05218_pruning_alive_nested');
+  AND log_comment IN ('05218_pruning_alive', '05218_pruning_off', '05218_pruning_alive_nested',
+                      '05218_pruning_alive_or', '05218_pruning_alive_or_nested');
 
 DROP TABLE t_projection_polarity;
