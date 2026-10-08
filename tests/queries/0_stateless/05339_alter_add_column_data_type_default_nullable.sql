@@ -29,3 +29,15 @@ ALTER TABLE t_alter_default_nullable MODIFY COLUMN a Array(Int64); -- { serverEr
 SELECT name, type FROM system.columns WHERE database = currentDatabase() AND table = 't_alter_default_nullable' AND name IN ('k', 'a', 'k_off', 'k_off_not_null') ORDER BY position;
 SELECT i, k FROM t_alter_default_nullable ORDER BY i;
 DROP TABLE t_alter_default_nullable;
+
+SET data_type_default_nullable = 0;
+DROP TABLE IF EXISTS t_modify_state_version;
+CREATE TABLE t_modify_state_version (i Int32, t Tuple(s AggregateFunction(quantileDeterministic, UInt64, UInt64)), u Tuple(s AggregateFunction(quantileDeterministic, UInt64, UInt64))) ENGINE = MergeTree ORDER BY i;
+ALTER TABLE t_modify_state_version MODIFY COLUMN u Nullable(Tuple(s AggregateFunction(quantileDeterministic, UInt64, UInt64)));
+-- With the setting, MODIFY COLUMN gives the same type as the explicit Nullable: the state version is not pinned.
+SET data_type_default_nullable = 1;
+ALTER TABLE t_modify_state_version MODIFY COLUMN t Tuple(s AggregateFunction(quantileDeterministic, UInt64, UInt64));
+DETACH TABLE t_modify_state_version;
+ATTACH TABLE t_modify_state_version;
+SELECT name, type FROM system.columns WHERE database = currentDatabase() AND table = 't_modify_state_version' ORDER BY position;
+DROP TABLE t_modify_state_version;

@@ -17,3 +17,6 @@ k_off_not_null	Int64
 1	\N
 2	\N
 3	30
+i	Int32
+t	Nullable(Tuple(s AggregateFunction(quantileDeterministic, UInt64, UInt64)))
+u	Nullable(Tuple(s AggregateFunction(quantileDeterministic, UInt64, UInt64)))

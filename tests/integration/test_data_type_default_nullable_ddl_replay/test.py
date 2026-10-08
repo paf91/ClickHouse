@@ -20,6 +20,7 @@ node2 = cluster.add_instance(
 )
 
 EXPECTED = "i\tInt32\nk\tInt32\nm\tNullable(Int32)\n"
+EXPECTED_MODIFIED = "i\tInt32\nk\tInt64\nm\tNullable(Int64)\n"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -45,6 +46,10 @@ def test_on_cluster():
     node2.query("ALTER TABLE default.t ON CLUSTER test_cluster ADD COLUMN m Int32")
     assert column_types(node1, "default") == EXPECTED
     assert column_types(node2, "default") == EXPECTED
+    node1.query("ALTER TABLE default.t ON CLUSTER test_cluster MODIFY COLUMN k Int64")
+    node2.query("ALTER TABLE default.t ON CLUSTER test_cluster MODIFY COLUMN m Int64")
+    assert column_types(node1, "default") == EXPECTED_MODIFIED
+    assert column_types(node2, "default") == EXPECTED_MODIFIED
     node1.query("DROP TABLE default.t ON CLUSTER test_cluster SYNC")
 
 
@@ -60,5 +65,11 @@ def test_replicated_database():
         node.query("SYSTEM SYNC DATABASE REPLICA rdb")
     assert column_types(node1, "rdb") == EXPECTED
     assert column_types(node2, "rdb") == EXPECTED
+    node1.query("ALTER TABLE rdb.t MODIFY COLUMN k Int64")
+    node2.query("ALTER TABLE rdb.t MODIFY COLUMN m Int64")
+    for node in [node1, node2]:
+        node.query("SYSTEM SYNC DATABASE REPLICA rdb")
+    assert column_types(node1, "rdb") == EXPECTED_MODIFIED
+    assert column_types(node2, "rdb") == EXPECTED_MODIFIED
     for node in [node1, node2]:
         node.query("DROP DATABASE rdb SYNC")
