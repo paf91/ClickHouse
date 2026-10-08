@@ -412,6 +412,11 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
     /// Whether the string literal about to be consumed carries PostgreSQL's escape-string syntax
     /// (`E'...'`, e.g. `DELIMITER E'\t'`). The `E` and the literal arrive as two tokens.
     bool pending_value_is_escape_string = false;
+    /// Nesting depth of parentheses: inside the parenthesized option list (`WITH (HEADER true, ...)`)
+    /// every option is a name followed by its own optional value, while the legacy unparenthesized
+    /// grammar has a bare `HEADER` that takes no value and may be followed directly by another option
+    /// (`CSV HEADER DELIMITER ';'`).
+    size_t paren_depth = 0;
 
     while (!pos->isEnd())
     {
@@ -434,6 +439,15 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
             /// `DELIMITER csv` is malformed, not `DELIMITER` followed by `CSV`.
             if ((pending == PendingOption::Delimiter || pending == PendingOption::Null || pending == PendingOption::Quote)
                 && !is_escape_string_prefix && lower != "as")
+            {
+                stray_literal = true;
+                pending = PendingOption::None;
+            }
+            /// Likewise, inside the parenthesized option list a bare word right after `HEADER` is its
+            /// value, and the only valid values are booleans: `WITH (HEADER csv)` is malformed, not
+            /// `HEADER` followed by `FORMAT csv`.
+            else if (pending == PendingOption::Header && paren_depth > 0
+                && lower != "true" && lower != "on" && lower != "false" && lower != "off")
             {
                 stray_literal = true;
                 pending = PendingOption::None;
@@ -529,6 +543,10 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
         else
         {
             /// Parentheses, commas and other punctuation carry no option value.
+            if (pos->type == TokenType::OpeningRoundBracket)
+                ++paren_depth;
+            else if (pos->type == TokenType::ClosingRoundBracket && paren_depth > 0)
+                --paren_depth;
             ++pos;
         }
     }
