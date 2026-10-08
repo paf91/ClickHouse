@@ -45,9 +45,9 @@ extern const SettingsBool allow_suspicious_codecs;
 }
 
 
-void CompressionCodecFactory::checkCodecIsNotColumnLevelOnly(const String & family_name)
+void CompressionCodecFactory::checkCodecIsNotColumnLevelOnly(const String & family_name) const
 {
-    if (equalsCaseInsensitive(family_name, "Quantized") || equalsCaseInsensitive(family_name, DEFAULT_CODEC_NAME))
+    if (equalsCaseInsensitive(family_name, DEFAULT_CODEC_NAME) || isDeclarativeCodec(family_name))
         throw Exception(ErrorCodes::BAD_ARGUMENTS,
             "Codec {} can only be specified in the column definition", family_name);
 }
@@ -74,16 +74,16 @@ void forEachCodecFamilyNameInChain(const ASTPtr & ast, Check && check)
 
 }
 
-void CompressionCodecFactory::checkCodecChainIsNotColumnLevelOnly(const ASTPtr & ast)
+void CompressionCodecFactory::checkCodecChainIsNotColumnLevelOnly(const ASTPtr & ast) const
 {
-    forEachCodecFamilyNameInChain(ast, [](const String & family_name) { checkCodecIsNotColumnLevelOnly(family_name); });
+    forEachCodecFamilyNameInChain(ast, [this](const String & family_name) { checkCodecIsNotColumnLevelOnly(family_name); });
 }
 
-void CompressionCodecFactory::checkCodecChainIsNotDeclarative(const ASTPtr & ast)
+void CompressionCodecFactory::checkCodecChainIsNotDeclarative(const ASTPtr & ast) const
 {
-    forEachCodecFamilyNameInChain(ast, [](const String & family_name)
+    forEachCodecFamilyNameInChain(ast, [this](const String & family_name)
     {
-        if (equalsCaseInsensitive(family_name, "Quantized"))
+        if (isDeclarativeCodec(family_name))
             throw Exception(ErrorCodes::BAD_ARGUMENTS,
                 "Codec {} can only be specified in the column definition", family_name);
     });

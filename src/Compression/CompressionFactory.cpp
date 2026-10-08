@@ -248,18 +248,39 @@ CompressionCodecPtr CompressionCodecFactory::getImpl(const String & family_name,
     if (equalsCaseInsensitive(family_name, "Multiple"))
         throw Exception(ErrorCodes::UNKNOWN_CODEC, "Codec Multiple cannot be specified directly");
 
-    const auto family_and_creator = family_name_with_codec.find(family_name);
-
-    if (family_and_creator == family_name_with_codec.end())
+    const String * canonical_family_name = tryGetCanonicalFamilyName(family_name);
+    if (!canonical_family_name)
         throw Exception(ErrorCodes::UNKNOWN_CODEC, "Unknown codec family: {}", family_name);
 
+    const auto family_and_creator = family_name_with_codec.find(*canonical_family_name);
+
     return family_and_creator->second(arguments, column_type);
+}
+
+const String * CompressionCodecFactory::tryGetCanonicalFamilyName(const String & family_name) const
+{
+    if (const auto exact = family_name_with_codec.find(family_name); exact != family_name_with_codec.end())
+        return &exact->first;
+
+    const auto it = lowercase_family_name_to_canonical.find(Poco::toLower(family_name));
+    if (it == lowercase_family_name_to_canonical.end())
+        return nullptr;
+    return &it->second;
+}
+
+bool CompressionCodecFactory::isDeclarativeCodec(const String & family_name) const
+{
+    const String * canonical_family_name = tryGetCanonicalFamilyName(family_name);
+    if (!canonical_family_name)
+        return false;
+    return family_name_with_properties.at(*canonical_family_name).is_declarative;
 }
 
 void CompressionCodecFactory::registerCompressionCodecWithType(
     const String & family_name,
     std::optional<uint8_t> byte_code,
     CreatorWithType creator,
+    CompressionCodecFamilyProperties properties,
     std::source_location source)
 {
     if (creator == nullptr)
@@ -269,7 +290,12 @@ void CompressionCodecFactory::registerCompressionCodecWithType(
     if (!family_name_with_codec.emplace(family_name, creator).second)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "CompressionCodecFactory: the codec family name '{}' is not unique", family_name);
 
+    if (!lowercase_family_name_to_canonical.emplace(Poco::toLower(family_name), family_name).second)
+        throw Exception(ErrorCodes::LOGICAL_ERROR,
+                        "CompressionCodecFactory: the codec family name '{}' differs only in case from another one", family_name);
+
     family_name_with_source.emplace(family_name, source.file_name());
+    family_name_with_properties.emplace(family_name, properties);
 
     if (byte_code)
         if (!family_code_with_codec.emplace(*byte_code, creator).second)
@@ -278,12 +304,17 @@ void CompressionCodecFactory::registerCompressionCodecWithType(
                             std::to_string(*byte_code));
 }
 
-void CompressionCodecFactory::registerCompressionCodec(const String & family_name, std::optional<uint8_t> byte_code, Creator creator, std::source_location source)
+void CompressionCodecFactory::registerCompressionCodec(
+    const String & family_name,
+    std::optional<uint8_t> byte_code,
+    Creator creator,
+    CompressionCodecFamilyProperties properties,
+    std::source_location source)
 {
     registerCompressionCodecWithType(family_name, byte_code, [family_name, creator](const ASTPtr & ast, const IDataType * /* data_type */)
     {
         return creator(ast);
-    }, source);
+    }, properties, source);
 }
 
 void CompressionCodecFactory::registerSimpleCompressionCodec(
@@ -297,7 +328,7 @@ void CompressionCodecFactory::registerSimpleCompressionCodec(
         if (ast)
             throw Exception(ErrorCodes::DATA_TYPE_CANNOT_HAVE_ARGUMENTS, "Compression codec {} cannot have arguments", family_name);
         return creator();
-    }, source);
+    }, {}, source);
 }
 
 

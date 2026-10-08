@@ -196,7 +196,9 @@ void registerCodecQuantized(CompressionCodecFactory & factory)
         if (!arguments)
             return std::make_shared<CompressionCodecQuantized>(QuantizedCodecParams{});
         return std::make_shared<CompressionCodecQuantized>(parseQuantizeCodecArguments(arguments));
-    });
+    },
+    /// The codec takes effect only through the serialization that a column-level `CODEC` attaches to the column.
+    CompressionCodecFamilyProperties{.is_declarative = true});
 }
 
 }
