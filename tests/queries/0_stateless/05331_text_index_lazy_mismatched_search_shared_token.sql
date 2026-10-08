@@ -33,11 +33,13 @@ SELECT token, num_posting_blocks > 1, has_compressed_postings FROM mergeTreeText
 
 SELECT 'or, no index', count(), sum(k) FROM tab_failed_search WHERE hasAllTokens(s, ['alpha', 'beta']) OR hasAllTokens(s, ['alpha', 'gamma'])
 SETTINGS use_skip_indexes = 0, query_plan_direct_read_from_text_index = 0;
-SELECT 'or, lazy', count(), sum(k) FROM tab_failed_search WHERE hasAllTokens(s, ['alpha', 'beta']) OR hasAllTokens(s, ['alpha', 'gamma']);
+SELECT 'or, lazy', count(), sum(k) FROM tab_failed_search WHERE hasAllTokens(s, ['alpha', 'beta']) OR hasAllTokens(s, ['alpha', 'gamma'])
+SETTINGS log_comment = '05331_or_lazy';
 
 SELECT 'not, no index', count(), sum(k) FROM tab_failed_search WHERE hasToken(s, 'alpha') AND NOT hasAllTokens(s, ['alpha', 'beta'])
 SETTINGS use_skip_indexes = 0, query_plan_direct_read_from_text_index = 0;
-SELECT 'not, lazy', count(), sum(k) FROM tab_failed_search WHERE hasToken(s, 'alpha') AND NOT hasAllTokens(s, ['alpha', 'beta']);
+SELECT 'not, lazy', count(), sum(k) FROM tab_failed_search WHERE hasToken(s, 'alpha') AND NOT hasAllTokens(s, ['alpha', 'beta'])
+SETTINGS log_comment = '05331_not_lazy';
 
 -- Both searches of each lazy query must be read from the index as `__text_index_*` columns, or the lazy reader is
 -- never reached. Parallel replicas are disabled because without a local plan EXPLAIN shows only the remote read.
@@ -45,5 +47,20 @@ SELECT 'or, index columns', uniqExactArray(extractAll(explain, '__text_index_\\w
 FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE hasAllTokens(s, ['alpha', 'beta']) OR hasAllTokens(s, ['alpha', 'gamma']) SETTINGS enable_parallel_replicas = 0);
 SELECT 'not, index columns', uniqExactArray(extractAll(explain, '__text_index_\\w+'))
 FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE hasToken(s, 'alpha') AND NOT hasAllTokens(s, ['alpha', 'beta']) SETTINGS enable_parallel_replicas = 0);
+
+-- The materialize mode reads the same columns, so check that both lazy queries iterated lazy cursors.
+-- Under parallel replicas without a local plan the counters land on the replicas' rows, so sum over every row of each query.
+SYSTEM FLUSH LOGS query_log;
+SELECT log_comment, sum(ProfileEvents['TextIndexLazySegmentsPrepared']) > 0
+FROM system.query_log
+WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish'
+  AND initial_query_id IN
+  (
+      SELECT query_id FROM system.query_log
+      WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish'
+        AND current_database = currentDatabase() AND is_initial_query AND log_comment IN ('05331_or_lazy', '05331_not_lazy')
+  )
+GROUP BY log_comment
+ORDER BY log_comment;
 
 DROP TABLE tab_failed_search;

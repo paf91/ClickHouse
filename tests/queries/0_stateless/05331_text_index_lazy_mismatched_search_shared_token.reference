@@ -5,3 +5,5 @@ not, no index	500	124750
 not, lazy	500	124750
 or, index columns	2
 not, index columns	2
+05331_not_lazy	1
+05331_or_lazy	1
