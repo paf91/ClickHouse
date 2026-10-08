@@ -61,6 +61,7 @@ namespace DB
 namespace Setting
 {
     extern const SettingsUInt64 distributed_connections_pool_size;
+    extern const SettingsURI format_avro_schema_registry_url;
     extern const SettingsLoadBalancing load_balancing;
     extern const SettingsString log_comment;
     extern const SettingsBool log_queries;
@@ -590,7 +591,10 @@ private:
 
         /// The remote server runs the job as an initial query and applies its binary type encoding settings to the wire,
         /// so this connection reads what the remote writes and writes what the remote reads.
-        auto format_settings = getFormatSettings(job_context);
+        /// The remote checks the job's Avro schema registry URL against its own allowlist, not against this server's.
+        Settings wire_settings = job_context->getSettingsCopy();
+        wire_settings[Setting::format_avro_schema_registry_url] = "";
+        auto format_settings = getFormatSettings(job_context, wire_settings);
         std::swap(format_settings.native.encode_types_in_binary_format, format_settings.native.decode_types_in_binary_format);
         connection->setFormatSettings(format_settings);
 
