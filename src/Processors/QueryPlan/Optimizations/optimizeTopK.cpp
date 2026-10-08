@@ -25,12 +25,7 @@ namespace DB::QueryPlanOptimizations
 
 bool dependsOnItsBlock(const ActionsDAG & actions)
 {
-    for (const auto & node : actions.getNodes())
-        if (node.type == ActionsDAG::ActionType::FUNCTION
-            && (node.function_base->isStateful() || !node.function_base->isDeterministicInScopeOfQuery()))
-            return true;
-
-    return false;
+    return actions.hasNonDeterministicOrStatefulFunctions();
 }
 
 /// True if a value of this type can contain a floating-point number anywhere inside it - directly,
