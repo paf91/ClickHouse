@@ -25,6 +25,23 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
+namespace
+{
+
+/// An unqualified parameterized-view name re-resolves against the receiving server's default
+/// database, so it is sent qualified. Only a 2-part result is resolvable as a parameterized view,
+/// so a dotted database name is left alone.
+bool isSentQualified(const TableFunctionNode & node)
+{
+    if (!node.isParameterizedView() || Identifier{node.getTableFunctionName()}.getPartsSize() != 1)
+        return false;
+
+    const auto & storage_id = node.getStorageID();
+    return storage_id.hasDatabase() && Identifier{storage_id.getDatabaseName()}.getPartsSize() == 1;
+}
+
+}
+
 TableFunctionNode::TableFunctionNode(String table_function_name_)
     : ITableExpressionNode(children_size)
     , table_function_name(table_function_name_)
@@ -110,7 +127,10 @@ void TableFunctionNode::dumpTreeImpl(WriteBuffer & buffer, FormatState & format_
 bool TableFunctionNode::isEqualImpl(const IQueryTreeNode & rhs, CompareOptions) const
 {
     const auto & rhs_typed = assert_cast<const TableFunctionNode &>(rhs);
-    if (table_function_name != rhs_typed.table_function_name)
+
+    /// A parameterized view is identified by its storage, whether it is spelled `pv` or `db.pv`.
+    const bool both_parameterized_views = isParameterizedView() && rhs_typed.isParameterizedView();
+    if (!both_parameterized_views && table_function_name != rhs_typed.table_function_name)
         return false;
 
     if (storage && rhs_typed.storage)
@@ -126,8 +146,8 @@ void TableFunctionNode::updateTreeHashImpl(HashState & state, CompareOptions) co
 {
     const auto full_name = storage ? storage_id.getFullNameNotQuoted() : String{};
 
-    /// A parameterized view hashes the qualified name `toASTImpl` sends to shards: `IN` set names derive from this hash.
-    const auto & name = isParameterizedView() ? full_name : table_function_name;
+    /// Hash the name `toASTImpl` sends to other servers: `IN` set names derive from this hash.
+    const auto & name = isSentQualified(*this) ? full_name : table_function_name;
     state.update(name.size());
     state.update(name);
 
@@ -171,18 +191,7 @@ ASTPtr TableFunctionNode::toASTImpl(const ConvertToASTOptions & options) const
 {
     auto table_function_ast = make_intrusive<ASTFunction>();
 
-    table_function_ast->name = table_function_name;
-
-    /// An unqualified parameterized-view name re-resolves against the receiving server's default
-    /// database, so qualify it from `storage_id`. Only a 2-part result is resolvable as a
-    /// parameterized view, so a dotted database name is left alone.
-    if (isParameterizedView() && storage_id.hasDatabase()
-        && Identifier{table_function_name}.getPartsSize() == 1)
-    {
-        const auto database_name = storage_id.getDatabaseName();
-        if (Identifier{database_name}.getPartsSize() == 1)
-            table_function_ast->name = database_name + "." + storage_id.getTableName();
-    }
+    table_function_ast->name = isSentQualified(*this) ? storage_id.getFullNameNotQuoted() : table_function_name;
 
     const auto & arguments = getArguments();
     table_function_ast->children.push_back(arguments.toAST(options));
