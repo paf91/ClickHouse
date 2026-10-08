@@ -41,7 +41,7 @@ try
         = std::make_unique<avro::DataFileReaderBase>(std::make_unique<AvroInputStreamReadBufferAdapter>(*buffer), MAX_AVRO_SCHEMA_DEPTH);
 
     avro::NodePtr root_node = manifest_file_reader->dataSchema().root();
-    auto data_type = AvroSchemaReader::avroNodeToDataType(root_node);
+    auto data_type = AvroSchemaReader::avroNodeToDataType(root_node, format_settings.max_parser_depth);
 
     MutableColumns columns;
     columns.push_back(data_type->createColumn());

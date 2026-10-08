@@ -227,9 +227,12 @@ public:
     /// Tuple instead of Nullable(Tuple). Schema inference passes
     /// schema_inference_allow_nullable_tuple_type here, because otherwise it would return a type
     /// that CREATE TABLE rejects.
-    static DataTypePtr avroNodeToDataType(avro::NodePtr node, bool allow_nullable_tuple_type = true);
+    /// `max_depth` bounds the nesting with named type references expanded (0 = unlimited).
+    static DataTypePtr avroNodeToDataType(avro::NodePtr node, size_t max_depth, bool allow_nullable_tuple_type = true);
 private:
-    static DataTypePtr avroNodeToDataTypeImpl(const avro::NodePtr & node, std::unordered_set<std::string> & seen_names, bool allow_nullable_tuple_type);
+    static DataTypePtr avroNodeToDataTypeImpl(
+        const avro::NodePtr & node, std::unordered_set<std::string> & seen_names, bool allow_nullable_tuple_type,
+        size_t max_depth, size_t depth);
 
     bool confluent;
     const FormatSettings format_settings;
