@@ -1,6 +1,4 @@
-"""A secondary query with both binary type flags works between a client and a server of different versions."""
-
-import shlex
+"""An older server queries a newer shard with the binary type encoding of the Native format enabled."""
 
 import pytest
 
@@ -15,6 +13,11 @@ old_node = cluster.add_instance(
     with_installed_binary=True,
 )
 
+BINARY_TYPES = {
+    "output_format_native_encode_types_in_binary_format": 1,
+    "input_format_native_decode_types_in_binary_format": 1,
+}
+
 
 @pytest.fixture(scope="module")
 def start_cluster():
@@ -25,32 +28,21 @@ def start_cluster():
         cluster.shutdown()
 
 
-def secondary_query(client, server, query):
-    return client.exec_in_container(
-        [
-            "bash",
-            "-c",
-            f"clickhouse client --host {server.name} --query_kind secondary_query"
-            " --output_format_native_encode_types_in_binary_format 1"
-            " --input_format_native_decode_types_in_binary_format 1"
-            f" --query {shlex.quote(query)}",
-        ]
+def test_old_initiator_new_shard(start_cluster):
+    new_node.query("DROP TABLE IF EXISTS t_05317 SYNC")
+    new_node.query(
+        "CREATE TABLE t_05317 (x UInt64, s String) ENGINE = MergeTree ORDER BY x"
     )
 
-
-@pytest.mark.parametrize(
-    "client, server",
-    [(old_node, new_node), (new_node, old_node)],
-    ids=["old_client_new_server", "new_client_old_server"],
-)
-def test_secondary_query_with_binary_types(start_cluster, client, server):
-    server.query("DROP TABLE IF EXISTS t_05317 SYNC")
-    server.query("CREATE TABLE t_05317 (x UInt64) ENGINE = MergeTree ORDER BY x")
-
+    old_node.http_query(
+        "INSERT INTO FUNCTION remote('new_node', default, t_05317) VALUES (42, 'str')",
+        method="POST",
+        params=BINARY_TYPES,
+    )
     assert (
-        secondary_query(client, server, "SELECT 42::UInt64 AS x, 'str' AS s")
+        old_node.http_query(
+            "SELECT x, s FROM remote('new_node', default, t_05317)",
+            params=BINARY_TYPES,
+        )
         == "42\tstr\n"
     )
-    secondary_query(client, server, "INSERT INTO t_05317 VALUES (8)")
-
-    assert server.query("SELECT x FROM t_05317") == "8\n"

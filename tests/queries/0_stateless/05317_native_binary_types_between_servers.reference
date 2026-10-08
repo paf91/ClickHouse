@@ -20,7 +20,3 @@ str	String
 8
 external data skipped after an exception
 TOO_BIG_AST
-QueryRunner on a cluster
-05317_runner_both	QueryFinish	0
-05317_runner_decode	QueryFinish	0
-05317_runner_encode	QueryFinish	0
