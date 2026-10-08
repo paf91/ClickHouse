@@ -290,6 +290,10 @@ std::shared_ptr<TSystemLog> createSystemLog(
         const MergeTreeSettings & effective_defaults = is_replicated ? context->getReplicatedMergeTreeSettings() : context->getMergeTreeSettings();
         for (const auto & required : default_settings_ast->as<ASTSetQuery &>().changes)
         {
+            /// It only controls how zero-level parts are written before merges, not the bucket layout of merged parts.
+            if (required.name == "map_serialization_version_for_zero_level_parts")
+                continue;
+
             /// The last occurrence wins, e.g. when `settings` from the configuration override the defaults.
             const Field * actual = nullptr;
             if (engine_settings)

@@ -315,6 +315,11 @@ def test_bucketed_schema_with_explicit_engine_warns(start_cluster):
     assert "max_buckets_in_map = 128" in node7.query("SHOW CREATE TABLE system.metric_log FORMAT TSVRaw")
     assert int(node7.count_in_log(warning)) == 0
 
+    # `map_serialization_version_for_zero_level_parts` only controls how zero-level parts are written
+    # before merges, so changing it does not affect the bucket layout of merged parts and does not warn.
+    restart_with_engine_settings(bucketed_settings.replace("_zero_level_parts = 'basic'", "_zero_level_parts = 'with_buckets'"))
+    assert int(node7.count_in_log(warning)) == 0
+
     node7.replace_in_config(config_path, "<schema_type>bucketed</schema_type>", "")
     node7.replace_in_config(config_path, current_settings[0], "")
     node7.restart_clickhouse()
