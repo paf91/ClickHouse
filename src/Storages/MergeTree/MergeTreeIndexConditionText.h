@@ -204,9 +204,9 @@ private:
     /// `mapContainsKeyValue(m, 'key', 'value')`: both pair tokens, searched as one `Any` query.
     bool traverseMapContainsKeyValueNode(const RPNBuilderFunctionTreeNode & function_node, RPNElement & out) const;
 
-    /// `compact`: apply `ITokenizer::compactTokens`. Sound only for `All` queries; `Any` queries must keep covered grams.
-    VectorWithMemoryTracking<String> stringToTokens(const Field & field, bool compact = true) const;
-    VectorWithMemoryTracking<String> stringToTokens(std::string_view raw, bool compact = true) const;
+    /// `compact` is valid only for `All` queries; `Any` queries must keep covered tokens.
+    VectorWithMemoryTracking<String> stringToTokens(const Field & field, bool compact) const;
+    VectorWithMemoryTracking<String> stringToTokens(std::string_view raw, bool compact) const;
     VectorWithMemoryTracking<String> substringToTokens(const Field & field, bool is_prefix, bool is_suffix) const;
     VectorWithMemoryTracking<String> stringLikeToTokens(const Field & field) const;
 

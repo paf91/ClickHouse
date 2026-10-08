@@ -36,8 +36,7 @@ constexpr size_t arg_input = 0;
 constexpr size_t arg_needles = 1;
 constexpr size_t arg_tokenizer = 2;
 
-/// `compact_tokens`: drop needle tokens implied by other needle tokens (see `ITokenizer::compactTokens`).
-/// Sound only under AND semantics: a `sparseGrams` haystack may contain a covered shorter gram without the longer one.
+/// Compaction drops tokens covered by longer ones; valid only for `hasAllTokens`.
 TokensWithPosition initializeSearchTokens(const ColumnsWithTypeAndName & arguments, const ITokenizer & tokenizer, std::string_view function_name, bool compact_tokens)
 {
     if (arguments.size() < 2)

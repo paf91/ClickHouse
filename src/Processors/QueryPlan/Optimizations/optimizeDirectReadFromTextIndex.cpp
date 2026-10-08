@@ -831,8 +831,7 @@ private:
                 VectorWithMemoryTracking<String> needles_array;
                 const auto & needles_string = needles_field.safeGet<String>();
                 tokenizer->stringToTokens(needles_string.data(), needles_string.size(), needles_array);
-                /// Compaction is sound only for hasAllTokens, and only without a postprocessor (it is applied to
-                /// these tokens afterwards and can map a dropped gram to a different token).
+                /// Compaction is valid only for hasAllTokens and is unsound before a postprocessor.
                 if (function_name == "hasAllTokens" && !apply_postprocessor)
                     needles_array = tokenizer->compactTokens(needles_array);
                 needles_field = Array(needles_array.begin(), needles_array.end());
