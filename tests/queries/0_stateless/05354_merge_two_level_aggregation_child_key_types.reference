@@ -1,0 +1,39 @@
+missing	1	5	1
+missing	10	0	2
+missing	11	0	1
+missing two	1	5	x	1
+missing two	10	0		2
+missing two	11	0		1
+missing local	1	x	1
+missing local	10		2
+missing local	11		1
+missing two shards	1	5	1
+missing two shards	10	0	3
+missing two shards	11	0	2
+grouping sets	1	0	1
+grouping sets	1	5	1
+grouping sets	10	0	2
+grouping sets	10	0	2
+grouping sets	11	0	1
+grouping sets	11	0	1
+totals	1	5	1
+totals	10	0	2
+totals	11	0	1
+
+totals	0	0	4
+rollup	0	0	4
+rollup	1	0	1
+rollup	1	5	1
+rollup	10	0	2
+rollup	10	0	2
+rollup	11	0	1
+rollup	11	0	1
+not memory efficient	1	5	1
+not memory efficient	10	0	2
+not memory efficient	11	0	1
+common type	1	y	1
+common type	10	x	2
+common type	11	z	1
+common type LowCardinality	x	2
+common type LowCardinality	y	1
+common type LowCardinality	z	1

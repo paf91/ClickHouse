@@ -311,6 +311,9 @@ private:
     {
         QueryPlan plan;
         QueryProcessingStage::Enum stage;
+        /// The child aggregated by keys of other types than the `Merge` table: its two-level bucket numbers are not the ones of
+        /// the merging step, so its partially aggregated data is passed on as single-level.
+        bool forget_aggregation_buckets = false;
     };
 
     /// Answer of `getExpandableReads`, unset until it is asked for. The parallel-replicas pass asks first
