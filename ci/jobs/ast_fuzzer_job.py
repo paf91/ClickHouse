@@ -78,38 +78,34 @@ def _last_exception(fuzzer_log: Path, error_code: int, error_name: str) -> str:
     ends its line (before `--stacktrace`'s section) and is followed by an empty line. Buffered stdout
     lands in the same log (before, mid-line or after the exception) and can quote both, so only a
     block closed that way counts, and the last one wins."""
-    marker = f"Code: {error_code}. DB::Exception:"
+    marker = f"Code: {error_code}. DB::Exception:".encode()
     endings = (
-        f"({error_name})",
-        f"({error_name}), Stack trace (when copying this message, always include the lines below):",
+        f"({error_name})".encode(),
+        f"({error_name}), Stack trace (when copying this message, always include the lines below):".encode(),
     )
-    found = ""
+    # Blocks are byte ranges, so an open one costs no memory however far its suffix is
+    found: tuple[int, int] | None = None
     # A closed block, kept once the next line turns out empty
-    pending = ""
-    # The block of the newest marker, so a marker quoted shortly before cannot swallow the message.
-    # It is dropped past `max_bytes` without its suffix, which bounds memory, not lines.
-    block: list[str] | None = None
-    block_bytes = 0
-    max_bytes = 1 << 20
-    with open(fuzzer_log, "r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            line = line.rstrip("\n")
+    pending: tuple[int, int] | None = None
+    # Where the block of the newest marker starts, so a marker quoted shortly before cannot swallow the message
+    start: int | None = None
+    position = 0
+    with open(fuzzer_log, "rb") as fh:
+        for raw_line in fh:
+            line = raw_line.rstrip(b"\n")
             if pending:
                 found = found if line else pending
-                pending = ""
+                pending = None
             if marker in line:
-                block, block_bytes = [], 0
-                line = line[line.index(marker) :]
-            if block is None:
-                continue
-            block.append(line)
-            block_bytes += len(line) + 1
-            if line.endswith(endings):
-                pending = "\n".join(block).strip()
-                block = None
-            elif block_bytes > max_bytes:
-                block = None
-    return found
+                start = position + line.index(marker)
+            if start is not None and line.endswith(endings):
+                pending = (start, position + len(line))
+                start = None
+            position += len(raw_line)
+        if not found:
+            return ""
+        fh.seek(found[0])
+        return fh.read(found[1] - found[0]).decode("utf-8", errors="replace").strip()
 
 
 # The exact first and last lines of the block `exitOnOracleMismatch` in `programs/client/FuzzLoop.cpp` prints
