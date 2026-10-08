@@ -654,8 +654,8 @@ void PocoHTTPClient::makeRequestInternalImpl(
                 }
                 catch (const Poco::IOException &)
                 {
-                    /// The server can answer with an error and close the connection without reading the whole
-                    /// body, e.g. 404 NoSuchUpload for an expired multipart upload. TLS allows no I/O after a failed write.
+                    /// A server may answer with an error and close the connection before reading the whole body.
+                    /// TLS allows no I/O after a failed write.
                     if (session->secure()
                         || DB::getSocketState(session->socket()) != DB::SocketState::DataPending
                         || !session->receiveEarlyResponse(poco_response)

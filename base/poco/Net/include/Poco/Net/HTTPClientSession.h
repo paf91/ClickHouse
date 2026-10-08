@@ -291,14 +291,8 @@ namespace Net
         /// a "Expect: 100-continue" header.
 
         bool receiveEarlyResponse(HTTPResponse & response);
-        /// To be called after sending the request failed while the server has
-        /// already sent data (a server may answer and close the connection
-        /// without reading the whole request body; the caller checks that data
-        /// is pending). Discards the rest of the request and the send error and
-        /// reads the response header into the given HTTPResponse, like
-        /// peekResponse(). Returns false if no response header can be read.
-        /// If true, receiveResponse() must then be called with the same
-        /// HTTPResponse object to read the response body.
+        /// After sending the request failed, drops the rest of it and reads the response header the
+        /// server has already sent. If true, receiveResponse() must be called with the same response.
 
         virtual void flushRequest();
         /// Flushes the request stream.
