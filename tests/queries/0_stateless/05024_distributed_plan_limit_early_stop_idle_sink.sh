@@ -87,11 +87,12 @@ if [ "$INITIATOR_ROWS" != 1 ]; then
 else
     # A stage's sources stop only after its sink closed its input, so each count covers a whole hop:
     # `stage_4_*` needs the idle exchanges of the second join, `stage_2_*` the idle sinks of the first.
+    # A join task also counts a dimension-table stream it is still reading when the stop comes, so 3 is a lower bound.
     $CLICKHOUSE_CLIENT --query "
-    SELECT 'idle exchanges', 'StreamingExchangeEarlyCloses', query AS task, ProfileEvents['StreamingExchangeEarlyCloses'] AS early_closes
+    SELECT 'idle exchanges', 'StreamingExchangeEarlyCloses >= 3', query AS task, early_closes >= 3
     FROM system.query_log
     WHERE event_date >= yesterday() AND type = 'QueryFinish' AND NOT is_initial_query
-      AND initial_query_id = '$QUERY_ID' AND early_closes > 0
+      AND initial_query_id = '$QUERY_ID' AND (ProfileEvents['StreamingExchangeEarlyCloses'] AS early_closes) > 0
     ORDER BY task
     SETTINGS max_rows_to_read = 0, enable_parallel_replicas = 0, automatic_parallel_replicas_mode = 0"
 
