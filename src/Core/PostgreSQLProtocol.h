@@ -1373,13 +1373,8 @@ public:
         if (sz < static_cast<Int32>(sizeof(Int32)))
             throw Exception(ErrorCodes::UNKNOWN_PACKET_FROM_CLIENT,
                             "Wrong message length {} in CopyFail, it must be at least 4", sz);
-        message.reserve(sz - sizeof(Int32));
-        for (size_t i = 0; i < sz - sizeof(Int32); ++i)
-        {
-            char byte = 0;
-            readBinary(byte, in);
-            message.push_back(byte);
-        }
+        /// The length is declared by the client, so do not reserve it up front.
+        readStringOfDeclaredSize(message, sz - sizeof(Int32), in);
         /// The reason is a null-terminated string; drop the trailing NUL if present.
         if (!message.empty() && message.back() == '\0')
             message.pop_back();
@@ -2767,6 +2762,14 @@ private:
         size_t pos = 0;
         while (pos < value.size() && isWhitespaceASCII(value[pos]))
             ++pos;
+        /// PostgreSQL prefixes the literal of an array whose lower bound is not 1 with its dimensions,
+        /// as in `[0:1]={1,2}`. A ClickHouse array always starts at index 1, so such a value cannot be
+        /// represented, and dropping the bounds would silently shift the indices of its elements.
+        if (pos < value.size() && value[pos] == '[')
+            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                            "Invalid value {} for an array prepared-statement parameter: explicit array bounds are not supported, "
+                            "because a ClickHouse array always starts at index 1",
+                            quoteString(value));
         ArrayLiteralShape shape;
         const ArrayLiteralElement array = parseArrayLiteral(value, pos, 0, shape);
         while (pos < value.size() && isWhitespaceASCII(value[pos]))

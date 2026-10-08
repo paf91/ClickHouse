@@ -6,7 +6,8 @@
 # type (`int4[]`, `text[]`, ...), and the client then binds the array literal `{...}` to it. The value
 # must reach the query as an array of the element type (`Nullable` only when an element is `NULL`), not
 # as the string `'{...}'`, and a value that is not a well-formed rectangular array literal, or whose
-# element does not fit the element type, is an error.
+# element does not fit the element type, is an error. A literal with explicit bounds (`[0:1]={1,2}`)
+# is an error too: a ClickHouse array always starts at index 1.
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -106,6 +107,8 @@ def run(query, oid, value):
     for error in errors:
         if "not a PostgreSQL array literal" in error:
             print("error: not a PostgreSQL array literal")
+        elif "explicit array bounds" in error:
+            print("error: explicit array bounds")
         elif "numeric array" in error:
             print("error: invalid numeric element")
         else:
@@ -138,6 +141,10 @@ run("SELECT $1", INT4_ARRAY, "{1} 2")
 run("SELECT $1", INT4_ARRAY, "{{{{{{{1}}}}}}}")
 run("SELECT $1", INT2_ARRAY, "{70000}")
 run("SELECT $1", NUMERIC_ARRAY, "{1.5,abc}")
+
+print("--- explicit bounds of an array whose lower bound is not 1")
+run("SELECT $1", INT4_ARRAY, "[0:1]={1,2}")
+run("SELECT $1", INT4_ARRAY, " [2:3][4:5]={{1,2},{3,4}}")
 
 print("--- the connection is still usable")
 run("SELECT arraySum($1)", INT4_ARRAY, "{40,2}")

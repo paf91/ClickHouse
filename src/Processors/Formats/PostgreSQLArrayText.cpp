@@ -146,6 +146,11 @@ public:
     void parse(IColumn & column, const IDataType & type)
     {
         skipWhitespace();
+        /// PostgreSQL prefixes the literal of an array whose lower bound is not 1 with its dimensions,
+        /// as in `[0:1]={a,b}`. A ClickHouse array always starts at index 1, so such a value cannot be
+        /// represented, and dropping the bounds would silently shift the indices of its elements.
+        if (pos < text.size() && text[pos] == '[')
+            throwError("explicit array bounds are not supported, because a ClickHouse array always starts at index 1");
         parseArray(column, type);
         skipWhitespace();
         if (pos != text.size())

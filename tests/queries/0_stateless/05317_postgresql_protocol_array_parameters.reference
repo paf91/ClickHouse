@@ -19,5 +19,8 @@ error: not a PostgreSQL array literal
 error: not a PostgreSQL array literal
 error
 error: invalid numeric element
+--- explicit bounds of an array whose lower bound is not 1
+error: explicit array bounds
+error: explicit array bounds
 --- the connection is still usable
 42

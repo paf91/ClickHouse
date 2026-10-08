@@ -29,6 +29,15 @@ COPY copy_escaped FROM STDIN;
 \.
 SQL
 
+# A literal with explicit bounds, which PostgreSQL emits for an array whose lower bound is not 1, is
+# rejected: a ClickHouse array always starts at index 1, and dropping the bounds would shift the indices.
+psql --host 127.0.0.1 --port "${CLICKHOUSE_PORT_POSTGRESQL}" "${CLICKHOUSE_DATABASE}" --user "${PG_USER}" \
+    --no-psqlrc --tuples-only --no-align 2>&1 <<'SQL' | grep -o 'explicit array bounds are not supported'
+COPY copy_escaped FROM STDIN;
+3	[0:1]={a,b}
+\.
+SQL
+
 ${CLICKHOUSE_CLIENT} -q "
 SELECT n, arrayMap(x -> concat('<', x, '>'), a), arrayMap(x -> isNull(x), a) FROM copy_escaped ORDER BY n;
 DROP TABLE copy_escaped;
