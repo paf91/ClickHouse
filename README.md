@@ -55,7 +55,7 @@ Upcoming meetups
 * [Hands-on training: Agent Observability with Langfuse in New York](https://luma.com/piww2zyw) - October 15th, 2026
 * [Hands-on training: Agent Observability with Langfuse in Menlo Park](https://luma.com/clickh-3qe8) - October 19th, 2026
 * [AI Builders and Databases London](https://luma.com/clickh-ykgp) - October 21st, 2026
-* [AI Builders and Databases Dubai](https://luma.com/clickh-vtzf)- October 23rd, 2026
+* [AI Builders and Databases Dubai](https://luma.com/clickh-vtzf) - October 22nd, 2026
 * [AI Builders Night New York @ Modal](https://luma.com/clickh-qu9s) - November 3rd, 2026
 * [LibreChat Meetup New York](https://luma.com/clickh-3qx0) - November 5th, 2026
 * [Observability with ClickStack Fundamentals Kubecon Training](https://luma.com/clickh-migc) - November 9th, 2026
