@@ -1091,7 +1091,8 @@
             and allowing the whole host would allow every bucket on it. The bucket is taken from the parsed S3 URL,
             so the entry matches both https://s3.us-west-2.amazonaws.com/my-bucket/ and https://my-bucket.s3.us-west-2.amazonaws.com/.
             Applies to S3 URLs only (the s3 table functions and engines, the S3 database engine, BACKUP and RESTORE to S3,
-            and S3 disks created in SQL with the disk function):
+            and S3 disks created in SQL with the disk function). A permanent (301) redirect returned by S3 is checked against
+            the bucket entries as well; a temporary (307) redirect is checked by host only and is rejected under a bucket-only list:
                     <s3_bucket>s3.us-west-2.amazonaws.com/my-bucket</s3_bucket>
         -->
     <!--</remote_url_allow_hosts>-->
