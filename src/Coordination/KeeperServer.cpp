@@ -1376,19 +1376,11 @@ nuraft::cb_func::ReturnCode KeeperServer::callbackFunc(nuraft::cb_func::Type typ
     if (next_index < last_commited || next_index - last_commited <= 1)
         commited_store = true;
 
-    /// `request_commit_idx`: the leader commit index of an append request that NuRaft has not stored yet.
-    auto set_initialized = [this](uint64_t request_commit_idx = 0)
+    auto set_initialized = [this]
     {
         {
             std::lock_guard lock(initialized_mutex);
-            if (!initialized_flag)
-            {
-                /// A new leader commits every entry already in its log, a follower up to the leader commit index.
-                keeper_context->setCommitIndexAtInitialization(std::max(
-                    request_commit_idx,
-                    raft_instance->is_leader() ? raft_instance->get_last_log_idx() : raft_instance->get_leader_committed_log_idx()));
-                initialized_flag = true;
-            }
+            initialized_flag = true;
         }
         initialized_cv.notify_all();
     };
@@ -1402,7 +1394,7 @@ nuraft::cb_func::ReturnCode KeeperServer::callbackFunc(nuraft::cb_func::Type typ
                 set_initialized();
             return nuraft::cb_func::ReturnCode::Ok;
         }
-        /// Not on BecomeFollower: the stored leader commit index is still the one of the previous leader then.
+        case nuraft::cb_func::BecomeFollower:
         case nuraft::cb_func::GotAppendEntryReqFromLeader:
         {
             if (param->leaderId != -1)
@@ -1414,7 +1406,7 @@ nuraft::cb_func::ReturnCode KeeperServer::callbackFunc(nuraft::cb_func::Type typ
                 /// BecameFresh for this node will not be called because it was already fresh
                 /// when it was leader.
                 if (leader_index < our_index + keeper_context->getCoordinationSettings()[CoordinationSetting::fresh_log_gap])
-                    set_initialized(static_cast<nuraft::req_msg *>(param->ctx)->get_commit_idx());
+                    set_initialized();
             }
             return nuraft::cb_func::ReturnCode::Ok;
         }

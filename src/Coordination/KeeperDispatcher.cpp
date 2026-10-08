@@ -110,7 +110,7 @@ namespace FailPoints
 KeeperDispatcher::KeeperDispatcher()
     : server_config(std::make_shared<KeeperConfiguration>())
     , log(getLogger("KeeperDispatcher"))
-    /// Random start: the leader can append a SessionID request of the previous process after the index getSessionID waits for.
+    /// Random start: entries this server wrote before a restart are committed again after it and must not match new requests.
     , internal_session_id_counter(static_cast<int64_t>(thread_local_rng() >> 2))
 {}
 
@@ -629,23 +629,6 @@ void KeeperDispatcher::onSessionIDResponse(const Coordination::ZooKeeperResponse
 
 int64_t KeeperDispatcher::getSessionID(int64_t session_timeout_ms)
 {
-    /// Up to this index the log can hold SessionID entries of the previous process. They must be
-    /// applied before a new request takes an internal id, so that none of them can answer it.
-    const auto commit_index_at_initialization = keeper_context->commitIndexAtInitialization();
-    if (!commit_index_at_initialization)
-        throw Exception(ErrorCodes::ABORTED, "Not issuing new session ID because the server is not initialized yet");
-
-    if (keeper_context->lastCommittedIndex() < *commit_index_at_initialization)
-    {
-        LOG_DEBUG(log, "Waiting for log index {} to be committed before issuing a session ID", *commit_index_at_initialization);
-        bool committed = keeper_context->waitCommittedUpto(
-            *commit_index_at_initialization, static_cast<uint64_t>(std::max<int64_t>(session_timeout_ms, 0)));
-        if (keeper_context->isShutdownCalled())
-            throw zkutil::KeeperException::fromMessage(Coordination::Error::ZSESSIONEXPIRED, "Keeper is shutting down");
-        if (!committed)
-            throw Exception(ErrorCodes::TIMEOUT_EXCEEDED, "Cannot receive session id within session timeout");
-    }
-
     /// New session id allocation is a special request, because we cannot process it in normal
     /// way: get request -> put to raft -> set response for registered callback.
     KeeperRequestForSession request_info;
