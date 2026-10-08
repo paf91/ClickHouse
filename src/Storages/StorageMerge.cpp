@@ -865,8 +865,7 @@ void ReadFromMerge::addFilter(FilterDAGInfo filter)
 namespace
 {
 
-/// Marks the two-level chunks of partially aggregated data as single-level, so the merging step buckets their keys
-/// with its own aggregation method.
+/// Passes two-level partially aggregated chunks on as single-level, so the merging step re-buckets their keys itself.
 class ForgetAggregationBucketsTransform final : public ISimpleTransform
 {
 public:
@@ -1431,8 +1430,7 @@ std::vector<ReadFromMerge::ChildPlan> ReadFromMerge::createChildrenPlans(SelectQ
 
             child.plan.addInterpreterContext(modified_context);
 
-            /// The step above merges the children's two-level buckets as they are, which is right only for a child that
-            /// aggregated by keys of the `Merge` types.
+            /// Bucket numbers depend on the aggregation key types, and the merging step merges the children's buckets as they are.
             if (child.plan.isInitialized() && common_processed_stage == QueryProcessingStage::WithMergeableState && query_info.need_aggregate)
                 child.forget_aggregation_buckets = !haveSameColumnTypes(*child.plan.getCurrentHeader(), *common_header);
 
