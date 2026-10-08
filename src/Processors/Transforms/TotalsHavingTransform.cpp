@@ -18,7 +18,9 @@ namespace DB
 namespace FailPoints
 {
     extern const char totals_having_transform_before_expression_pause[];
+    extern const char totals_having_transform_after_expression_pause[];
     extern const char totals_having_transform_pause[];
+    extern const char totals_having_transform_drop_cancelled_chunk[];
     extern const char totals_having_transform_totals_pause[];
     extern const char totals_having_transform_totals_start_pause[];
     extern const char totals_having_transform_totals_before_expression_pause[];
@@ -137,6 +139,12 @@ IProcessor::Status TotalsHavingTransform::prepare()
         finished_transform = true;
     }
 
+    if (isCancelled())
+    {
+        getTotalsPort().finish();
+        return Status::Finished;
+    }
+
     auto & totals_output = getTotalsPort();
 
     /// Check can output.
@@ -157,7 +165,11 @@ IProcessor::Status TotalsHavingTransform::prepare()
 void TotalsHavingTransform::work()
 {
     if (finished_transform)
+    {
+        if (isCancelled())
+            return;
         prepareTotals();
+    }
     else
         ISimpleTransform::work();
 }
@@ -194,6 +206,13 @@ void TotalsHavingTransform::transform(Chunk & chunk)
     if (!chunk)
         return;
 
+    if (isCancelled())
+    {
+        chunk.clear();
+        stopReading();
+        return;
+    }
+
     auto finalized = chunk.clone();
     if (final)
         finalizeChunk(finalized, aggregates_mask);
@@ -203,6 +222,13 @@ void TotalsHavingTransform::transform(Chunk & chunk)
     if (filter_column_name.empty())
     {
         addToTotals(chunk, nullptr);
+        if (isCancelled())
+        {
+            FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
+            chunk.clear();
+            stopReading();
+            return;
+        }
         chunk = std::move(finalized);
     }
     else
@@ -229,7 +255,7 @@ void TotalsHavingTransform::transform(Chunk & chunk)
 
         expression->execute(finalized_block, num_rows, false, false, &getCancellationFlag());
 
-        FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_pause);
+        FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_after_expression_pause);
 
         if (isCancelled())
         {
@@ -248,6 +274,13 @@ void TotalsHavingTransform::transform(Chunk & chunk)
         if (const_filter_description.always_true)
         {
             addToTotals(chunk, nullptr);
+            if (isCancelled())
+            {
+                FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
+                chunk.clear();
+                stopReading();
+                return;
+            }
             chunk.setColumns(std::move(columns), num_rows);
             return;
         }
@@ -255,7 +288,16 @@ void TotalsHavingTransform::transform(Chunk & chunk)
         if (const_filter_description.always_false)
         {
             if (totals_mode == TotalsMode::BEFORE_HAVING)
+            {
                 addToTotals(chunk, nullptr);
+                if (isCancelled())
+                {
+                    FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
+                    chunk.clear();
+                    stopReading();
+                    return;
+                }
+            }
 
             chunk.clear();
             return;
@@ -265,9 +307,27 @@ void TotalsHavingTransform::transform(Chunk & chunk)
 
         /// Add values to `totals` (if it was not already done).
         if (totals_mode == TotalsMode::BEFORE_HAVING)
+        {
             addToTotals(chunk, nullptr);
+            if (isCancelled())
+            {
+                FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
+                chunk.clear();
+                stopReading();
+                return;
+            }
+        }
         else
+        {
             addToTotals(chunk, filter_description.data);
+            if (isCancelled())
+            {
+                FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_drop_cancelled_chunk);
+                chunk.clear();
+                stopReading();
+                return;
+            }
+        }
 
         /// Filter the block by expression in HAVING.
         for (auto & column : columns)
@@ -310,13 +370,31 @@ void TotalsHavingTransform::addToTotals(const Chunk & chunk, const IColumn::Filt
             if (filter)
             {
                 for (size_t row = 0; row < size; ++row)
+                {
+                    if ((row & 0xFFF) == 0)
+                    {
+                        if (row > 0) [[unlikely]]
+                            FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_pause);
+                        if (isCancelled())
+                            return;
+                    }
                     if ((*filter)[row])
                         totals_column.insertMergeFrom(vec[row]);
+                }
             }
             else
             {
                 for (size_t row = 0; row < size; ++row)
+                {
+                    if ((row & 0xFFF) == 0)
+                    {
+                        if (row > 0) [[unlikely]]
+                            FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_pause);
+                        if (isCancelled())
+                            return;
+                    }
                     totals_column.insertMergeFrom(vec[row]);
+                }
             }
         }
     }
@@ -331,8 +409,8 @@ void TotalsHavingTransform::prepareTotals()
         /// The main stream was already cancelled and the result is discarded anyway, so none of the
         /// totals work below has to be done: no merging of `overflow_aggregates`, no finalization of
         /// aggregate states, and no evaluation of the `HAVING` expression for the totals row.
-        /// Install an empty chunk matching the totals port header, so that `prepare` pushes it and
-        /// finishes instead of scheduling this method again.
+        /// Install an empty chunk matching the totals port header and mark the totals as prepared,
+        /// so that this method is not scheduled again (`prepare` finishes the cancelled totals port).
         totals = Chunk(getTotalsPort().getHeader().cloneEmptyColumns(), 0);
         total_prepared = true;
         return;

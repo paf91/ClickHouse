@@ -2,9 +2,9 @@
 # Tags: no-fasttest, no-parallel, no-sanitizers-lsan
 # Test that KILL QUERY works for TotalsHavingTransform, covering the early-return code path
 # after the HAVING expression is executed with a cancellation callback.
-# Uses the totals_having_transform_pause failpoint to stop the query after expression execution,
+# Uses the totals_having_transform_after_expression_pause failpoint to stop the query after expression execution,
 # then KILL QUERY and verify the cancellation is detected.
-# no-parallel: totals_having_transform_pause is a global PAUSEABLE_ONCE failpoint, unrelated queries could consume it.
+# no-parallel: totals_having_transform_after_expression_pause is a global PAUSEABLE_ONCE failpoint, unrelated queries could consume it.
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -13,10 +13,10 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 query_id="kill_query_having_totals_pause_${CLICKHOUSE_DATABASE}_$RANDOM"
 output_file="${CLICKHOUSE_TMP}/kill_query_having_totals_pause_${CLICKHOUSE_DATABASE}.out"
 
-trap '${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT totals_having_transform_pause" 2>/dev/null' EXIT
+trap '${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT totals_having_transform_after_expression_pause" 2>/dev/null' EXIT
 
 # Enable failpoint before starting the query
-${CLICKHOUSE_CLIENT} -q "SYSTEM ENABLE FAILPOINT totals_having_transform_pause"
+${CLICKHOUSE_CLIENT} -q "SYSTEM ENABLE FAILPOINT totals_having_transform_after_expression_pause"
 
 # Start a HAVING query with totals that will pause at the failpoint.
 # The client is timeout-bounded: if a regression makes the killed query never observe the
@@ -35,9 +35,9 @@ timeout 60 ${CLICKHOUSE_CLIENT} --query_id="$query_id" --query "
 # regression), fail explicitly instead of hanging the whole check. Kill the stuck query (async —
 # a SYNC kill of a query that never reached the pause site could hang again) and exit without
 # waiting for the background job.
-if ! timeout 60 ${CLICKHOUSE_CLIENT} -q "SYSTEM WAIT FAILPOINT totals_having_transform_pause PAUSE"
+if ! timeout 60 ${CLICKHOUSE_CLIENT} -q "SYSTEM WAIT FAILPOINT totals_having_transform_after_expression_pause PAUSE"
 then
-    echo "FAIL: timed out waiting for the totals_having_transform_pause failpoint"
+    echo "FAIL: timed out waiting for the totals_having_transform_after_expression_pause failpoint"
     ${CLICKHOUSE_CURL} -sS "${CLICKHOUSE_URL}&http_wait_end_of_query=0" -d "KILL QUERY WHERE query_id = '$query_id'" >/dev/null
     exit 1
 fi
@@ -46,7 +46,7 @@ fi
 ${CLICKHOUSE_CURL} -sS "${CLICKHOUSE_URL}&http_wait_end_of_query=0" -d "KILL QUERY WHERE query_id = '$query_id'" >/dev/null
 
 # Disable failpoint - query should see isCancelled() and call stopReading(), then early-return
-${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT totals_having_transform_pause"
+${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT totals_having_transform_after_expression_pause"
 
 wait
 

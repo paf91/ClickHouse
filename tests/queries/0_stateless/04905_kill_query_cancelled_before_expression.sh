@@ -13,7 +13,7 @@ trap '
     ${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT filter_transform_before_expression_pause" 2>/dev/null
     ${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT filter_transform_pause" 2>/dev/null
     ${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT totals_having_transform_before_expression_pause" 2>/dev/null
-    ${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT totals_having_transform_pause" 2>/dev/null
+    ${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT totals_having_transform_after_expression_pause" 2>/dev/null
     ${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT expression_transform_before_expression_pause" 2>/dev/null
     ${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT expression_transform_pause" 2>/dev/null
     ${CLICKHOUSE_CLIENT} -q "SYSTEM DISABLE FAILPOINT converting_transform_before_expression_pause" 2>/dev/null
@@ -200,7 +200,7 @@ run_cancelled_query \
 
 run_cancelled_query \
     totals_having_transform_before_expression_pause \
-    totals_having_transform_pause \
+    totals_having_transform_after_expression_pause \
     "kill_query_having_before_expression_${CLICKHOUSE_DATABASE}_$RANDOM" \
     "SELECT number % 10 AS k, count() FROM numbers(1000000) GROUP BY k WITH TOTALS HAVING sipHash64(count()) % 2 >= 0 FORMAT Null SETTINGS max_threads = 1" || exit 1
 
