@@ -835,6 +835,16 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare() const
                     && !storage_column_names.contains(rename.rename_from))
                     renamed_column_targets.emplace(rename.rename_to);
             }
+
+            /// A patch may still need a rename that every base part has already passed.
+            for (const auto & patch : conversions->getAllPatches())
+            {
+                for (const auto & rename : patch.part->getAlterConversions()->getRenameMap())
+                {
+                    if (columns_present_in_patch_parts.contains(rename.rename_from) && !storage_column_names.contains(rename.rename_from))
+                        renamed_column_targets.emplace(rename.rename_to);
+                }
+            }
         }
 
         const auto & columns_desc = global_ctx->metadata_snapshot->getColumns();

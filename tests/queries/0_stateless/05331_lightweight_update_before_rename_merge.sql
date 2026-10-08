@@ -4,6 +4,7 @@
 -- A lightweight UPDATE made before RENAME COLUMN must survive a merge that writes the part at the new metadata version.
 
 SET enable_lightweight_update = 1;
+SET optimize_throw_if_noop = 1;
 
 -- Updates before and after the rename, then a merge that does not apply patches.
 DROP TABLE IF EXISTS t_lwu_rename SYNC;
@@ -61,6 +62,26 @@ ALTER TABLE t_lwu_rename_merge MODIFY SETTING max_replicated_mutations_in_queue 
 ALTER TABLE t_lwu_rename_merge DELETE WHERE 0 SETTINGS mutations_sync = 2;
 SELECT 'merged on disk', x, w FROM t_lwu_rename_merge ORDER BY x SETTINGS apply_patch_parts = 0;
 DROP TABLE t_lwu_rename_merge SYNC;
+
+-- The same for an added column whose only values are in the patch.
+DROP TABLE IF EXISTS t_lwu_rename_added SYNC;
+CREATE TABLE t_lwu_rename_added (x UInt32)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/t_lwu_rename_added', '1') ORDER BY tuple()
+SETTINGS enable_block_number_column = 1, enable_block_offset_column = 1, apply_patches_on_merge = 0, max_replicated_mutations_in_queue = 0;
+
+INSERT INTO t_lwu_rename_added VALUES (1), (2);
+ALTER TABLE t_lwu_rename_added ADD COLUMN v UInt32;
+UPDATE t_lwu_rename_added SET v = 5 WHERE x = 1;
+ALTER TABLE t_lwu_rename_added RENAME COLUMN v TO w SETTINGS alter_sync = 0;
+SYSTEM SYNC REPLICA t_lwu_rename_added;
+OPTIMIZE TABLE t_lwu_rename_added FINAL;
+ALTER TABLE t_lwu_rename_added MODIFY SETTING apply_patches_on_merge = 1;
+OPTIMIZE TABLE t_lwu_rename_added FINAL;
+SELECT 'added merged with patch', x, w FROM t_lwu_rename_added ORDER BY x SETTINGS apply_patch_parts = 0;
+ALTER TABLE t_lwu_rename_added MODIFY SETTING max_replicated_mutations_in_queue = 16;
+ALTER TABLE t_lwu_rename_added DELETE WHERE 0 SETTINGS mutations_sync = 2;
+SELECT 'added on disk', x, w FROM t_lwu_rename_added ORDER BY x SETTINGS apply_patch_parts = 0;
+DROP TABLE t_lwu_rename_added SYNC;
 
 -- An UPDATE by the old name on a replica that has not applied the rename yet.
 DROP TABLE IF EXISTS t_lwu_rename_stale SYNC;
