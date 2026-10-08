@@ -3478,6 +3478,7 @@ DataPartsVector StorageMergeTree::renameAndCommitEmptyParts(MutableDataPartsVect
     }
     catch (...)
     {
+        /// Ok: the function rethrows the current exception.
         removeRolledBackEmptyPartsAndRethrow(new_parts, transaction);
     }
 
