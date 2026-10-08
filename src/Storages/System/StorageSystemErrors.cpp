@@ -15,9 +15,15 @@
 #include <Common/logger_useful.h>
 
 #include <mutex>
+#include <optional>
 
 namespace DB
 {
+namespace ErrorCodes
+{
+    extern const int CANNOT_PARSE_DWARF;
+}
+
 namespace Setting
 {
     extern const SettingsBool system_events_show_zero_values;
@@ -90,22 +96,21 @@ void StorageSystemErrors::fillData(MutableColumns & res_columns, ContextPtr cont
                 const size_t lines_old_size = lines_column ? lines_column->size() : 0;
 
 #if (defined(__ELF__) && !defined(OS_FREEBSD)) || defined(OS_DARWIN)
-                /// These two columns are diagnostic sugar: a symbolization failure (`CANNOT_PARSE_DWARF`
-                /// while reading debug info, a missing or truncated `.dSYM`, ...) must not make the whole
-                /// `system.errors` table unreadable, so the failure is reported to the server log and
-                /// the columns are left empty.
+                /// These two columns are diagnostic sugar: a failure to parse DWARF debug info must not
+                /// make the whole `system.errors` table unreadable, so it is reported to the server log
+                /// and the columns are left empty. Any other exception propagates.
+                std::optional<std::pair<std::vector<String>, std::vector<String>>> symbolized;
                 if (!error.trace.empty())
                 {
                     try
                     {
-                        auto [symbols, lines] = symbolizeTrace(error.trace.data(), error.trace.size(), need_symbols, need_lines);
-                        if (symbols_column)
-                            symbols_column->insert(Array(symbols.begin(), symbols.end()));
-                        if (lines_column)
-                            lines_column->insert(Array(lines.begin(), lines.end()));
+                        symbolized = symbolizeTrace(error.trace.data(), error.trace.size(), need_symbols, need_lines);
                     }
-                    catch (...)
+                    catch (const Exception & e)
                     {
+                        if (e.code() != ErrorCodes::CANNOT_PARSE_DWARF)
+                            throw;
+
                         /// Symbolization fails for the whole binary rather than for a single address,
                         /// so report it only once instead of flooding the log on every query.
                         static std::once_flag reported;
@@ -118,8 +123,18 @@ void StorageSystemErrors::fillData(MutableColumns & res_columns, ContextPtr cont
                         });
                     }
                 }
+
+                /// Insert outside of the `try`: `ColumnArray::insert` appends nested elements before the offset,
+                /// so an exception (e.g. `MEMORY_LIMIT_EXCEEDED`) thrown here must propagate, not leave a partial row.
+                if (symbolized)
+                {
+                    if (symbols_column)
+                        symbols_column->insert(Array(symbolized->first.begin(), symbolized->first.end()));
+                    if (lines_column)
+                        lines_column->insert(Array(symbolized->second.begin(), symbolized->second.end()));
+                }
 #endif
-                /// Fill whatever was not inserted above (no trace, unsupported platform, or a failure),
+                /// Fill whatever was not inserted above (no trace, unsupported platform, or a DWARF failure),
                 /// keeping all columns of the row the same size.
                 if (symbols_column && symbols_column->size() == symbols_old_size)
                     symbols_column->insertDefault();
