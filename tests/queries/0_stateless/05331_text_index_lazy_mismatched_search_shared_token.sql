@@ -50,14 +50,16 @@ FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE ha
 
 -- The materialize mode reads the same columns, so check that both lazy queries iterated lazy cursors.
 -- Under parallel replicas without a local plan the counters land on the replicas' rows, so sum over every row of each query.
+-- A retry can reuse the database, so only queries since this run created the table count.
 SYSTEM FLUSH LOGS query_log;
+WITH (SELECT metadata_modification_time FROM system.tables WHERE database = currentDatabase() AND name = 'tab_failed_search') AS run_start
 SELECT log_comment, sum(ProfileEvents['TextIndexLazySegmentsPrepared']) > 0
 FROM system.query_log
-WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish'
+WHERE event_date >= toDate(run_start) AND event_time >= run_start AND type = 'QueryFinish'
   AND initial_query_id IN
   (
       SELECT query_id FROM system.query_log
-      WHERE event_date >= yesterday() AND event_time >= now() - 600 AND type = 'QueryFinish'
+      WHERE event_date >= toDate(run_start) AND event_time >= run_start AND type = 'QueryFinish'
         AND current_database = currentDatabase() AND is_initial_query AND log_comment IN ('05331_or_lazy', '05331_not_lazy')
   )
 GROUP BY log_comment
