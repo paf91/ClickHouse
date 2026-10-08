@@ -1728,7 +1728,7 @@ When adding a regular expression with the `\<host_regexp\>` xml tag, the RE2 eng
 When adding a single S3 bucket with the `\<s3_bucket\>` xml tag, as `host/bucket` or `host:port/bucket`:
 - it is useful when the endpoint is shared by many parties, for example the path-style AWS endpoint `s3.us-west-2.amazonaws.com`, and allowing the whole host would allow every bucket on it.
 - the bucket is taken from the parsed S3 URL, so the entry matches both `https://s3.us-west-2.amazonaws.com/my-bucket/...` and `https://my-bucket.s3.us-west-2.amazonaws.com/...`.
-- it applies to S3 URLs only: the `s3` table functions and engines, the `S3` database engine, and `BACKUP`/`RESTORE` to `S3`.
+- it applies to S3 URLs only: the `s3` table functions and engines, the `S3` database engine, `BACKUP`/`RESTORE` to `S3`, and S3 disks created in SQL with the `disk` function.
 
 For example:
 

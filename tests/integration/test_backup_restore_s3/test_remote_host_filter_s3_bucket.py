@@ -81,6 +81,39 @@ def test_s3_table_function_respects_bucket():
     assert "UNACCEPTABLE_URL" in error, error
 
 
+@pytest.mark.parametrize("disk_type", ["s3", "s3_plain_rewritable"])
+def test_custom_s3_disk_respects_bucket(disk_type):
+    name = uuid.uuid4().hex
+
+    def create(table, endpoint):
+        return node.query_and_get_error(
+            f"""
+            CREATE TABLE {table} (id UInt64, s String) ENGINE = MergeTree ORDER BY id
+            SETTINGS disk = disk(
+                type = '{disk_type}',
+                endpoint = '{endpoint}',
+                access_key_id = 'minio',
+                secret_access_key = '{minio_secret_key}')
+            """
+        )
+
+    assert create(f"t_disk_{name}", f"http://minio1:9001/root/data/disks/{name}/") == ""
+    node.query(f"INSERT INTO t_disk_{name} SELECT * FROM t")
+    assert node.query(f"SELECT count() FROM t_disk_{name}") == "2\n"
+    node.query(f"DROP TABLE t_disk_{name} SYNC")
+
+    # Other buckets on the allowed host, another port and another host are rejected before the disk
+    # (and its S3 client) is created.
+    for endpoint in [
+        f"http://minio1:9001/other/data/disks/{name}/",
+        f"http://minio1:9001/root-other/data/disks/{name}/",
+        f"http://minio1:9002/root/data/disks/{name}/",
+        f"http://resolver:8080/root/data/disks/{name}/",
+    ]:
+        error = create(f"t_disk_bad_{name}", endpoint)
+        assert "UNACCEPTABLE_URL" in error, error
+
+
 def test_database_s3_respects_bucket():
     name = uuid.uuid4().hex
     node.query(

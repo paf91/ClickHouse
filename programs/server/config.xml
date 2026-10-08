@@ -1090,7 +1090,8 @@
             Use it when the endpoint is shared by many parties, e.g. a path-style AWS endpoint such as s3.us-west-2.amazonaws.com,
             and allowing the whole host would allow every bucket on it. The bucket is taken from the parsed S3 URL,
             so the entry matches both https://s3.us-west-2.amazonaws.com/my-bucket/ and https://my-bucket.s3.us-west-2.amazonaws.com/.
-            Applies to S3 URLs only (the s3 table functions and engines, the S3 database engine, BACKUP and RESTORE to S3):
+            Applies to S3 URLs only (the s3 table functions and engines, the S3 database engine, BACKUP and RESTORE to S3,
+            and S3 disks created in SQL with the disk function):
                     <s3_bucket>s3.us-west-2.amazonaws.com/my-bucket</s3_bucket>
         -->
     <!--</remote_url_allow_hosts>-->
