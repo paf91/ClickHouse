@@ -4558,29 +4558,33 @@ ActionsDAG::NodeRawConstPtrs ActionsDAG::extractConjunctionAtoms(const Node * pr
     return atoms;
 }
 
-ActionsDAG ActionsDAG::restrictFilterDAGToInputs(
-    const ActionsDAG::Node * filter_node, const NameSet & available_inputs, bool lazy_execution_forced) const
+ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter_node, const NameSet & available_inputs) const
 {
-    /// A weakened `AND` evaluates its later operands on more rows, and the projection evaluates the filter a second
-    /// time. So the result of walking `OR` is used only if it evaluates no function lazily and nothing that is
-    /// non-deterministic or stateful. With `force_enable` every function is lazy.
-    if (!lazy_execution_forced)
+    /// The projection evaluates the filter on rows the main read may skip, and a weakened `AND` evaluates its later
+    /// operands on more rows. So the result of walking `OR` is used only if nothing in it can throw or give another
+    /// value when evaluated again: `AND`, `OR`, and comparisons or `IN` over native numbers.
+    auto restricted = restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/true);
+
+    auto is_number = [](const Node * node) { return isNativeNumber(removeLowCardinalityAndNullable(node->result_type)); };
+    auto is_total = [&](const Node & node)
     {
-        auto restricted = restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/true);
-        auto is_unsafe = [](const Node & node)
-        {
-            if (isNonDeterministicOrStateful(node))
-                return true;
-            if (node.type != ActionType::FUNCTION || !node.function_base)
-                return false;
-            DataTypesWithConstInfo arguments;
-            for (const auto * child : node.children)
-                arguments.push_back({child->result_type, child->column != nullptr});
-            return node.function_base->isSuitableForShortCircuitArgumentsExecution(arguments);
-        };
-        if (std::ranges::none_of(restricted.nodes, is_unsafe))
-            return restricted;
-    }
+        if (node.type == ActionType::INPUT || node.type == ActionType::COLUMN || node.type == ActionType::ALIAS)
+            return true;
+        if (node.type != ActionType::FUNCTION || !node.function_base)
+            return false;
+        const auto & name = node.function_base->getName();
+        if (name == "and" || name == "or")
+            return true;
+        if (name == "equals" || name == "notEquals" || name == "less" || name == "greater" || name == "lessOrEquals"
+            || name == "greaterOrEquals")
+            return std::ranges::all_of(node.children, is_number);
+        if (name == "in" || name == "notIn")
+            return is_number(node.children.front());
+        return false;
+    };
+
+    if (std::ranges::all_of(restricted.nodes, is_total))
+        return restricted;
     return restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/false);
 }
 

@@ -36,11 +36,13 @@ SELECT count() FROM t_projection_polarity WHERE (a = 1 AND if(b = 1, NULL, NULL)
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND toFloat64(b);
 -- `throwIf` runs only where `b = 1`, so `b = 1` must not be weakened under the `OR`.
 SELECT count() FROM t_projection_polarity WHERE (a <= 2 AND b = 1 AND throwIf(a = 0) = 0) OR a = 2;
--- With every function lazy nothing tells which of them may throw, so `b = 1` is not weakened under the `OR` at all.
+-- Under `force_enable` the `gcd` also runs only where `b = 1`, so `b = 1` must not be weakened under the `OR`.
 SELECT count() FROM t_projection_polarity WHERE (a <= 2 AND b = 1 AND gcd(a, 0) = 0) OR a = 2
 SETTINGS short_circuit_function_evaluation = 'force_enable';
 -- `rand()` must not be drawn a second time over the projection: about half of the a = 1 rows are kept.
 SELECT count() BETWEEN 2800 AND 3200 FROM t_projection_polarity WHERE (a = 1 AND b = 7 AND rand() % 2 = 0) OR a = 2;
+-- The projection evaluates the filter on rows the main read skips (`id < 16384`), and `gcd` throws on `x = 5` there.
+SELECT count() FROM t_projection_polarity WHERE id >= 16384 AND ((a = 1 AND b = 7 AND gcd(1, x - 5) = 1) OR (a = 2 AND b = 8));
 
 -- A conjunct of an `AND` read with positive polarity must still be weakened, or the index stops pruning.
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND b = 7;
@@ -57,6 +59,8 @@ SELECT count() FROM t_projection_polarity WHERE (a = 1 AND x = 5 AND b = 7) OR (
 SETTINGS log_comment = '05218_pruning_alive_or';
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND ((x = 5 AND b = 7) OR (x = 6 AND b = 8))
 SETTINGS log_comment = '05218_pruning_alive_or_nested';
+SELECT count() FROM t_projection_polarity WHERE a IN (1, 2) AND ((x = 5 AND b = 7) OR (x = 6 AND b = 8))
+SETTINGS log_comment = '05218_pruning_alive_or_in';
 -- A function in a conjunct that is replaced is never evaluated, so it does not stop the walk, also over projection columns.
 SELECT count() FROM t_projection_polarity WHERE (a = 1 AND x = 5 AND toFloat64(b)) OR (a = 2 AND x = 6 AND toFloat64(a) + b > 0)
 SETTINGS log_comment = '05218_pruning_alive_or_dropped';
@@ -72,10 +76,12 @@ SELECT
     maxIf(read_rows, log_comment = '05218_pruning_alive_nested') <= 2 * 8192 AS pruned_nested,
     maxIf(read_rows, log_comment = '05218_pruning_alive_or') <= 2 * 8192 AS pruned_or,
     maxIf(read_rows, log_comment = '05218_pruning_alive_or_nested') <= 2 * 8192 AS pruned_or_nested,
+    maxIf(read_rows, log_comment = '05218_pruning_alive_or_in') <= 2 * 8192 AS pruned_or_in,
     maxIf(read_rows, log_comment = '05218_pruning_alive_or_dropped') <= 2 * 8192 AS pruned_or_dropped
 FROM system.query_log
 WHERE current_database = currentDatabase() AND type = 'QueryFinish'
   AND log_comment IN ('05218_pruning_alive', '05218_pruning_off', '05218_pruning_alive_nested',
-                      '05218_pruning_alive_or', '05218_pruning_alive_or_nested', '05218_pruning_alive_or_dropped');
+                      '05218_pruning_alive_or', '05218_pruning_alive_or_nested', '05218_pruning_alive_or_in',
+                      '05218_pruning_alive_or_dropped');
 
 DROP TABLE t_projection_polarity;
