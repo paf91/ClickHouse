@@ -122,7 +122,6 @@ void normalizeLegacyToTimeInAlterMetadataDefinitions(ASTAlterQuery & alter)
     }
 }
 
-/// Like in `CREATE TABLE`, a column added without `NULL` / `NOT NULL` is `Nullable` under `data_type_default_nullable`.
 /// The resolved type is spelled out in the query, so the hosts that replay it do not depend on the setting.
 void applyDataTypeDefaultNullableToAddedColumns(ASTAlterQuery & alter)
 {
