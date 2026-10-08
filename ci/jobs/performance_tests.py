@@ -151,6 +151,8 @@ TEST_PERF_CHANGES_TABLE = "perf_test_perf_changes_v1"
 PARTIAL_QUERIES_TABLE = "perf_partial_queries_v1"
 SKIPPED_TESTS_TABLE = "perf_skipped_tests_v1"
 RUN_ERRORS_TABLE = "perf_run_errors_v1"
+# Run warnings share the run errors table, told apart by this `test` value.
+RUN_WARNING_TEST = "(warning)"
 METRIC_CHANGES_TABLE = "perf_metric_changes_v1"
 FLAMEGRAPH_STACKS_TABLE = "perf_flamegraph_stacks_v1"
 
@@ -342,6 +344,13 @@ REPORT_UPLOADS = [
         "table_columns": ["test", "error"],
         "input_schema": "test String, error String",
         "select_exprs": ["test", "error"],
+    },
+    {
+        "table": RUN_ERRORS_TABLE,
+        "source": f"{perf_wd}/run-warnings.tsv",
+        "table_columns": ["test", "error"],
+        "input_schema": "warning String",
+        "select_exprs": [f"'{RUN_WARNING_TEST}'", "warning"],
     },
     {
         "table": METRIC_CHANGES_TABLE,
@@ -1031,7 +1040,7 @@ def export_system_logs(servers):
     return True
 
 
-def insert_into_cidb(cidb, info, table, query, data, deadline):
+def insert_into_cidb(cidb, info, table, query, data, deadline, token_key=None):
     """Run a REPORT-stage INSERT into `table`. Returns None on success and the
     reason of the failure otherwise.
 
@@ -1039,8 +1048,9 @@ def insert_into_cidb(cidb, info, table, query, data, deadline):
     `DASHBOARD_INPUT_TABLES` that CIDB failed without rejecting it
     (`last_rejected`) is retried while another attempt fits. Every attempt
     carries the same `insert_deduplication_token`, so the server drops a
-    resent block that an attempt abandoned by the client did commit."""
-    token = f"{info.pr_number}/{info.sha}/{info.job_name}/{get_check_start_time()}/{table}"
+    resent block that an attempt abandoned by the client did commit.
+    `token_key` tells apart several uploads into the same table."""
+    token = f"{info.pr_number}/{info.sha}/{info.job_name}/{get_check_start_time()}/{token_key or table}"
     settings = {"insert_deduplication_token": token}
     if deadline is None:
         if cidb.do_insert_query(
@@ -1115,7 +1125,9 @@ def run_report_upload(cfg, cidb, info, reference_sha, compare_against_release, d
     )
     line_count = data.count("\n")
     print(f"Do insert into [{cfg['table']}]: >>>\n{query}\n<<<")
-    error = insert_into_cidb(cidb, info, cfg["table"], query, data, deadline)
+    error = insert_into_cidb(
+        cidb, info, cfg["table"], query, data, deadline, token_key=f"{cfg['table']}/{source_path.name}"
+    )
     if error is None:
         print(f"Inserted [{line_count}] rows into [{cfg['table']}]")
     else:
@@ -1479,6 +1491,21 @@ def find_prev_build(info, build_type):
         return link
     print(f"WARNING: latest master reference build is also unavailable: {link}")
     return None
+
+
+def stale_reference_warning(info, link_for_ref_ch):
+    """Why the reference build is older than the master revision tested with this PR, or "" when it is not."""
+    commits = info.get_kv_data("master_track_commits_sha") or []
+    behind = next(
+        (i for i, sha in enumerate(commits) if f"/{sha}/" in link_for_ref_ch), 0
+    )
+    if behind == 0:
+        return ""
+    return (
+        f"The reference is master {commits[behind][:12]}, {behind} commits behind master {commits[0][:12]} "
+        "tested with this PR, which had no build yet. Changes merged into master in between show up as "
+        f"changes of this PR: https://github.com/ClickHouse/ClickHouse/compare/{commits[behind]}...{commits[0]}"
+    )
 
 
 def find_base_release_build(info, build_type):
@@ -2300,11 +2327,15 @@ def main():
     else:
         Utils.raise_with_error("Unknown processor architecture")
 
-    reference_warning = (
-        LOCAL_REFERENCE_FALLBACK_WARNING
-        if info.is_local_run and link_for_ref_ch.startswith(LATEST_MASTER_BUILD_PREFIX)
-        else ""
+    use_latest_master = info.is_local_run and link_for_ref_ch.startswith(
+        LATEST_MASTER_BUILD_PREFIX
     )
+    if use_latest_master:
+        reference_warning = LOCAL_REFERENCE_FALLBACK_WARNING
+    elif compare_against_master:
+        reference_warning = stale_reference_warning(info, link_for_ref_ch)
+    else:
+        reference_warning = ""
 
     if compare_against_release:
         print("It's a comparison against latest release baseline")
@@ -2418,7 +2449,7 @@ def main():
         # The latest-master URL is mutable: refresh it when entering the install
         # stage. Also invalidate a cached binary when the selected baseline changes.
         if (
-            reference_warning
+            use_latest_master
             or not Path(f"{perf_left}/.done").is_file()
             or not reference_source.is_file()
             or reference_source.read_text() != link_for_ref_ch
@@ -2731,6 +2762,8 @@ def main():
                 reference.write(
                     f"\nWARNING: {reference_warning}\nReference commit: {reference_sha}\n"
                 )
+        with open(f"{perf_wd}/run-warnings.tsv", "w", encoding="utf-8") as warnings:
+            warnings.write(reference_warning + "\n" if reference_warning else "")
         Shell.check(f"git log -1 HEAD > {perf_wd}/right-commit.txt")
         os.environ["CLICKHOUSE_PERFORMANCE_COMPARISON_CHECK_NAME_PREFIX"] = (
             Utils.normalize_string(info.job_name)
