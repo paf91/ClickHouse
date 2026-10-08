@@ -10,6 +10,7 @@
 #include <Common/typeid_cast.h>
 #include <Core/Settings.h>
 #include <Core/ServerSettings.h>
+#include <DataTypes/dataTypeToAST.h>
 #include <Databases/DatabaseFactory.h>
 #include <Databases/DatabaseReplicated.h>
 #include <Databases/IDatabase.h>
@@ -69,6 +70,7 @@ namespace Setting
     extern const SettingsUInt64 max_parser_depth;
     extern const SettingsUInt64 max_parser_backtracks;
     extern const SettingsBool use_legacy_to_time;
+    extern const SettingsBool data_type_default_nullable;
 }
 
 namespace ServerSetting
@@ -117,6 +119,25 @@ void normalizeLegacyToTimeInAlterMetadataDefinitions(ASTAlterQuery & alter)
             if (payload)
                 replaceLegacyToTime(*payload);
         }
+    }
+}
+
+/// Like in `CREATE TABLE`, a column added without `NULL` / `NOT NULL` is `Nullable` under `data_type_default_nullable`.
+/// The resolved type is spelled out in the query, so the hosts that replay it do not depend on the setting.
+void applyDataTypeDefaultNullableToAddedColumns(ASTAlterQuery & alter)
+{
+    for (const auto & child : alter.command_list->children)
+    {
+        auto * command = child->as<ASTAlterCommand>();
+        if (command->type != ASTAlterCommand::ADD_COLUMN)
+            continue;
+
+        auto & col_decl = command->col_decl->as<ASTColumnDeclaration &>();
+        if (!col_decl.getType() || col_decl.null_modifier)
+            continue;
+
+        col_decl.setType(dataTypeToAST(InterpreterCreateQuery::getColumnType(
+            col_decl, /*make_columns_nullable=*/ true, /*pin_current_state_version=*/ true)));
     }
 }
 
@@ -469,6 +490,10 @@ BlockIO InterpreterAlterQuery::executeToTable(const ASTAlterQuery & alter)
 
     if (getContext()->getSettingsRef()[Setting::use_legacy_to_time])
         normalizeLegacyToTimeInAlterMetadataDefinitions(query_ptr->as<ASTAlterQuery &>());
+
+    if (settings[Setting::data_type_default_nullable] && !getContext()->isDDLOrOnClusterInternal()
+        && !getContext()->getClientInfo().is_shared_catalog_internal)
+        applyDataTypeDefaultNullableToAddedColumns(query_ptr->as<ASTAlterQuery &>());
 
     auto table_id = getContext()->tryResolveStorageID(alter);
     StoragePtr table;

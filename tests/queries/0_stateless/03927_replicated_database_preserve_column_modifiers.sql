@@ -12,6 +12,7 @@ USE {CLICKHOUSE_DATABASE:Identifier};
 -- Verify that explicit NOT NULL is preserved when data_type_default_nullable=1.
 -- The DDL replayed from ZooKeeper on secondary replicas must not re-apply
 -- data_type_default_nullable, because the column type is already resolved.
+-- The same holds for the columns added by ALTER TABLE ... ADD COLUMN.
 SET data_type_default_nullable = 1;
 
 CREATE TABLE t_not_null
@@ -21,6 +22,13 @@ CREATE TABLE t_not_null
 )
 ENGINE = Memory
 FORMAT Null;
+
+SELECT name, type
+FROM system.columns
+WHERE database = currentDatabase() AND table = 't_not_null'
+ORDER BY position;
+
+ALTER TABLE t_not_null ADD COLUMN added Int32, ADD COLUMN added_not_null Int32 NOT NULL FORMAT Null;
 
 SELECT name, type
 FROM system.columns
