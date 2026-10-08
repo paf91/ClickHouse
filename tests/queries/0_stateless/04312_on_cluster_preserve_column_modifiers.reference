@@ -6,3 +6,4 @@ n.b	Array(String)
 key	Int64
 added	Nullable(Int32)
 added_not_null	Int32
+Nullable(Int64)

@@ -10,6 +10,8 @@
 #include <Common/typeid_cast.h>
 #include <Core/Settings.h>
 #include <Core/ServerSettings.h>
+#include <DataTypes/DataTypeFactory.h>
+#include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/dataTypeToAST.h>
 #include <Databases/DatabaseFactory.h>
 #include <Databases/DatabaseReplicated.h>
@@ -123,20 +125,24 @@ void normalizeLegacyToTimeInAlterMetadataDefinitions(ASTAlterQuery & alter)
 }
 
 /// The resolved type is spelled out in the query, so the hosts that replay it do not depend on the setting.
-void applyDataTypeDefaultNullableToAddedColumns(ASTAlterQuery & alter)
+void applyDataTypeDefaultNullableToColumnDeclarations(ASTAlterQuery & alter)
 {
     for (const auto & child : alter.command_list->children)
     {
         auto * command = child->as<ASTAlterCommand>();
-        if (command->type != ASTAlterCommand::ADD_COLUMN)
+        const bool is_add = command->type == ASTAlterCommand::ADD_COLUMN;
+        if (!is_add && command->type != ASTAlterCommand::MODIFY_COLUMN)
             continue;
 
         auto & col_decl = command->col_decl->as<ASTColumnDeclaration &>();
         if (!col_decl.getType() || col_decl.null_modifier)
             continue;
 
-        col_decl.setType(dataTypeToAST(InterpreterCreateQuery::getColumnType(
-            col_decl, /*make_columns_nullable=*/ true, /*pin_current_state_version=*/ true)));
+        /// Like `AlterCommand::parse`, only `ADD COLUMN` pins the current aggregate function state version.
+        DataTypePtr type = is_add
+            ? InterpreterCreateQuery::getColumnType(col_decl, /*make_columns_nullable=*/ true, /*pin_current_state_version=*/ true)
+            : makeNullable(DataTypeFactory::instance().get(col_decl.getType()));
+        col_decl.setType(dataTypeToAST(type));
     }
 }
 
@@ -492,7 +498,7 @@ BlockIO InterpreterAlterQuery::executeToTable(const ASTAlterQuery & alter)
 
     if (settings[Setting::data_type_default_nullable] && !getContext()->isDDLOrOnClusterInternal()
         && !getContext()->getClientInfo().is_shared_catalog_internal)
-        applyDataTypeDefaultNullableToAddedColumns(query_ptr->as<ASTAlterQuery &>());
+        applyDataTypeDefaultNullableToColumnDeclarations(query_ptr->as<ASTAlterQuery &>());
 
     auto table_id = getContext()->tryResolveStorageID(alter);
     StoragePtr table;

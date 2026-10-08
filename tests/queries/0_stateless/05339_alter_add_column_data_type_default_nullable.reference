@@ -10,4 +10,10 @@ u	Nullable(UInt8)
 a	Array(Int32)
 1	\N	\N	0	\N	7	\N	\N	\N	[]
 2	\N	\N	0	\N	7	\N	\N	\N	[]
-k_off	Int64
+k	Nullable(Int64)
+a	Array(Int32)
+k_off	Nullable(Int64)
+k_off_not_null	Int64
+1	\N
+2	\N
+3	30

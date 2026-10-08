@@ -17,9 +17,15 @@ SELECT name, type FROM system.columns WHERE database = currentDatabase() AND tab
 SELECT * FROM t_alter_default_nullable ORDER BY i;
 
 SET data_type_default_nullable = 0;
-ALTER TABLE t_alter_default_nullable ADD COLUMN k_off Int32;
--- MODIFY COLUMN keeps the declared type.
+ALTER TABLE t_alter_default_nullable ADD COLUMN k_off Int32, ADD COLUMN k_off_not_null Int32;
+INSERT INTO t_alter_default_nullable (i, k) VALUES (3, 30);
+
 SET data_type_default_nullable = 1;
+ALTER TABLE t_alter_default_nullable MODIFY COLUMN k Int64;
 ALTER TABLE t_alter_default_nullable MODIFY COLUMN k_off Int64;
-SELECT name, type FROM system.columns WHERE database = currentDatabase() AND table = 't_alter_default_nullable' AND name = 'k_off';
+ALTER TABLE t_alter_default_nullable MODIFY COLUMN k_off_not_null Int64 NOT NULL;
+ALTER TABLE t_alter_default_nullable MODIFY COLUMN k_off_not_null COMMENT 'c';
+ALTER TABLE t_alter_default_nullable MODIFY COLUMN a Array(Int64); -- { serverError ILLEGAL_TYPE_OF_ARGUMENT }
+SELECT name, type FROM system.columns WHERE database = currentDatabase() AND table = 't_alter_default_nullable' AND name IN ('k', 'a', 'k_off', 'k_off_not_null') ORDER BY position;
+SELECT i, k FROM t_alter_default_nullable ORDER BY i;
 DROP TABLE t_alter_default_nullable;
