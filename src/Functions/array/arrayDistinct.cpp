@@ -71,9 +71,7 @@ private:
         ColumnArray::Offsets & res_offsets,
         const ColumnNullable * nullable_col);
 
-    /// The null map check is resolved at compile time, and the loop is kept out of line: inlined into
-    /// `executeNumber` with a run-time null map check, it runs out of registers on aarch64 and
-    /// rematerializes the `DefaultHash` multiplier constants for every element. Keep `NO_INLINE`.
+    /// `NO_INLINE` to keep the loop's register allocation independent of the caller.
     template <typename T, bool has_null_map>
     NO_INLINE static void executeNumberImpl(
         const T * values,
