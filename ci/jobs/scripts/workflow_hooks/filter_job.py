@@ -146,6 +146,9 @@ _COVERAGE_PIPELINE_PATHS = (
     "ci/defs/defs.py",
     # Schedules the coverage jobs and their `arm_binary` replacements in pull requests.
     "ci/workflows/pull_request.py",
+    # Generated from `ci/workflows/pull_request.py`: its `needs` / `if` wiring runs these jobs,
+    # so a pull request that only regenerates it still runs one of the coverage-equivalent paths.
+    ".github/workflows/pull_request.yml",
     "tests/clickhouse-test",
     "tests/config/",
     # Select the tests of the `ParallelReplicas` and `AsyncInsert` configurations.
