@@ -39,4 +39,11 @@ SELECT 'not, no index', count(), sum(k) FROM tab_failed_search WHERE hasToken(s,
 SETTINGS use_skip_indexes = 0, query_plan_direct_read_from_text_index = 0;
 SELECT 'not, lazy', count(), sum(k) FROM tab_failed_search WHERE hasToken(s, 'alpha') AND NOT hasAllTokens(s, ['alpha', 'beta']);
 
+-- Both searches of each lazy query must be read from the index as `__text_index_*` columns, or the lazy reader is
+-- never reached. Parallel replicas are disabled because without a local plan EXPLAIN shows only the remote read.
+SELECT 'or, index columns', uniqExactArray(extractAll(explain, '__text_index_\\w+'))
+FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE hasAllTokens(s, ['alpha', 'beta']) OR hasAllTokens(s, ['alpha', 'gamma']) SETTINGS enable_parallel_replicas = 0);
+SELECT 'not, index columns', uniqExactArray(extractAll(explain, '__text_index_\\w+'))
+FROM (EXPLAIN actions = 1 SELECT count(), sum(k) FROM tab_failed_search WHERE hasToken(s, 'alpha') AND NOT hasAllTokens(s, ['alpha', 'beta']) SETTINGS enable_parallel_replicas = 0);
+
 DROP TABLE tab_failed_search;

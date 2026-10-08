@@ -3,3 +3,5 @@ or, no index	50	12250
 or, lazy	50	12250
 not, no index	500	124750
 not, lazy	500	124750
+or, index columns	2
+not, index columns	2
