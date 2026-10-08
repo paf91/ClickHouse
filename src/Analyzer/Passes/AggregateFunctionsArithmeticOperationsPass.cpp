@@ -12,6 +12,7 @@
 
 #include <Core/Settings.h>
 
+#include <DataTypes/DataTypeInterval.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeNullable.h>
 
@@ -117,15 +118,28 @@ public:
           * `a Decimal32(0)`, `sum(a / 2)` over `{1, 1}` is `0`, but `sum(a) / 2` is `1`, and `sum(a * 3)`
           * throws `DECIMAL_OVERFLOW` for a row `999999999`, but `sum(a) * 3` does not.
           */
-        /// Nor with a compound operand: `min` and `max` order an `Array`, a `Tuple` or a `Map` lexicographically, which an
-        /// element-wise operation does not preserve, and they do not accept a `Variant`.
+        /// Nor with an operand that is not an integer, a float or an interval, except a date or a time under `min` or `max`:
+        /// `min` and `max` order an `Array` or a `Tuple` lexicographically, which an element-wise operation does not preserve,
+        /// `sum` and `avg` reject an IP address, and `avg` of a date or a time is rounded to its resolution.
+        const bool is_min_or_max = lower_aggregate_function_name == "min" || lower_aggregate_function_name == "max";
+        bool has_date_time_argument = false;
+        bool has_day_or_longer_interval = false;
         for (const auto & argument : arithmetic_function_arguments_nodes)
         {
             const auto argument_type = removeNullable(removeLowCardinality(argument->getResultType()));
-            if (isDecimal(argument_type) || isArray(argument_type) || isTuple(argument_type) || isMap(argument_type)
-                || isVariant(argument_type))
+            const WhichDataType which(argument_type);
+            if (!which.isInteger() && !which.isFloat() && !which.isInterval()
+                && !(is_min_or_max && which.isDateOrDate32OrTimeOrTime64OrDateTimeOrDateTime64()))
                 return;
+
+            has_date_time_argument |= which.isDateTimeOrDateTime64();
+            if (const auto * interval_type = typeid_cast<const DataTypeInterval *>(argument_type.get()))
+                has_day_or_longer_interval |= interval_type->getKind() >= IntervalKind(IntervalKind::Kind::Day);
         }
+
+        /// A day or longer is added to a `DateTime` in its time zone, which is not monotone across a DST change.
+        if (has_date_time_argument && has_day_or_longer_interval)
+            return;
 
         /** Need reverse max <-> min for:
           *
