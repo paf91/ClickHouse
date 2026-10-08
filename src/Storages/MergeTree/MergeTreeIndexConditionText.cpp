@@ -2189,7 +2189,7 @@ bool MergeTreeIndexConditionText::traverseJSONSubcolumnKeyNode(
     if (required_columns.size() != 1 || outputs.size() != 1)
         return false;
 
-    auto required_column = required_columns.front();
+    const auto & required_column = required_columns.front();
 
     /// Try to match the required column to a JSON subcolumn with JSONAllPaths index.
     auto json_info = tryMatchJSONSubcolumnToIndex(required_column.name, header, "JSONAllPaths", json_argument_types);
