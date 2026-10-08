@@ -7,8 +7,8 @@
 namespace DB
 {
 
-struct TopKThresholdTracker;
-using TopKThresholdTrackerPtr = std::shared_ptr<TopKThresholdTracker>;
+class ITopKThresholdTracker;
+using TopKThresholdTrackerPtr = std::shared_ptr<ITopKThresholdTracker>;
 
 /// Implementation of IMergingTransform via MergingSortedAlgorithm.
 class MergingSortedTransform final : public IMergingTransform<MergingSortedAlgorithm>
