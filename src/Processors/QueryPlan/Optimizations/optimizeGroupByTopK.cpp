@@ -269,8 +269,8 @@ static TopKThresholdTrackerPtr tryAttachDynamicFilter(
     /// and `GROUP BY a, c` reach different boundaries on `a` over the same rows). So the salt includes all the
     /// grouping keys with their types and the order of every ranked key, not only the first one. Only the first
     /// key has to be passed through unchanged, the others may be computed between the read and the aggregation
-    /// (`GROUP BY a, b % {m:UInt64}`), and the name of a computed key does not identify its expression (an alias,
-    /// a query parameter), so the salt also includes every expression on the way from the read to the aggregation.
+    /// (`GROUP BY a, g` over `SELECT a, b % 100 AS g`), and the name of a computed key does not always identify its
+    /// expression (a column of a subquery), so the salt also includes every expression between the read and the aggregation.
     SipHash hash;
     hash.update(std::string_view("group_by_top_k"));
     hash.update(info.column_name);
