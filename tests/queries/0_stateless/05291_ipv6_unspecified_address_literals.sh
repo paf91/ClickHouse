@@ -35,7 +35,7 @@ ${CLICKHOUSE_CLIENT} --query "
 "
 
 for value in '::' '0:0:0:0:0:0:0:0' '0::0' '::0.0.0.0' '::1' ':::' '::%no-such-interface' 'not-an-ip'; do
-    quota_key=$(${CLICKHOUSE_CURL} -sS -H "X-Forwarded-For: ${value}" "${CLICKHOUSE_URL}&user=${test_user}" \
-        -d "SELECT quota_key FROM system.quota_usage WHERE quota_name = '${test_quota}'")
-    printf '%s\t%s\n' "${value}" "${quota_key}"
+    usage=$(${CLICKHOUSE_CURL} -sS -H "X-Forwarded-For: ${value}" "${CLICKHOUSE_URL}&user=${test_user}" \
+        -d "SELECT count(), any(quota_key) FROM system.quota_usage WHERE quota_name = '${test_quota}'")
+    printf '%s\t%s\n' "${value}" "${usage}"
 done
