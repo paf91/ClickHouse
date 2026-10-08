@@ -1,7 +1,5 @@
 #include <Analyzer/TableFunctionNode.h>
 
-#include <Analyzer/Identifier.h>
-
 #include <Common/assert_cast.h>
 #include <Common/SipHash.h>
 
@@ -33,11 +31,11 @@ namespace
 /// so a dotted database name is left alone.
 bool isSentQualified(const TableFunctionNode & node)
 {
-    if (!node.isParameterizedView() || Identifier{node.getTableFunctionName()}.getPartsSize() != 1)
+    if (!node.isParameterizedView() || node.getTableFunctionName().contains('.'))
         return false;
 
     const auto & storage_id = node.getStorageID();
-    return storage_id.hasDatabase() && Identifier{storage_id.getDatabaseName()}.getPartsSize() == 1;
+    return storage_id.hasDatabase() && !storage_id.getDatabaseName().contains('.');
 }
 
 }
