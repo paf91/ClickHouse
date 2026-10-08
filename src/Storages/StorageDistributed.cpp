@@ -31,6 +31,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 
 #include <Columns/ColumnConst.h>
+#include <Columns/ColumnSet.h>
 
 #include <Common/CurrentMetrics.h>
 #include <Common/Macros.h>
@@ -95,6 +96,7 @@
 #include <Interpreters/getClusterName.h>
 #include <Interpreters/RequiredSourceColumnsVisitor.h>
 #include <Interpreters/getHeaderForProcessingStage.h>
+#include <Interpreters/PreparedSets.h>
 
 #include <TableFunctions/TableFunctionView.h>
 #include <TableFunctions/TableFunctionFactory.h>
@@ -440,6 +442,19 @@ bool isExpressionActionsDeterministic(const ExpressionActionsPtr & actions)
     return true;
 }
 
+bool expressionActionsContainSubquerySet(const ExpressionActionsPtr & actions)
+{
+    for (const auto & node : actions->getActionsDAG().getNodes())
+    {
+        if (!node.column || !WhichDataType(node.result_type).isSet())
+            continue;
+        const auto * column_set = typeid_cast<const ColumnSet *>(node.column->getDataColumnPtr().get());
+        if (column_set && typeid_cast<const FutureSetFromSubquery *>(column_set->getData().get()))
+            return true;
+    }
+    return false;
+}
+
 /// Weaker than `isExpressionActionsDeterministic`: it also accepts a function whose result can change
 /// between queries as long as it is fixed within one, `dictGet` being the motivating case. Such a sharding
 /// key still describes where a row belongs — `allow_nondeterministic_optimize_skip_unused_shards` exists
@@ -604,6 +619,10 @@ StorageDistributed::StorageDistributed(
         /// Check that sharding_key exists in the table and has numeric type.
         checkShardingKeyExistsAndIsNumeric(sharding_key_, getContext(), storage_metadata.getColumns().getAllPhysical());
         sharding_key_expr = buildShardingKeyExpression(sharding_key_, getContext(), storage_metadata.getColumns().getAllPhysical(), false);
+        /// Nothing builds the set of an `IN` over a subquery or a non-`Set` table for a sharding key.
+        if (is_fresh_definition && expressionActionsContainSubquerySet(sharding_key_expr))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                "Sharding expression cannot contain IN with a subquery or a non-Set table, because its set is never built");
         sharding_key_column_name = sharding_key_->getColumnName();
         /// Building the expression analyzes (and may rewrite) the sharding key: e.g. the analyzer const-folds
         /// `if(2, toInt32(id), t0)` down to `toInt32(id)`, so the raw AST name is absent from the expression

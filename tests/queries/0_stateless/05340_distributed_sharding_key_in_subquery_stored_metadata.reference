@@ -1,0 +1,5 @@
+1
+Distributed(\'test_shard_localhost\', \'db\', \'dst\', (k IN (db.dst)))
+reattached
+altered
+BAD_ARGUMENTS
