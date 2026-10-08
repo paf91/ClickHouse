@@ -1,5 +1,7 @@
 0
 WHERE
+2
+5
 1
 2
 4
@@ -10,6 +12,7 @@ WHERE
 3
 4
 5
+5
 PREWHERE
 HAVING
 1	2
@@ -19,3 +22,7 @@ HAVING
 QUALIFY
 1	2
 2	2
+1
+2
+4
+5
