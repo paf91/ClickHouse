@@ -49,6 +49,9 @@ $CLIENT_BINARY_TYPES --query_kind secondary_query -q "INSERT INTO t_dst VALUES (
 $CLIENT_BINARY_TYPES --query_kind secondary_query -q "SELECT d, dynamicType(d) FROM t_src ORDER BY toString(d) SETTINGS enable_parallel_replicas = 0"
 $CLICKHOUSE_CLIENT -q "SELECT x FROM t_dst ORDER BY x"
 
+echo 'external data skipped after an exception'
+seq 1 1000000 | $CLIENT_BINARY_TYPES --max_ast_elements 2 --external --file=- --name=ext --structure='x UInt64' -q "SELECT x FROM ext" 2>&1 | grep -o -m1 'TOO_BIG_AST'
+
 echo 'QueryRunner on a cluster'
 $CLICKHOUSE_CLIENT <<'EOF'
 CREATE TABLE t_runner (query String, database String, settings Map(String, String)) ENGINE = QueryRunner SETTINGS cluster = 'test_shard_localhost', mode = 'synchronous';
