@@ -224,7 +224,7 @@ class Runner:
         if config.init_environment == Environment.MACOS:
             # Drop swap files and other accumulated state; the random offset staggers reboots across the fleet.
             config.max_life = 3600 * 24 * 3 + 900 * random.randint(0, 24)
-            # 20 GiB in `df -k` blocks; a Fast test job uses several GiB of the rootfs.
+            # 20 GiB in KiB; a Fast test job uses several GiB of the rootfs.
             config.free_blocks_threshold = 20 * 1024 * 1024
 
         log(f"max jobs: {config.max_jobs}")
@@ -456,21 +456,14 @@ class Runner:
 
     @staticmethod
     def check_free_disk_space() -> None:
-        # `-k` pins the unit to 1 KiB so `free_blocks_threshold` means the same
-        # everywhere: BSD `df` (macOS) reports 512-byte blocks by default, and
-        # GNU `df` switches to 512 under `POSIXLY_CORRECT` or `$BLOCKSIZE`.
-        result = subprocess.run(
-            ["df", "-k", "/"], capture_output=True, text=True, check=True
-        )
+        usage = shutil.disk_usage("/")
+        free_blocks = usage.free // 1024
+        free_percent = usage.free * 100 // usage.total
         if config.verbose:
-            log(f"df -k / output:\n{result.stdout}", "disk-space")
-        last = result.stdout.splitlines()[-1].split()
-
-        free_blocks = int(last[3])
-        free_percent = int(last[3]) * 100 // int(last[1])
+            log(f"rootfs: {free_blocks} KiB free, {free_percent}%", "disk-space")
 
         if free_blocks < config.free_blocks_threshold:
-            raise RuntimeError(f"Out of disk space: {free_blocks} blocks on rootfs")
+            raise RuntimeError(f"Out of disk space: {free_blocks} KiB free on rootfs")
         if free_percent < config.free_blocks_threshold_percent:
             raise RuntimeError(
                 f"Out of disk space: {free_percent}% of free space on rootfs"
