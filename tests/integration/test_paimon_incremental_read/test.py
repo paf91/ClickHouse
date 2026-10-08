@@ -513,7 +513,11 @@ def test_paimon_incremental_read_watermark_is_monotonic(started_cluster):
 
     zk = cluster.get_kazoo_client("zoo1")
     try:
-        _wait_for_znode(zk, f"{keeper_path}/processing_lock", present=True)
+        node.query(
+            "SYSTEM WAIT FAILPOINT "
+            "paimon_incremental_read_pause_before_watermark_commit PAUSE",
+            timeout=60,
+        )
         assert reader.is_alive(), (
             f"the reader returned before the watermark was moved: {reader_result!r}"
         )
@@ -583,7 +587,11 @@ def test_paimon_incremental_read_operator_reset_is_not_overwritten(started_clust
     reader.start()
 
     try:
-        _wait_for_znode(zk, f"{keeper_path}/processing_lock", present=True)
+        node.query(
+            "SYSTEM WAIT FAILPOINT "
+            "paimon_incremental_read_pause_before_watermark_commit PAUSE",
+            timeout=60,
+        )
         assert reader.is_alive(), (
             f"the reader returned before the cursor was rewound: {reader_result!r}"
         )
