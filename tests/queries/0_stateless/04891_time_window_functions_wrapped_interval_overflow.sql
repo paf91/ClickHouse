@@ -10,6 +10,8 @@ SELECT hop(toDateTime32('1969-12-31'), toIntervalDay(1), toIntervalDay(214748364
 SELECT hopEnd(toDateTime('1970-01-01 01:02:07', 'Europe/Amsterdam'), toIntervalQuarter(413844), toIntervalQuarter(413844)); -- { serverError BAD_ARGUMENTS }
 SELECT hop(materialize(toDateTime(0, 'UTC')), toIntervalMonth(100000), toIntervalMonth(100000)); -- { serverError BAD_ARGUMENTS }
 SELECT hop(toDateTime(0, 'US/Samoa'), toIntervalDay(33554432), toIntervalDay(52543755)); -- { serverError BAD_ARGUMENTS }
+-- If the unchanged end is already before the time, a window that does not contain the time used to be returned.
+SELECT hop(toDateTime(1700000000, 'Europe/Amsterdam'), toIntervalDay(33554432), toIntervalDay(52543755)); -- { serverError BAD_ARGUMENTS }
 -- A sane hop is unaffected.
 SELECT hop(toDateTime('2026-08-13 10:07:00', 'UTC'), toIntervalMinute(15), toIntervalMinute(60), 'UTC');
 SELECT hop(toDateTime('2026-08-13 10:07:00', 'UTC'), toIntervalQuarter(1), toIntervalQuarter(2), 'UTC');
