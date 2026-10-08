@@ -766,8 +766,9 @@ bool SchemaConverter::processSubtreeDynamic(TraversalNode & node)
     if (schema_idx_of_role[Value].has_value() && !is_variant_blob_leaf(*schema_idx_of_role[Value]))
         return false;
 
-    const bool read_as_json = node.type_hint && isObject(node.type_hint);
-    if (node.type_hint && !read_as_json && !isDynamic(node.type_hint))
+    const DataTypePtr type_hint = node.type_hint ? removeNullable(node.type_hint) : nullptr;
+    const bool read_as_json = type_hint && isObject(type_hint);
+    if (type_hint && !read_as_json && !isDynamic(type_hint))
         return false;
 
     /// Spark 4.0 writes variant columns without the `VARIANT` logical type, so they can only be

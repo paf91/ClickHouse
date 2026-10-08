@@ -3641,9 +3641,8 @@ MutableColumnPtr Reader::formOutputColumn(RowSubgroup & row_subgroup, size_t out
             nullable_group_null_map = ColumnUInt8::create(num_rows, UInt8(0));
     }
 
-    TypeIndex kind = output_info.nullable_group
-        ? removeNullable(output_info.input_type)->getColumnType()
-        : output_info.input_type->getColumnType();
+    /// Nullable wraps the type of a physically nullable tuple group and of a variant read as `Nullable(JSON)`.
+    TypeIndex kind = removeNullable(output_info.input_type)->getColumnType();
 
     if (output_info.is_primitive)
     {

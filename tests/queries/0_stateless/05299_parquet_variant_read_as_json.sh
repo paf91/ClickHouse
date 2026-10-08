@@ -44,6 +44,17 @@ ${CLICKHOUSE_LOCAL} --query "
     SELECT n, v.a, v.b.c FROM t ORDER BY n;
 "
 
+echo '--- Nullable(JSON): the variant null and the null group are NULL ---'
+${CLICKHOUSE_LOCAL} --query "
+    SELECT n, v, toTypeName(v), v.a, v.b.c
+    FROM file('${DATA_FILE}', Parquet, 'n Int64, v Nullable(JSON(a Int64))')
+    ORDER BY n
+"
+${CLICKHOUSE_LOCAL} --query "
+    CREATE TABLE tn (n Int64, v Nullable(JSON(a Int64))) ENGINE = Memory;
+    INSERT INTO tn SELECT * FROM file('${DATA_FILE}', Parquet);
+    SELECT n, v, isNull(v) FROM tn ORDER BY n;
+"
 echo '--- schema inference still gives Dynamic ---'
 ${CLICKHOUSE_LOCAL} --query "DESCRIBE file('${DATA_FILE}', Parquet)"
 

@@ -4,6 +4,7 @@
 #include <Columns/ColumnDecimal.h>
 #include <Columns/ColumnDynamic.h>
 #include <Columns/ColumnNullable.h>
+#include <DataTypes/DataTypeNullable.h>
 #include <Columns/ColumnObject.h>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnTuple.h>
@@ -733,12 +734,24 @@ void decodeVariantColumn(
     const NullMap * value_nulls = nullptr;
     const ColumnString & value_strings = unwrapLeaf(value, value_nulls);
 
-    auto * output_dynamic = typeid_cast<ColumnDynamic *>(&output);
-    auto * output_object = typeid_cast<ColumnObject *>(&output);
+    /// `Nullable(JSON)`: values are decoded into the nested column, nulls (of the whole group or a variant
+    /// null) go through `output.insertDefault()`, which inserts NULL into a nullable column.
+    IColumn * output_inner = &output;
+    NullMap * output_null_map = nullptr;
+    DataTypePtr inner_type = output_type;
+    if (auto * output_nullable = typeid_cast<ColumnNullable *>(&output))
+    {
+        output_inner = &output_nullable->getNestedColumn();
+        output_null_map = &output_nullable->getNullMapData();
+        inner_type = removeNullable(output_type);
+    }
+
+    auto * output_dynamic = typeid_cast<ColumnDynamic *>(output_inner);
+    auto * output_object = typeid_cast<ColumnObject *>(output_inner);
     std::optional<JSONPathsFilter> filter;
     if (output_object)
         filter.emplace(
-            assert_cast<const DataTypeObject &>(*output_type), format_settings.json.type_json_use_partial_match_to_skip_paths_by_regexp);
+            assert_cast<const DataTypeObject &>(*inner_type), format_settings.json.type_json_use_partial_match_to_skip_paths_by_regexp);
     else
         chassert(output_dynamic);
 
@@ -771,6 +784,8 @@ void decodeVariantColumn(
         if (output_dynamic)
         {
             decodeValueIntoDynamic(value_blob, 0, context, 0, *output_dynamic);
+            if (output_null_map)
+                output_null_map->push_back(0);
             continue;
         }
 
@@ -793,6 +808,8 @@ void decodeVariantColumn(
 
         checkDepth(context, 0);
         decodeObjectIntoJSON(value_blob, 1, header >> 2, context, 0, *output_object, &*filter);
+        if (output_null_map)
+            output_null_map->push_back(0);
     }
 }
 
