@@ -845,12 +845,12 @@ bool MergeTreeIndexConditionText::traverseAtomNode(const RPNBuilderTreeNode & no
     return false;
 }
 
-VectorWithMemoryTracking<String> MergeTreeIndexConditionText::stringToTokens(const Field & field) const
+VectorWithMemoryTracking<String> MergeTreeIndexConditionText::stringToTokens(const Field & field, bool compact) const
 {
-    return stringToTokens(std::string_view(field.safeGet<String>()));
+    return stringToTokens(std::string_view(field.safeGet<String>()), compact);
 }
 
-VectorWithMemoryTracking<String> MergeTreeIndexConditionText::stringToTokens(std::string_view raw) const
+VectorWithMemoryTracking<String> MergeTreeIndexConditionText::stringToTokens(std::string_view raw, bool compact) const
 {
     VectorWithMemoryTracking<String> tokens;
     if (has_preprocessor)
@@ -862,11 +862,12 @@ VectorWithMemoryTracking<String> MergeTreeIndexConditionText::stringToTokens(std
     {
         tokenizer->stringToTokens(raw.data(), raw.size(), tokens);
     }
-    if (!has_postprocessor)
+    if (compact && !has_postprocessor)
         return tokenizer->compactTokens(tokens);
 
     /// Containment compaction is unsound after a postprocessor (it maps tokens independently), so only dedup.
-    tokens = postprocessor->processTokens(std::move(tokens));
+    if (has_postprocessor)
+        tokens = postprocessor->processTokens(std::move(tokens));
     std::unordered_set<String> unique_tokens(tokens.begin(), tokens.end());
     return VectorWithMemoryTracking<String>(unique_tokens.begin(), unique_tokens.end());
 }
@@ -1376,7 +1377,8 @@ bool MergeTreeIndexConditionText::traverseFunctionNode(
         // hasAny/AllTokens funcs accept either string which will be tokenized or array of strings to be used as-is
         if (value_data_type.isString())
         {
-            search_tokens = stringToTokens(value_field);
+            /// Compaction drops grams implied by longer ones; that holds for All but a row may hold only a dropped gram under Any.
+            search_tokens = stringToTokens(value_field, /*compact=*/ function_name == "hasAllTokens");
         }
         else
         {
