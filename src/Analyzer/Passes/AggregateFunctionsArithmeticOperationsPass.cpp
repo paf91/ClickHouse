@@ -10,6 +10,8 @@
 #include <Analyzer/FunctionNode.h>
 #include <Analyzer/Utils.h>
 
+#include <Common/NaNUtils.h>
+
 #include <Core/Settings.h>
 
 #include <DataTypes/DataTypeInterval.h>
@@ -52,6 +54,16 @@ Field zeroField(const Field & value)
     }
 
     throw Exception(ErrorCodes::BAD_TYPE_OF_FIELD, "Unexpected literal type in function");
+}
+
+/// `x * value` and `x / value` keep the order of `x` and distribute over `sum` only for a finite non-zero `value`.
+bool isFiniteNonZero(const Field & value)
+{
+    if (value.isNull())
+        return false;
+    if (value.getType() == Field::Types::Float64)
+        return isFinite(value.safeGet<Float64>()) && value.safeGet<Float64>() != 0;
+    return value != zeroField(value);
 }
 
 /** Rewrites:   sum([multiply|divide]) -> [multiply|divide](sum)
@@ -118,9 +130,9 @@ public:
           * `a Decimal32(0)`, `sum(a / 2)` over `{1, 1}` is `0`, but `sum(a) / 2` is `1`, and `sum(a * 3)`
           * throws `DECIMAL_OVERFLOW` for a row `999999999`, but `sum(a) * 3` does not.
           */
-        /// Nor with an operand that is not an integer, a float or an interval, except a date or a time under `min` or `max`:
+        /// Nor with an operand that is not an integer or a float, except a date, a time or an interval under `min` or `max`:
         /// `min` and `max` order an `Array` or a `Tuple` lexicographically, which an element-wise operation does not preserve,
-        /// `sum` and `avg` reject an IP address, and `avg` of a date or a time is rounded to its resolution.
+        /// `sum` and `avg` reject an IP address, and `avg` of a date, a time or an interval is rounded to its unit.
         const bool is_min_or_max = lower_aggregate_function_name == "min" || lower_aggregate_function_name == "max";
         bool has_date_time_argument = false;
         bool has_day_or_longer_interval = false;
@@ -128,8 +140,8 @@ public:
         {
             const auto argument_type = removeNullable(removeLowCardinality(argument->getResultType()));
             const WhichDataType which(argument_type);
-            if (!which.isInteger() && !which.isFloat() && !which.isInterval()
-                && !(is_min_or_max && which.isDateOrDate32OrTimeOrTime64OrDateTimeOrDateTime64()))
+            if (!which.isInteger() && !which.isFloat()
+                && !(is_min_or_max && (which.isInterval() || which.isDateOrDate32OrTimeOrTime64OrDateTimeOrDateTime64())))
                 return;
 
             has_date_time_argument |= which.isDateTimeOrDateTime64();
@@ -139,6 +151,10 @@ public:
 
         /// A day or longer is added to a `DateTime` in its time zone, which is not monotone across a DST change.
         if (has_date_time_argument && has_day_or_longer_interval)
+            return;
+
+        const auto * constant_node = right_argument_constant_node ? right_argument_constant_node : left_argument_constant_node;
+        if ((arithmetic_function_name == "multiply" || arithmetic_function_name == "divide") && !isFiniteNonZero(constant_node->getValue()))
             return;
 
         /** Need reverse max <-> min for:

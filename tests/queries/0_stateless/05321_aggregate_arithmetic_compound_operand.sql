@@ -47,6 +47,19 @@ SELECT min(t - INTERVAL 1 DAY), max(t - INTERVAL 1 DAY)
 FROM (SELECT toTimeZone(toDateTime('2020-10-25 00:30:00', 'UTC') + number * 2700, 'Europe/Amsterdam') AS t FROM numbers(2))
 SETTINGS optimize_arithmetic_operations_in_aggregate_functions = 0;
 
+-- Multiplication or division by zero or infinity: `x / -0.0` maps -1 to `inf` and 2 to `-inf`, and `-inf + inf` is `nan`.
+SELECT min(x / -0.0), max(x / -0.0), sum(x / 0.), avg(x / 0), sum(x * inf), sum(-inf * x) FROM values('x Float64', (-1), (2));
+SELECT min(x / -0.0), max(x / -0.0), sum(x / 0.), avg(x / 0), sum(x * inf), sum(-inf * x) FROM values('x Float64', (-1), (2))
+SETTINGS optimize_arithmetic_operations_in_aggregate_functions = 0;
+
+-- A `NULL` constant.
+SELECT min(x * CAST(NULL, 'Nullable(Float64)')), min(CAST(NULL, 'Nullable(Float64)') / x) FROM values('x Float64', (1), (2));
+
+-- `avg` of an interval is rounded to its unit before the constant is added.
+SELECT avg(i + INTERVAL 1 DAY), avg(i - INTERVAL 1 DAY) FROM (SELECT toIntervalDay(number) AS i FROM numbers(2));
+SELECT avg(i + INTERVAL 1 DAY), avg(i - INTERVAL 1 DAY) FROM (SELECT toIntervalDay(number) AS i FROM numbers(2))
+SETTINGS optimize_arithmetic_operations_in_aggregate_functions = 0;
+
 -- Still moved out: a scalar operand, and an hour added to a time. Not moved out: a compound operand, and a day added to a time.
 SELECT extract(arrayStringConcat(groupArray(explain), ' '), 'function_name: (multiply|plus|min)')
 FROM (EXPLAIN QUERY TREE SELECT min(arr[1] * -1) FROM t_aggregate_arithmetic_array);
