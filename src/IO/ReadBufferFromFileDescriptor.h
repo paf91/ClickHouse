@@ -4,6 +4,7 @@
 #include <Interpreters/Context_fwd.h>
 #include <Common/IThrottler.h>
 
+#include <atomic>
 #include <unistd.h>
 
 
@@ -26,7 +27,10 @@ protected:
 
     /// Try to read the data from the OS page cache first to tell such reads apart for the `throttler`.
     /// See `enableOSPageCacheReadsDetection`.
-    bool detect_os_page_cache_reads = false;
+    /// It is turned off on the first read that shows that the file does not support it
+    /// (e.g. `tmpfs` rejects `RWF_NOWAIT` with `EOPNOTSUPP`), to avoid the extra failing system call on every read.
+    /// Atomic, because `readBigAt` can be called concurrently.
+    mutable std::atomic<bool> detect_os_page_cache_reads = false;
 
     /// To be called by the descendants that know the flags the file was opened with.
     /// Has an effect only for `pread` and when the `throttler` ignores the OS page cache reads,

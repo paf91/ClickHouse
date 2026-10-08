@@ -77,12 +77,14 @@ size_t ReadBufferFromFileDescriptor::readImpl(char * to, size_t min_bytes, size_
 
             if (use_pread)
             {
-                if (detect_os_page_cache_reads)
+                if (detect_os_page_cache_reads.load(std::memory_order_relaxed))
                 {
                     /// Fails with `EAGAIN` without waiting for the disk if the data is not in the page cache.
                     /// In this and any other failure, the regular `pread` below reads the data or reports the error.
                     res = preadNoWait(fd, to + bytes_read, to_read, offset + bytes_read);
                     from_os_page_cache = res > 0;
+                    if (res == -1 && isPreadNoWaitUnavailable(errno))
+                        detect_os_page_cache_reads.store(false, std::memory_order_relaxed);
                 }
                 if (!from_os_page_cache)
                     res = ::pread(fd, to + bytes_read, to_read, offset + bytes_read);
@@ -148,11 +150,12 @@ void ReadBufferFromFileDescriptor::enableOSPageCacheReadsDetection(int flags)
     /// The detection costs an extra system call for the data that is not in the page cache,
     /// which is why it is used only when there is a throttler that ignores such reads
     /// (e.g. not for merges, mutations or backups that are throttled only by their own bandwidth limits).
-    detect_os_page_cache_reads = use_pread
+    bool enable = use_pread
         && throttler
         && throttler->ignoresOSPageCacheReads()
         && (flags == -1 || !(flags & O_DIRECT))
         && preadNoWaitUnavailableReason().empty();
+    detect_os_page_cache_reads.store(enable, std::memory_order_relaxed);
 }
 
 
