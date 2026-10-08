@@ -155,8 +155,8 @@ SELECT uuid FROM system.tables WHERE database = currentDatabase() AND name = 't_
 
 SYSTEM DROP COLUMNS CACHE;
 
--- enable_parallel_replicas = 0: with parallel replicas another replica may do the read,
--- and its ProfileEvents never reach this query's query_log row.
+-- `enable_parallel_replicas = 0`: with parallel replicas another replica may do the read,
+-- and its `ProfileEvents` never reach this query's `query_log` row.
 
 -- Read all parts (populate cache)
 SELECT sum(id), sum(value), count() FROM t_cache_multipart

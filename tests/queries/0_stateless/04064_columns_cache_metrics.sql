@@ -19,8 +19,8 @@ INSERT INTO t_cache_metrics SELECT number, toString(number) FROM numbers(10000);
 
 SYSTEM DROP COLUMNS CACHE;
 
--- enable_parallel_replicas = 0: with parallel replicas another replica may do the read,
--- and its ProfileEvents never reach this query's query_log row.
+-- `enable_parallel_replicas = 0`: with parallel replicas another replica may do the read,
+-- and its `ProfileEvents` never reach this query's `query_log` row.
 
 -- First read (cache miss expected)
 SELECT sum(id), count() FROM t_cache_metrics

@@ -24,8 +24,8 @@ SYSTEM DROP COLUMNS CACHE;
 
 -- The first read populates the cache. It really is split into several blocks (checked
 -- through `blockNumber`), so the deferred write has to survive the continuation reads.
--- enable_parallel_replicas = 0: with parallel replicas another replica may do the read,
--- and its ProfileEvents never reach the row of this query checked below.
+-- `enable_parallel_replicas = 0`: with parallel replicas another replica may do the read,
+-- and its `ProfileEvents` never reach the row of this query checked below.
 SELECT uniqExact(blockNumber()) > 1, sum(id), uniqExact(s) FROM t_cc_multi_block
 SETTINGS max_block_size = 65536, preferred_block_size_bytes = 1000000, enable_parallel_replicas = 0;
 
