@@ -1662,18 +1662,20 @@ PostgreSQLHandler::CopyQueryResult PostgreSQLHandler::processCopyQuery(const Str
                 /// so the killed query leaves `system.processes` before the drain below blocks on the
                 /// client (a `KILL QUERY ... SYNC` must not wait for the client to end the copy).
                 io.process_list_entries.clear();
-                message_transport->send(
-                    PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse(
-                        PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse::ERROR, "57014",
-                        "canceling COPY FROM STDIN due to user request"),
-                    true);
                 /// The cancel can land in the middle of a `CopyData` frame, even in the middle of its
                 /// length field if the client split the header. In the first case the rest of the frame is
                 /// payload and is skipped before the drain looks for the next message; in the second there
                 /// is no way to tell payload from a header any more, so the connection cannot be reused -
                 /// let the error propagate and close it, as PostgreSQL does on a desynchronized stream.
+                /// This check comes before the handled error is sent: the outer handler reports the
+                /// propagated error itself, and the client must get exactly one `ErrorResponse`.
                 if (!copy_in_stream.canResynchronize())
                     throw;
+                message_transport->send(
+                    PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse(
+                        PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse::ERROR, "57014",
+                        "canceling COPY FROM STDIN due to user request"),
+                    true);
                 discardRemainingCopyInFrames(copy_in_stream.pendingFrameBytes());
                 return CopyQueryResult::ErrorHandled;
             }
