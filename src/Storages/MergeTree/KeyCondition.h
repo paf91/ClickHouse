@@ -215,6 +215,13 @@ public:
     /// Returns whether there is such a column in the key.
     bool addCondition(const String & column, const Range & range);
 
+    /// Checks if the condition has unknown atoms.
+    bool hasUnknownAtoms() const;
+
+    /// A copy where every atom that cannot be evaluated is replaced with the constant that maximizes the condition.
+    /// It has the same `can_be_true` on every range, but `can_be_false` is not exact, so it must not be used for exact ranges.
+    KeyCondition createWithUnknownAtomsAssumedTrue() const;
+
     String toString() const;
 
     size_t getNumKeyColumns() const { return num_key_columns; }
@@ -259,6 +266,14 @@ public:
         const MonotonicFunctionsChain & functions,
         DataTypePtr current_type,
         bool single_point = false);
+
+    /// How many times `applyMonotonicFunctionsChainToRange` answered "unknown" on the current thread because the chain
+    /// could not be evaluated on a range (rather than because it is not monotonic there). Such an answer is an
+    /// over-approximation, so it supports no exactness claim derived from `matchesExactContinuousRange`, and it
+    /// contradicts none either. The caller takes a snapshot before a check and compares after it: the analysis of a
+    /// part runs on one thread, and the counter is the only channel that reaches through every path applying a chain,
+    /// including `MergeTreeSetIndex`.
+    static size_t getNumUnevaluableChainApplications();
 
     bool matchesExactContinuousRange() const;
 
@@ -513,13 +528,6 @@ public:
         bool date_time_overflow_behavior_ignore_);
 
 private:
-    /// `applyMonotonicFunctionsChainToRange` without the handling of an endpoint the chain cannot compute.
-    static std::optional<Range> applyMonotonicFunctionsChainToRangeImpl(
-        Range key_range,
-        const MonotonicFunctionsChain & functions,
-        DataTypePtr current_type,
-        bool single_point);
-
     /// Whether any atom reads a `Nullable` key column whose analysed range may hold a NULL value.
     /// A NULL satisfies neither a comparison nor its negation, which the two-valued range algebra of
     /// `checkInHyperrectangle` cannot express, so it costs the analysis its `can_be_false` claim.
