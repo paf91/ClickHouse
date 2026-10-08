@@ -354,7 +354,9 @@ public:
     /// constant true where that AND is read with positive polarity, and a filter that cannot be expressed
     /// at all becomes constant true.
     /// Useful for evaluating boolean filters in projection indices when some input columns are missing.
-    ActionsDAG restrictFilterDAGToInputs(const ActionsDAG::Node * filter_node, const NameSet & available_inputs) const;
+    /// `lazy_execution_forced` is whether `short_circuit_function_evaluation` is `force_enable`.
+    ActionsDAG restrictFilterDAGToInputs(
+        const ActionsDAG::Node * filter_node, const NameSet & available_inputs, bool lazy_execution_forced) const;
 
     /// Execute actions for header. Input block must have empty columns.
     /// Result should be equal to the execution of ExpressionActions built from this DAG.

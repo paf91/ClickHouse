@@ -13,14 +13,14 @@ SET use_query_condition_cache = 0;          -- a cached granule set would leak b
 
 DROP TABLE IF EXISTS t_projection_polarity;
 
-CREATE TABLE t_projection_polarity (id UInt64, a UInt64, x UInt64, b UInt64) ENGINE = MergeTree ORDER BY id
+CREATE TABLE t_projection_polarity (id UInt64, a UInt64, x UInt64, b UInt64, d0 Decimal64(0), d18 Decimal64(18)) ENGINE = MergeTree ORDER BY id
 SETTINGS index_granularity = 8192, index_granularity_bytes = 0, min_bytes_for_wide_part = 0;
 
 -- `b` is outside the projection, which is what makes a conjunct over it non-computable there.
-ALTER TABLE t_projection_polarity ADD PROJECTION p (SELECT a, x, _part_offset ORDER BY a);
+ALTER TABLE t_projection_polarity ADD PROJECTION p (SELECT a, x, d0, d18, _part_offset ORDER BY a);
 
 -- A single part, above `min_table_rows_to_use_projection_index`, so the projection is used as an index.
-INSERT INTO t_projection_polarity SELECT number, number % 1000, intDiv(number, 1000), 7 FROM numbers(2000000)
+INSERT INTO t_projection_polarity SELECT number, number % 1000, intDiv(number, 1000), 7, 10, 0 FROM numbers(2000000)
 SETTINGS max_insert_block_size = 2000000, min_insert_block_size_rows = 2000000;
 
 -- Every row with a = 1 has b = 7, so each predicate below is true for all 2000 of them.
@@ -36,6 +36,11 @@ SELECT count() FROM t_projection_polarity WHERE (a = 1 AND if(b = 1, NULL, NULL)
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND toFloat64(b);
 -- `throwIf` runs only where `b = 1`, so `b = 1` must not be weakened under the `OR`.
 SELECT count() FROM t_projection_polarity WHERE (a <= 2 AND b = 1 AND throwIf(a = 0) = 0) OR a = 2;
+-- With every function lazy, a comparison that may throw must not run past a weakened `b = 1` either.
+SELECT count() FROM t_projection_polarity WHERE (a <= 2 AND b = 1 AND d0 = d18) OR a = 2
+SETTINGS short_circuit_function_evaluation = 'force_enable', decimal_check_overflow = 1;
+-- `rand()` must not be drawn a second time over the projection: about half of the a = 1 rows are kept.
+SELECT count() BETWEEN 2800 AND 3200 FROM t_projection_polarity WHERE (a = 1 AND b = 7 AND rand() % 2 = 0) OR a = 2;
 
 -- A conjunct of an `AND` read with positive polarity must still be weakened, or the index stops pruning.
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND b = 7;
@@ -52,6 +57,9 @@ SELECT count() FROM t_projection_polarity WHERE (a = 1 AND x = 5 AND b = 7) OR (
 SETTINGS log_comment = '05218_pruning_alive_or';
 SELECT count() FROM t_projection_polarity WHERE a = 1 AND ((x = 5 AND b = 7) OR (x = 6 AND b = 8))
 SETTINGS log_comment = '05218_pruning_alive_or_nested';
+-- A function in a conjunct that is replaced is never evaluated, so it does not stop the walk.
+SELECT count() FROM t_projection_polarity WHERE (a = 1 AND x = 5 AND toFloat64(b)) OR (a = 2 AND x = 6 AND toBool(b))
+SETTINGS log_comment = '05218_pruning_alive_or_dropped';
 
 SYSTEM FLUSH LOGS query_log;
 
@@ -63,10 +71,11 @@ SELECT
     minIf(read_rows, log_comment = '05218_pruning_off') >= 2000000 AS not_pruned,
     maxIf(read_rows, log_comment = '05218_pruning_alive_nested') <= 2 * 8192 AS pruned_nested,
     maxIf(read_rows, log_comment = '05218_pruning_alive_or') <= 2 * 8192 AS pruned_or,
-    maxIf(read_rows, log_comment = '05218_pruning_alive_or_nested') <= 2 * 8192 AS pruned_or_nested
+    maxIf(read_rows, log_comment = '05218_pruning_alive_or_nested') <= 2 * 8192 AS pruned_or_nested,
+    maxIf(read_rows, log_comment = '05218_pruning_alive_or_dropped') <= 2 * 8192 AS pruned_or_dropped
 FROM system.query_log
 WHERE current_database = currentDatabase() AND type = 'QueryFinish'
   AND log_comment IN ('05218_pruning_alive', '05218_pruning_off', '05218_pruning_alive_nested',
-                      '05218_pruning_alive_or', '05218_pruning_alive_or_nested');
+                      '05218_pruning_alive_or', '05218_pruning_alive_or_nested', '05218_pruning_alive_or_dropped');
 
 DROP TABLE t_projection_polarity;

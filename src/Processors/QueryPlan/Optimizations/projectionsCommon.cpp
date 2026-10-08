@@ -32,6 +32,7 @@ namespace Setting
     extern const SettingsBool parallel_replicas_support_projection;
     extern const SettingsUInt64 max_projection_rows_to_use_projection_index;
     extern const SettingsUInt64 min_table_rows_to_use_projection_index;
+    extern const SettingsShortCircuitFunctionEvaluation short_circuit_function_evaluation;
 }
 
 namespace ErrorCodes
@@ -553,8 +554,10 @@ void filterPartsAndCollectProjectionCandidates(
             available_inputs.emplace(column.name);
 
         auto prewhere_info = std::make_shared<PrewhereInfo>();
-        prewhere_info->prewhere_actions
-            = projection_query_info.filter_actions_dag->restrictFilterDAGToInputs(filter_node, available_inputs);
+        prewhere_info->prewhere_actions = projection_query_info.filter_actions_dag->restrictFilterDAGToInputs(
+            filter_node,
+            available_inputs,
+            context->getSettingsRef()[Setting::short_circuit_function_evaluation] == ShortCircuitFunctionEvaluation::FORCE_ENABLE);
         prewhere_info->need_filter = true;
         prewhere_info->prewhere_column_name = prewhere_info->prewhere_actions.getOutputs().front()->result_name;
         prewhere_info->remove_prewhere_column = true;
