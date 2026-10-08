@@ -337,9 +337,8 @@ TextIndexDirectReadMode MergeTreeIndexConditionText::getDirectReadMode(const Str
 {
     const bool is_array_tokenizer = (tokenizer->getType() == ITokenizer::Type::Array);
 
-    /// One token per pair: `m['key'] = 'value'` is one posting list, `m['key'] IN (...)` the union of one
-    /// list per set element, `mapContainsKeyValue` the union of the first- and repeated-occurrence lists.
-    /// Nothing else is supported yet.
+    /// One token per pair, so each of these is a union of posting lists: one per set element for `IN`,
+    /// two for `mapContainsKeyValue`. Nothing else is supported yet.
     if (tokenizer->getType() == ITokenizer::Type::KeyValuePairs)
     {
         const bool is_exact = function_name == "equals" || function_name == "in" || function_name == "globalIn"
@@ -790,8 +789,7 @@ bool MergeTreeIndexConditionText::traverseAtomNode(const RPNBuilderTreeNode & no
         auto lhs_argument = function.getArgumentAt(0);
         auto rhs_argument = function.getArgumentAt(1);
 
-        /// `tryPrepareSetForTextSearch` sets `out.function` itself, as not every set becomes a
-        /// disjunction of per-element queries.
+        /// The helper sets `out.function` itself: not every set becomes a per-element disjunction.
         if ((function_name == "in" || function_name == "globalIn"
              || function_name == "nullIn" || function_name == "globalNullIn")
             && tryPrepareSetForTextSearch(lhs_argument, rhs_argument, function_name, out))
@@ -2134,8 +2132,7 @@ bool MergeTreeIndexConditionText::traverseMapElementKeyValueSetNode(
     const String & function_name,
     RPNElement & out) const
 {
-    /// Rejects a tuple left-hand side, e.g. `(m['key'], x) IN (('value', 1))`, whose other components
-    /// must match within the same set element - a token union cannot express that.
+    /// Also rejects a tuple left-hand side: a token union cannot bind its other components.
     auto key = tryGetMapElementKeyForIndexColumn(lhs);
     if (!key)
         return false;
@@ -2159,9 +2156,7 @@ bool MergeTreeIndexConditionText::traverseMapElementKeyValueSetNode(
     auto set_column_ptr = recursiveRemoveLowCardinality(columns.front());
     const auto & set_column = *set_column_ptr;
 
-    /// Only a `String` element becomes a pair token as it stands. A `FixedString` one would first need
-    /// the padding normalization that the generic path below applies, and a `Nullable` set carries
-    /// elements this atom cannot bind.
+    /// `FixedString` needs the padding normalization of the generic path, `Nullable` carries NULL elements.
     if (!WhichDataType(set_column.getDataType()).isString())
         return false;
 
@@ -2180,15 +2175,13 @@ bool MergeTreeIndexConditionText::traverseMapElementKeyValueSetNode(
         tokens.push_back(KeyValuePairsTokenizer::encodeToken(*key, value, /*is_duplicate=*/ false));
     }
 
-    /// A query with no tokens reads as "nothing to search for", which direct read turns into an
-    /// always-true virtual column. An empty set matches no row.
+    /// A token-less query becomes an always-true virtual column; an empty set matches no row.
     if (tokens.empty())
     {
         out.function = RPNElement::ALWAYS_FALSE;
         return true;
     }
 
-    /// A row satisfies the predicate exactly when it holds one of these tokens.
     out.function = RPNElement::FUNCTION_HAS_ANY_TOKENS;
     out.text_search_queries.emplace_back(std::make_shared<TextSearchQuery>(
         function_name, TextSearchMode::Any, getDirectReadMode(function_name), std::move(tokens)));
@@ -2327,19 +2320,12 @@ bool MergeTreeIndexConditionText::tryPrepareSetForTextSearch(
     const String & function_name,
     RPNElement & out) const
 {
-    /// The set is read once, here, and the decision derived from it is never revisited, while an
-    /// `ENGINE = Set` table keeps inserting into the very set held by the query. Exact direct read makes
-    /// the tokens the whole answer, so a value inserted afterwards would never match. See
-    /// `FutureSet::isMutableDuringQuery`, which states this requirement, and
-    /// `prepareSetsForDefaultValueEvaluation`, which refuses such a set for a weaker decision.
-    ///
-    /// The element checks below refuse a mutable set today anyway, because `StorageSet` keeps no
-    /// explicit elements, but that is a property of that storage rather than a rule of this analysis.
+    /// Tokens frozen here are never revisited, so a set that keeps changing under the query cannot be
+    /// used. See `FutureSet::isMutableDuringQuery` and `prepareSetsForDefaultValueEvaluation`.
     if (auto future_set = rhs.tryGetPreparedSet(); future_set && future_set->isMutableDuringQuery())
         return false;
 
-    /// The generic path below tokenizes every set element as a string, which can never produce a token
-    /// in the pair format. Partition hard, as `traverseFunctionNode` does.
+    /// The generic path below tokenizes elements as strings, which never yields a pair token.
     if (tokenizer->getType() == ITokenizer::Type::KeyValuePairs)
         return traverseMapElementKeyValueSetNode(lhs, rhs, function_name, out);
 
