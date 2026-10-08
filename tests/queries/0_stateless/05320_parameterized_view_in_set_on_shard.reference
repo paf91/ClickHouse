@@ -17,6 +17,8 @@ SELECT number, number IN (SELECT x FROM pv(p = 0)) FROM dist ORDER BY number;
 3	0
 SELECT countIf(number IN (SELECT x FROM pv(p = 0))) FROM remote('127.0.0.{1,2}', currentDatabase(), data);
 2
+SELECT countIf(number IN (SELECT x FROM pv(p = 0))) FROM dist SETTINGS serialize_query_plan = 1;
+2
 SELECT countIf(number IN (SELECT x FROM pv(p = 0))), countIf(number IN (SELECT x FROM pv(p = 3))) FROM dist;
 2	0
 SELECT countIf(number IN (SELECT x FROM pv(p = 0))) FROM data SETTINGS enable_parallel_replicas = 2,

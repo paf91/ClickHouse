@@ -22,6 +22,7 @@ SELECT countIf(number NOT IN (SELECT x FROM pv(p = 0))) FROM dist;
 SELECT number IN (SELECT x FROM pv(p = 0)) AS k, count() FROM dist GROUP BY k ORDER BY k;
 SELECT number, number IN (SELECT x FROM pv(p = 0)) FROM dist ORDER BY number;
 SELECT countIf(number IN (SELECT x FROM pv(p = 0))) FROM remote('127.0.0.{1,2}', currentDatabase(), data);
+SELECT countIf(number IN (SELECT x FROM pv(p = 0))) FROM dist SETTINGS serialize_query_plan = 1;
 SELECT countIf(number IN (SELECT x FROM pv(p = 0))), countIf(number IN (SELECT x FROM pv(p = 3))) FROM dist;
 SELECT countIf(number IN (SELECT x FROM pv(p = 0))) FROM data SETTINGS enable_parallel_replicas = 2,
     automatic_parallel_replicas_mode = 0, log_comment = '05320_parallel_replicas',
