@@ -5,7 +5,9 @@ without rescoring	3
 with rescoring	3
 the index answer	[1,1,1]
 the bruteforce answer	[1,1,1]
+apply_deleted_mask = 0 uses the index	1
 apply_deleted_mask = 0	[0,0,0]
+apply_deleted_mask = 0 and _row_exists uses the index	0
 apply_deleted_mask = 0 and _row_exists	3
 apply_deleted_mask = 0 and _row_exists	[1,1,1]
 a deleted cluster	3
