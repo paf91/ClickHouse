@@ -4561,6 +4561,32 @@ ActionsDAG::NodeRawConstPtrs ActionsDAG::extractConjunctionAtoms(const Node * pr
 ActionsDAG ActionsDAG::restrictFilterDAGToInputs(
     const ActionsDAG::Node * filter_node, const NameSet & available_inputs, bool lazy_execution_forced) const
 {
+    /// A weakened `AND` evaluates its later operands on more rows, and the projection evaluates the filter a second
+    /// time. So the result of walking `OR` is used only if it evaluates no function lazily and nothing that is
+    /// non-deterministic or stateful. With `force_enable` every function is lazy.
+    if (!lazy_execution_forced)
+    {
+        auto restricted = restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/true);
+        auto is_unsafe = [](const Node & node)
+        {
+            if (isNonDeterministicOrStateful(node))
+                return true;
+            if (node.type != ActionType::FUNCTION || !node.function_base)
+                return false;
+            DataTypesWithConstInfo arguments;
+            for (const auto * child : node.children)
+                arguments.push_back({child->result_type, child->column != nullptr});
+            return node.function_base->isSuitableForShortCircuitArgumentsExecution(arguments);
+        };
+        if (std::ranges::none_of(restricted.nodes, is_unsafe))
+            return restricted;
+    }
+    return restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/false);
+}
+
+ActionsDAG ActionsDAG::restrictFilterDAGToInputsImpl(
+    const ActionsDAG::Node * filter_node, const NameSet & available_inputs, bool walk_or) const
+{
     ActionsDAG actions;
     std::unordered_map<const Node *, const Node *> copy_map;
     std::unordered_map<const ActionsDAG::Node *, bool> can_compute;
@@ -4582,27 +4608,12 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(
         /// another DAG of which this one is a clone. Only a parent inside the subgraph can observe a
         /// substitution anyway, because that is all Phase 2 copies.
         std::stack<const Node *> to_visit;
-        NodeRawConstPtrs unsafe_nodes;
         std::unordered_set<const Node *> visited{filter_node};
         to_visit.push(filter_node);
         while (!to_visit.empty())
         {
             const auto * node = to_visit.top();
             to_visit.pop();
-            if (node->type == ActionType::FUNCTION && node->function_base)
-            {
-                DataTypesWithConstInfo arguments;
-                for (const auto * child : node->children)
-                    arguments.push_back({child->result_type, child->column != nullptr});
-                const auto * adaptor = typeid_cast<const FunctionToFunctionBaseAdaptor *>(node->function_base.get());
-                bool may_throw = lazy_execution_forced
-                    ? !adaptor || adaptor->getFunction()->canThrow(arguments)
-                    : node->function_base->isSuitableForShortCircuitArgumentsExecution(arguments);
-                if (may_throw || isNonDeterministicOrStateful(*node))
-                    unsafe_nodes.push_back(node);
-            }
-            else if (isNonDeterministicOrStateful(*node))
-                unsafe_nodes.push_back(node);
             for (const auto * child : node->children)
             {
                 ++num_parents[child];
@@ -4611,27 +4622,6 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(
             }
         }
 
-        /// A node over an input that is not available is replaced together with its conjunct, so only the others are
-        /// evaluated by the restricted filter.
-        auto is_kept = [&](const Node * root)
-        {
-            std::stack<const Node *> stack;
-            std::unordered_set<const Node *> seen{root};
-            stack.push(root);
-            while (!stack.empty())
-            {
-                const auto * node = stack.top();
-                stack.pop();
-                if (node->type == ActionType::INPUT && !available_inputs.contains(node->result_name))
-                    return false;
-                for (const auto * child : node->children)
-                    if (seen.insert(child).second)
-                        stack.push(child);
-            }
-            return true;
-        };
-        bool keeps_unsafe_node = std::ranges::any_of(unsafe_nodes, is_kept);
-
         auto is_function = [](const Node * candidate, std::string_view name)
         {
             return candidate->type == ActionType::FUNCTION && candidate->function_base
@@ -4639,11 +4629,9 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(
         };
 
         /// `OR` is monotone in each operand like `AND`, also with NULLs, so an `AND` under it keeps the polarity.
-        /// A weakened `AND` evaluates its later operands on more rows, and the projection evaluates the filter a second
-        /// time, so `OR` is not walked when a kept node may throw when evaluated lazily or depends on where it runs.
         auto is_and_or_or = [&](const Node * candidate)
         {
-            return is_function(candidate, "and") || (!keeps_unsafe_node && is_function(candidate, "or"));
+            return is_function(candidate, "and") || (walk_or && is_function(candidate, "or"));
         };
 
         /// An alias is the same value under a new name, so it keeps the polarity of what it wraps. A filter
