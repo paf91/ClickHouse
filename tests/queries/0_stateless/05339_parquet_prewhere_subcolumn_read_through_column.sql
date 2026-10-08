@@ -1,5 +1,5 @@
 -- Tags: no-fasttest
--- Tag no-fasttest: needs Parquet and s3
+-- Tag no-fasttest: needs Parquet, s3 and IcebergLocal
 -- Random settings limits: optimize_move_to_prewhere=(1, 1); query_plan_optimize_prewhere=(1, 1); query_plan_remove_unused_columns=(1, 1)
 
 -- A Parquet read with PREWHERE must still return the subcolumns that the format reads through their
@@ -29,3 +29,25 @@ SELECT 's3';
 SELECT count(), sum(number) FROM s3(s3_conn, filename = currentDatabase() || '/05339.parquet', format = Parquet) WHERE indexHint(n.null) AND number > 5;
 SELECT indexHint(n.null), number FROM s3(s3_conn, filename = currentDatabase() || '/05339.parquet', format = Parquet) WHERE number > 96 ORDER BY number;
 SELECT countIf(n.null), sum(arr.size0), count() FROM s3(s3_conn, filename = currentDatabase() || '/05339.parquet', format = Parquet) WHERE number > 5;
+
+-- An ORC data file of an Iceberg table read as Parquet: PREWHERE is applied after the reader.
+SET allow_insert_into_iceberg = 1;
+SET async_insert = 0;
+
+CREATE TEMPORARY TABLE iceberg_path AS
+WITH if(changed, trimBoth(value), 'user_files/') AS user_files_path
+SELECT concat(
+    if(startsWith(user_files_path, '/'), '', (SELECT path FROM system.disks WHERE name = 'default')),
+    user_files_path, '/', currentDatabase(), '/05339_iceberg_orc/') AS path
+FROM system.server_settings WHERE name = 'user_files_path';
+
+CREATE TABLE t_05339_orc (number UInt64, n Nullable(UInt64)) ENGINE = IcebergLocal((SELECT path FROM iceberg_path), 'ORC');
+INSERT INTO t_05339_orc SELECT number, if(number % 3 = 0, NULL, number) FROM numbers(100);
+CREATE TABLE t_05339_parquet ENGINE = IcebergLocal((SELECT path FROM iceberg_path), 'Parquet');
+
+SELECT 'iceberg orc';
+SELECT countIf(n.null), count() FROM t_05339_parquet PREWHERE n > 5 OR number < 3;
+
+DROP TABLE t_05339_parquet SYNC;
+DROP TABLE t_05339_orc SYNC;
+DROP TABLE iceberg_path;
