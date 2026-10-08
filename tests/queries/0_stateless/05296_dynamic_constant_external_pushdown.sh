@@ -7,12 +7,13 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$CUR_DIR"/../shell_config.sh
 
 # A `Dynamic` constant in a filter pushed down to an external database selects the same rows as the local read.
+# A STRICT table, so that the filter on its column is pushed down.
 
 DB_PATH="${CLICKHOUSE_USER_FILES}/05296_dynamic_pushdown_${CLICKHOUSE_DATABASE}.db"
 trap 'rm -f "${DB_PATH}"' EXIT
 rm -f "${DB_PATH}"
 
-sqlite3 "${DB_PATH}" "CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (3), (7), (42);"
+sqlite3 "${DB_PATH}" "CREATE TABLE t (n INTEGER) STRICT; INSERT INTO t VALUES (3), (7), (42);"
 chmod ugo+r "${DB_PATH}"
 
 run()
