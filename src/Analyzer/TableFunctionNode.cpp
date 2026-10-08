@@ -131,8 +131,8 @@ bool TableFunctionNode::isEqualImpl(const IQueryTreeNode & rhs, CompareOptions) 
     if (!both_parameterized_views && table_function_name != rhs_typed.table_function_name)
         return false;
 
-    if (storage && rhs_typed.storage)
-        return storage_id == rhs_typed.storage_id;
+    if (storage && rhs_typed.storage && storage_id != rhs_typed.storage_id)
+        return false;
 
     if (settings_changes != rhs_typed.settings_changes)
         return false;

@@ -24,7 +24,9 @@ $CLICKHOUSE_CLIENT -q "
     SELECT number IN (SELECT x FROM ${CLICKHOUSE_DATABASE}.pv(p = 0)) AS k, count() FROM dist
     GROUP BY number IN (SELECT x FROM pv(p = 0)) ORDER BY k"
 
-# Different arguments are still different views.
-$CLICKHOUSE_CLIENT -q "
-    SELECT number IN (SELECT x FROM pv(p = 0)) AS k, count() FROM data
-    GROUP BY number IN (SELECT x FROM ${CLICKHOUSE_DATABASE}.pv(p = 3))" 2>&1 | grep -o -m1 'NOT_AN_AGGREGATE'
+# Different arguments, modifiers or settings are still different table expressions.
+for rhs in "pv(p = 3)" "pv(p = 0) FINAL" "pv(p = 0, SETTINGS max_threads = 1)"; do
+    $CLICKHOUSE_CLIENT -q "
+        SELECT number IN (SELECT x FROM pv(p = 0)) AS k, count() FROM data
+        GROUP BY number IN (SELECT x FROM ${CLICKHOUSE_DATABASE}.$rhs)" 2>&1 | grep -o -m1 'NOT_AN_AGGREGATE'
+done
