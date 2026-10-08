@@ -1715,7 +1715,6 @@ private:
             using Iterator = typename Map::const_iterator;
 
 
-            /// Every key in the cells of this stream matched: there is nothing to walk.
             if (!position.has_value())
             {
                 const bool all_keys_used = allKeysUsed(map, *parent.used_flags, bucket_idx, num_buckets);

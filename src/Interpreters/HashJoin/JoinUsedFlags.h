@@ -33,8 +33,7 @@ public:
 
     /// For single disjunct we store all flags in a dedicated container to avoid calculating hash(nullptr) on each access.
     /// Index is the offset in FindResult
-    /// Plain bytes, so that they can be counted in bulk after the probe;
-    /// while the probe runs they are accessed only through `std::atomic_ref`.
+    /// While the probe runs, accessed only through `offsetFlag` (`std::atomic_ref`).
     std::vector<UInt8> per_offset_flags;
 
     std::atomic_ref<UInt8> offsetFlag(size_t offset) const
