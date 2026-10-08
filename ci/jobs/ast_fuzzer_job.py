@@ -74,41 +74,62 @@ AST_FUZZER_ORACLE_EXIT_CODE = 906 & 0xFF
 
 def _last_exception(fuzzer_log: Path, error_code: int, error_name: str) -> str:
     """The exception that ended the run. Several codes share an exit code, so it is the proof.
-    Multi-line messages (e.g. health check `Details:`) run until the `(ERROR_NAME)` suffix.
-    Searches the whole log: the terminal step's buffered stdout can flush after the exception.
-    That stdout can quote `Code: N.` too, so a match counts only once its suffix is found."""
+    Multi-line messages (e.g. health check `Details:`) run until the `(ERROR_NAME)` suffix, which
+    ends its line (before `--stacktrace`'s section) and is followed by an empty line. Buffered stdout
+    lands in the same log (before, mid-line or after the exception) and can quote both, so only a
+    block closed that way counts, and the last one wins."""
     marker = f"Code: {error_code}. DB::Exception:"
-    suffix = f"({error_name})"
+    endings = (
+        f"({error_name})",
+        f"({error_name}), Stack trace (when copying this message, always include the lines below):",
+    )
     found = ""
+    # A closed block, kept once the next line turns out empty
+    pending = ""
     # Open candidate blocks; one gives up after 100 lines without its suffix
     candidates: list[list[str]] = []
     with open(fuzzer_log, "r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.rstrip("\n")
+            if pending:
+                found = found if line else pending
+                pending = ""
             for block in candidates:
                 block.append(line)
             if marker in line:
                 candidates.append([line[line.index(marker) :]])
-            if suffix in line:
-                # The oldest open block is the one whose message the suffix closes
-                found = "\n".join(candidates[0]).strip() if candidates else found
+            if line.endswith(endings):
+                # The newest open block, so a marker quoted shortly before cannot swallow the message
+                pending = "\n".join(candidates[-1]).strip() if candidates else ""
                 candidates = []
             candidates = [block for block in candidates if len(block) < 100]
     return found
 
 
+# The exact first and last lines of the block `exitOnOracleMismatch` in `programs/client/FuzzLoop.cpp` prints
+ORACLE_MISMATCH_FIRST_LINE = "=== AST FUZZER ORACLE MISMATCH (fatal) ==="
+ORACLE_MISMATCH_LAST_LINE = "=" * 42
+
+
 def _oracle_mismatch_block(fuzzer_log: Path, max_lines: int = 500) -> str:
-    """The client's `AST FUZZER ORACLE MISMATCH` block, from the marker through its closing `====` line.
-    The reproduction settings come last in it, so a fixed line count would cut them first."""
-    block: list[str] = []
+    """The client's `AST FUZZER ORACLE MISMATCH` block, from its exact first line through its exact last one.
+    The client prints it after `\\n\\n` and exits, so a fuzzed query quoting the marker does not open it,
+    and the last block wins over anything stdout flushes after it. The reproduction settings come last
+    in it, so a fixed line count would cut them first."""
+    found = ""
+    block: list[str] | None = None
     with open(fuzzer_log, "r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
-            if not block and "AST FUZZER ORACLE MISMATCH" not in line:
+            line = line.rstrip("\n")
+            if line == ORACLE_MISMATCH_FIRST_LINE:
+                block = []
+            if block is None:
                 continue
-            block.append(line.rstrip("\n"))
-            if (len(block) > 1 and line.startswith("=" * 10)) or len(block) >= max_lines:
-                break
-    return "\n".join(block)
+            block.append(line)
+            if (len(block) > 1 and line == ORACLE_MISMATCH_LAST_LINE) or len(block) >= max_lines:
+                found = "\n".join(block)
+                block = None
+    return found
 
 # A client-origin 241 line: "Code: 241" with NO "Received from" on the same line.
 # clickhouse-client raises 241 for its own --max_memory_usage_in_client cap (see
