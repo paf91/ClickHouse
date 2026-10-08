@@ -703,20 +703,6 @@ String computeFileCacheVersionToken(const struct stat & file_stat)
         file_stat.st_size);
 }
 
-/// Whether the version token of a file with this `stat` proves every later rewrite: filesystem
-/// timestamps are coarser than the wall clock, so it does only once the last modification is
-/// comfortably in the past (see the settle-window comment at the call site in `StorageFileSource`).
-bool isFileCacheVersionTokenSettled(const struct stat & file_stat)
-{
-#if defined(OS_DARWIN)
-    const auto mtim_sec = file_stat.st_mtimespec.tv_sec;
-#else
-    const auto mtim_sec = file_stat.st_mtim.tv_sec;
-#endif
-    static constexpr Int64 file_version_settle_seconds = 3;
-    return static_cast<Int64>(mtim_sec) + file_version_settle_seconds <= static_cast<Int64>(time(nullptr));
-}
-
 /// Re-stats `path` and reports whether it still produces `expected_token`. Used to bracket a
 /// local-file read (once right after opening, once right before trusting the read for the Query
 /// Condition Cache) so a rewrite by another writer that lands strictly between the initial `stat`
@@ -1803,10 +1789,10 @@ void StorageFileSource::beforeDestroy()
 
 StorageFileSource::~StorageFileSource()
 {
-    writePendingTopKQueryConditionCacheEntries();
     try
     {
         beforeDestroy();
+        writePendingTopKQueryConditionCacheEntries();
     }
     catch (...)
     {
@@ -1814,39 +1800,32 @@ StorageFileSource::~StorageFileSource()
     }
 }
 
-void StorageFileSource::writePendingTopKQueryConditionCacheEntries() noexcept
+void StorageFileSource::writePendingTopKQueryConditionCacheEntries()
 {
     /// A file changed during the query: the files read are not the ones the key describes.
     if (pending_top_k_query_condition_cache_entries.empty() || top_k_query_condition_cache_key->isInvalidated())
         return;
 
-    try
+    /// The threshold only ever tightens towards the final one, whatever state the query is in:
+    /// a row group whose rows all sort strictly beyond it holds no row of the result - `__topKFilter`
+    /// keeps rows equal to the threshold, as they may still tie-break into the result.
+    const auto & tracker = *format_filter_info->top_k_filter->threshold_tracker;
+    for (const auto & entry : pending_top_k_query_condition_cache_entries)
     {
-        /// The threshold only ever tightens towards the final one, whatever state the query is in:
-        /// a row group whose rows all sort strictly beyond it holds no row of the result - `__topKFilter`
-        /// keeps rows equal to the threshold, as they may still tie-break into the result.
-        const auto & tracker = *format_filter_info->top_k_filter->threshold_tracker;
-        for (const auto & entry : pending_top_k_query_condition_cache_entries)
-        {
-            std::unordered_set<size_t> matched_row_groups(entry.matched_row_groups.begin(), entry.matched_row_groups.end());
-            if (tracker.isSet())
-                for (const auto & [row_group, best_value] : entry.best_values)
-                    if (!tracker.isValueInsideThreshold(best_value))
-                        matched_row_groups.erase(row_group);
+        std::unordered_set<size_t> matched_row_groups(entry.matched_row_groups.begin(), entry.matched_row_groups.end());
+        if (tracker.isSet())
+            for (const auto & [row_group, best_value] : entry.best_values)
+                if (!tracker.isValueInsideThreshold(best_value))
+                    matched_row_groups.erase(row_group);
 
-            writeQueryConditionCacheEntry(
-                storage->getStorageID().uuid,
-                entry.cache_file_key,
-                top_k_query_condition_cache_key->condition_hash,
-                top_k_query_condition_cache_key->condition,
-                entry.total_row_groups,
-                matched_row_groups,
-                getContext());
-        }
-    }
-    catch (...)
-    {
-        tryLogCurrentException(getLogger("StorageFile"), "Failed to write to query condition cache");
+        writeQueryConditionCacheEntry(
+            storage->getStorageID().uuid,
+            entry.cache_file_key,
+            top_k_query_condition_cache_key->condition_hash,
+            top_k_query_condition_cache_key->condition,
+            entry.total_row_groups,
+            matched_row_groups,
+            getContext());
     }
 }
 
@@ -2052,7 +2031,14 @@ Chunk StorageFileSource::generate()
                 /// recently - or with an mtime in the future, e.g. due to clock skew on a
                 /// network mount - it fails close and stays bypassed (see the gates below)
                 /// rather than risking stale results.
-                current_file_version_settled = isFileCacheVersionTokenSettled(file_stat);
+#if defined(OS_DARWIN)
+                const auto mtim_sec = file_stat.st_mtimespec.tv_sec;
+#else
+                const auto mtim_sec = file_stat.st_mtim.tv_sec;
+#endif
+                static constexpr Int64 file_version_settle_seconds = 3;
+                current_file_version_settled
+                    = static_cast<Int64>(mtim_sec) + file_version_settle_seconds <= static_cast<Int64>(time(nullptr));
 
                 if (getContext()->getSettingsRef()[Setting::engine_file_skip_empty_files] && file_stat.st_size == 0)
                 {
@@ -2528,7 +2514,7 @@ void StorageFileSource::checkTopKQueryConditionCacheKeyHolds(bool still_holds) c
     /// `_path` / `_file` filter excludes does not contribute to the threshold.
     const auto & tokens = top_k_query_condition_cache_key->file_version_tokens;
     auto it = tokens.find(current_path);
-    bool holds = still_holds && current_file_cache_version.has_value() && current_file_version_settled
+    bool holds = still_holds && current_file_cache_version.has_value()
         && it != tokens.end() && it->second == *current_file_cache_version;
     /// Armed, this stands in for a file rewritten after the key was made and after an entry was used.
     fiu_do_on(FailPoints::file_top_k_query_condition_cache_inject_file_change,
@@ -2816,15 +2802,13 @@ StorageFileSource::TopKQueryConditionCacheKeyPtr ReadFromFile::makeTopKQueryCond
     /// The threshold of the TopN filter comes from the rows of every file of the query: a file
     /// that loses rows or is rewritten can loosen it, and a row group skipped under the old
     /// threshold may then hold rows of the result. So the key covers the version tokens of all
-    /// files, and it is made only when every token has settled (see `isFileCacheVersionTokenSettled`),
-    /// i.e. when any later change of any of the files is guaranteed to change the key. Only the files
-    /// the query reads matter, which a `_path` / `_file` filter can narrow down.
+    /// files. Only the files the query reads matter, which a `_path` / `_file` filter can narrow down.
     Strings paths = files_iterator->tryGetFiles().value_or(paths_snapshot);
     SipHash files_hash;
     for (const auto & path : paths)
     {
         struct stat file_stat{};
-        if (0 != stat(path.c_str(), &file_stat) || !S_ISREG(file_stat.st_mode) || !isFileCacheVersionTokenSettled(file_stat))
+        if (0 != stat(path.c_str(), &file_stat) || !S_ISREG(file_stat.st_mode))
             return {};
 
         String token = computeFileCacheVersionToken(file_stat);

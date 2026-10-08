@@ -388,7 +388,7 @@ private:
     void checkTopKQueryConditionCacheKeyHolds(bool still_holds) const;
 
     /// Writes `pending_top_k_query_condition_cache_entries` to the query condition cache.
-    void writePendingTopKQueryConditionCacheEntries() noexcept;
+    void writePendingTopKQueryConditionCacheEntries();
 
     std::shared_ptr<StorageFile> storage;
     FilesIteratorPtr files_iterator;
