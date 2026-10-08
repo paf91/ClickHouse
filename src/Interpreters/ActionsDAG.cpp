@@ -4561,8 +4561,10 @@ ActionsDAG::NodeRawConstPtrs ActionsDAG::extractConjunctionAtoms(const Node * pr
 ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter_node, const NameSet & available_inputs) const
 {
     /// The projection evaluates the filter on rows the main read may skip, and a weakened `AND` evaluates its later
-    /// operands on more rows, so the `OR` walk is kept only if its result cannot throw or change on re-evaluation.
-    auto restricted = restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/true);
+    /// operands on more rows, so the `OR` walk is kept only if no `OR` it weakened can throw or change on re-evaluation.
+    /// Outside such an `OR` the restriction is the same as without the walk.
+    std::unordered_set<const Node *> substitutes;
+    auto restricted = restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/true, &substitutes);
 
     auto is_number = [](const Node * node) { return isNativeNumber(removeLowCardinalityAndNullable(node->result_type)); };
     auto is_total = [&](const Node & node)
@@ -4582,13 +4584,36 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputs(const ActionsDAG::Node * filter
         return false;
     };
 
-    if (std::ranges::all_of(restricted.nodes, is_total))
-        return restricted;
-    return restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/false);
+    auto is_safe = [&](const Node & or_node)
+    {
+        bool weakened = false;
+        bool total = true;
+        std::vector<const Node *> to_visit{&or_node};
+        std::unordered_set<const Node *> visited{&or_node};
+        while (!to_visit.empty())
+        {
+            const auto * node = to_visit.back();
+            to_visit.pop_back();
+            weakened |= substitutes.contains(node);
+            total &= is_total(*node);
+            for (const auto * child : node->children)
+                if (visited.insert(child).second)
+                    to_visit.push_back(child);
+        }
+        return !weakened || total;
+    };
+
+    for (const auto & node : restricted.nodes)
+        if (node.type == ActionType::FUNCTION && node.function_base && node.function_base->getName() == "or" && !is_safe(node))
+            return restrictFilterDAGToInputsImpl(filter_node, available_inputs, /*walk_or=*/false);
+    return restricted;
 }
 
 ActionsDAG ActionsDAG::restrictFilterDAGToInputsImpl(
-    const ActionsDAG::Node * filter_node, const NameSet & available_inputs, bool walk_or) const
+    const ActionsDAG::Node * filter_node,
+    const NameSet & available_inputs,
+    bool walk_or,
+    std::unordered_set<const Node *> * substitutes) const
 {
     ActionsDAG actions;
     std::unordered_map<const Node *, const Node *> copy_map;
@@ -4707,6 +4732,8 @@ ActionsDAG ActionsDAG::restrictFilterDAGToInputsImpl(
                             {
                                 auto const_column = child->result_type->createColumnConst(0, true_value);
                                 copy_map[child] = &actions.addColumn(std::move(const_column), child->result_type, child->result_name);
+                                if (substitutes)
+                                    substitutes->insert(copy_map[child]);
 
                                 /// Mark as now computable (since we substituted it)
                                 it->second = true;

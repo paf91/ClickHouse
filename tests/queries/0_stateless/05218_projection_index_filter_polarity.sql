@@ -64,6 +64,12 @@ SETTINGS log_comment = '05218_pruning_alive_or_in';
 -- A function in a conjunct that is replaced is never evaluated, so it does not stop the walk, also over projection columns.
 SELECT count() FROM t_projection_polarity WHERE (a = 1 AND x = 5 AND toFloat64(b)) OR (a = 2 AND x = 6 AND toFloat64(a) + b > 0)
 SETTINGS log_comment = '05218_pruning_alive_or_dropped';
+-- A conjunct outside the weakened `OR` is evaluated without the walk too, so it does not stop the walk, also in another `OR`.
+SELECT count() FROM t_projection_polarity WHERE toString(a) != '' AND ((a = 1 AND x = 5 AND b = 7) OR (a = 2 AND x = 6 AND b = 8))
+SETTINGS log_comment = '05218_pruning_alive_or_outside';
+SELECT count() FROM t_projection_polarity
+WHERE (toString(a) != '' OR toString(x) = '6') AND ((a = 1 AND x = 5 AND b = 7) OR (a = 2 AND x = 6 AND b = 8))
+SETTINGS log_comment = '05218_pruning_alive_or_outside_or';
 
 SYSTEM FLUSH LOGS query_log;
 
@@ -77,11 +83,13 @@ SELECT
     maxIf(read_rows, log_comment = '05218_pruning_alive_or') <= 2 * 8192 AS pruned_or,
     maxIf(read_rows, log_comment = '05218_pruning_alive_or_nested') <= 2 * 8192 AS pruned_or_nested,
     maxIf(read_rows, log_comment = '05218_pruning_alive_or_in') <= 2 * 8192 AS pruned_or_in,
-    maxIf(read_rows, log_comment = '05218_pruning_alive_or_dropped') <= 2 * 8192 AS pruned_or_dropped
+    maxIf(read_rows, log_comment = '05218_pruning_alive_or_dropped') <= 2 * 8192 AS pruned_or_dropped,
+    maxIf(read_rows, log_comment = '05218_pruning_alive_or_outside') <= 2 * 8192 AS pruned_or_outside,
+    maxIf(read_rows, log_comment = '05218_pruning_alive_or_outside_or') <= 2 * 8192 AS pruned_or_outside_or
 FROM system.query_log
 WHERE current_database = currentDatabase() AND type = 'QueryFinish'
   AND log_comment IN ('05218_pruning_alive', '05218_pruning_off', '05218_pruning_alive_nested',
                       '05218_pruning_alive_or', '05218_pruning_alive_or_nested', '05218_pruning_alive_or_in',
-                      '05218_pruning_alive_or_dropped');
+                      '05218_pruning_alive_or_dropped', '05218_pruning_alive_or_outside', '05218_pruning_alive_or_outside_or');
 
 DROP TABLE t_projection_polarity;
