@@ -619,7 +619,6 @@ StorageDistributed::StorageDistributed(
         /// Check that sharding_key exists in the table and has numeric type.
         checkShardingKeyExistsAndIsNumeric(sharding_key_, getContext(), storage_metadata.getColumns().getAllPhysical());
         sharding_key_expr = buildShardingKeyExpression(sharding_key_, getContext(), storage_metadata.getColumns().getAllPhysical(), false);
-        /// Nothing builds the set of an `IN` over a subquery or a non-`Set` table for a sharding key.
         if (is_fresh_definition && expressionActionsContainSubquerySet(sharding_key_expr))
             throw Exception(ErrorCodes::BAD_ARGUMENTS,
                 "Sharding expression cannot contain IN with a subquery or a non-Set table, because its set is never built");
