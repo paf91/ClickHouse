@@ -1421,7 +1421,13 @@ static String rewritePgTableIsVisible(const String & query)
         /// same function; a quoted identifier keeps its case there, so only the exact spelling matches.
         const bool is_call = (token.type == TokenType::BareWord && equalsCaseInsensitive(text, function_name))
             || (token.type == TokenType::QuotedIdentifier && text == "\"pg_table_is_visible\"");
-        if (!is_call)
+        /// The `pg_catalog.` qualifier has already been removed by `removePgCatalogQualifier`, so a name that
+        /// is still qualified (`other.pg_table_is_visible(oid)`) is not the catalog function and is left alone.
+        size_t prev = i;
+        while (prev > 0 && !tokens[prev - 1].isSignificant())
+            --prev;
+        const bool is_qualified = prev > 0 && tokens[prev - 1].type == TokenType::Dot;
+        if (!is_call || is_qualified)
         {
             result.append(token.begin, token.end);
             continue;
