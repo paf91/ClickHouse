@@ -14135,23 +14135,8 @@ AlterConversionsPtr MergeTreeData::getAlterConversionsForPart(
 
     /// Apply masking policies to the part
 #if CLICKHOUSE_CLOUD
-    if (enabled_masking_policies)
-    {
-        auto alter_commands = enabled_masking_policies->getAlterCommands(
-            part->storage.getStorageID().database_name,
-            part->storage.getStorageID().table_name);
-
-        /// Convert each ALTER command to a MutationCommand
-        for (const auto & alter_command_ast : alter_commands)
-        {
-            if (auto mutation_command_opt = MutationCommand::parse(*alter_command_ast))
-            {
-                commands.push_back(*mutation_command_opt);
-            }
-            else
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Failed to parse MutationCommand produced by masking policy rule");
-        }
-    }
+    auto masking_commands = getMaskingPolicyCommands(part->storage.getStorageID(), enabled_masking_policies);
+    commands.insert(commands.end(), masking_commands.begin(), masking_commands.end());
 #endif
 
     for (auto & patch : patches)
@@ -14174,6 +14159,28 @@ AlterConversionsPtr MergeTreeData::getAlterConversionsForPart(
 
     return std::make_shared<AlterConversions>(commands, patches_for_reader, query_context);
 }
+
+#if CLICKHOUSE_CLOUD
+MutationCommands MergeTreeData::getMaskingPolicyCommands(const StorageID & storage_id, const EnabledMaskingPoliciesPtr & enabled_masking_policies)
+{
+    MutationCommands commands;
+    if (!enabled_masking_policies)
+        return commands;
+
+    auto alter_commands = enabled_masking_policies->getAlterCommands(storage_id.database_name, storage_id.table_name);
+
+    /// Convert each ALTER command to a MutationCommand
+    for (const auto & alter_command_ast : alter_commands)
+    {
+        if (auto mutation_command_opt = MutationCommand::parse(*alter_command_ast))
+            commands.push_back(*mutation_command_opt);
+        else
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Failed to parse MutationCommand produced by masking policy rule");
+    }
+
+    return commands;
+}
+#endif
 
 PatchPartMetadata MergeTreeData::getPatchPartMetadata(const IMergeTreeDataPart & patch_part, ContextPtr local_context) const
 {

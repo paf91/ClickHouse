@@ -1463,6 +1463,11 @@ public:
 #endif
         );
 
+#if CLICKHOUSE_CLOUD
+    /// Returns the commands that apply the enabled masking policies to the data of the table on the fly.
+    static MutationCommands getMaskingPolicyCommands(const StorageID & storage_id, const EnabledMaskingPoliciesPtr & enabled_masking_policies);
+#endif
+
     /// Returns destination disk or volume for the TTL rule according to current storage policy.
     SpacePtr getDestinationForMoveTTL(const TTLDescription & move_ttl) const;
 
