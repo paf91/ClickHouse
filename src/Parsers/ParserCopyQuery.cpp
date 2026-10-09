@@ -36,6 +36,18 @@
 namespace DB
 {
 
+namespace
+{
+
+/// `psql` and libpq clients terminate the statement with `;`, which `parseQuery` accepts after the
+/// parsed query, so it ends the command here as well.
+bool isEndOfStatement(IParser::Pos & pos)
+{
+    return pos->isEnd() || pos->type == TokenType::Semicolon;
+}
+
+}
+
 bool ParserCopyQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ParserIdentifier s_ident;
@@ -107,6 +119,7 @@ bool ParserCopyQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
             return false;
         }
 
+        /// The terminating `;` is not accepted here: `STDOUT` or `STDIN` is still to come.
         if (pos->isEnd())
             return true;
 
@@ -373,7 +386,7 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
 
     /// No options at all: PostgreSQL defaults to the text format, which we map to TSV. This is also the
     /// shape that libpq/pqxx use to read a result set (`COPY (query) TO STDOUT`).
-    if (pos->isEnd())
+    if (isEndOfStatement(pos))
         return true;
 
     /// The `COPY` option we act on directly is the output format: an explicit `FORMAT <name>` (PostgreSQL's
@@ -418,7 +431,7 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
     /// (`CSV HEADER DELIMITER ';'`).
     size_t paren_depth = 0;
 
-    while (!pos->isEnd())
+    while (!isEndOfStatement(pos))
     {
         if (pos->type == TokenType::BareWord)
         {
