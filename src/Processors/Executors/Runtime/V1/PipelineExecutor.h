@@ -6,13 +6,9 @@
 #include <Common/Logger.h>
 #include <Common/ThreadPool_fwd.h>
 #include <Common/ISlotControl.h>
-#include <Common/AllocatorWithMemoryTracking.h>
 
 #include <queue>
 #include <memory>
-
-#include <boost/container/devector.hpp>
-
 
 namespace DB
 {
@@ -94,10 +90,9 @@ private:
     ReadProgressCallbackPtr read_progress_callback;
     StepProfilerPtr step_profiler;
 
-    /// This queue can grow a lot and lead to OOM. That is why we use non-default
-    /// allocator for container which throws exceptions in operator new
-    using DequeWithMemoryTracker = boost::container::devector<IProcessor *, AllocatorWithMemoryTracking<IProcessor *>>;
-    using Queue = std::queue<IProcessor *, DequeWithMemoryTracker>; // STYLE_CHECK_ALLOW_STD_CONTAINERS -- already tracked: the container is a `boost::container::devector` with `AllocatorWithMemoryTracking`
+    /// This queue can grow a lot and lead to OOM, so it is allocated through a tracking
+    /// allocator that throws instead of overcommitting.
+    using Queue = DevectorQueueWithMemoryTracking<IProcessor *>;
 
     void initializeExecution(size_t num_threads, bool concurrency_control); /// Initialize executor contexts and task_queue.
     void finalizeExecution(); /// Check all processors are finished.

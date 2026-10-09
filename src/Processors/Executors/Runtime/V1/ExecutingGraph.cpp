@@ -1,3 +1,4 @@
+#include <Common/DevectorWithMemoryTracking.h>
 #include <Common/VectorWithMemoryTracking.h>
 #include <Common/UnorderedSetWithMemoryTracking.h>
 #include <Processors/Executors/Runtime/V1/ExecutingGraph.h>
@@ -175,7 +176,7 @@ void ExecutingGraph::removeAffectedEdges(Node & node, const UnorderedSetWithMemo
     std::erase_if(node.direct_edges, is_removed_edge);
 }
 
-ExecutingGraph::UpdateNodeStatus ExecutingGraph::updatePipeline(boost::container::devector<Node *> & stack, Node & cur_node)
+ExecutingGraph::UpdateNodeStatus ExecutingGraph::updatePipeline(DevectorWithMemoryTracking<Node *> & stack, Node & cur_node)
 {
     IProcessor::PipelineUpdate update = cur_node.processor()->updatePipeline();
 
@@ -200,7 +201,7 @@ ExecutingGraph::UpdateNodeStatus ExecutingGraph::updatePipeline(boost::container
 }
 
 ExecutingGraph::UpdateNodeStatus ExecutingGraph::updatePipelineImpl(
-    boost::container::devector<Node *> & stack, Node & cur_node, IProcessor::PipelineUpdate & update)
+    DevectorWithMemoryTracking<Node *> & stack, Node & cur_node, IProcessor::PipelineUpdate & update)
 {
     IProcessor::CancelReason cancel_reason_if_cancelled = IProcessor::CancelReason::NotCancelled;
     {
@@ -360,8 +361,8 @@ void ExecutingGraph::initializeExecution(Queue & queue, Queue & async_queue)
 ExecutingGraph::UpdateNodeStatus ExecutingGraph::updateNode(IProcessor & initial, Queue & queue, Queue & async_queue)
 {
     Processors delayed_destruction;
-    boost::container::devector<Edge *> updated_edges;
-    boost::container::devector<Node *> updated_processors;
+    DevectorWithMemoryTracking<Edge *> updated_edges;
+    DevectorWithMemoryTracking<Node *> updated_processors;
     VectorWithMemoryTracking<Node *> pending_expansion;
 
     std::shared_lock read_lock(nodes_mutex);

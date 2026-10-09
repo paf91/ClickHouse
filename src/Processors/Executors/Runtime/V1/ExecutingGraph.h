@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Common/DevectorWithMemoryTracking.h>
 #include <Common/VectorWithMemoryTracking.h>
 #include <Common/UnorderedSetWithMemoryTracking.h>
 #include <Common/UnorderedMapWithMemoryTracking.h>
@@ -8,7 +9,6 @@
 #include <Processors/Port.h>
 #include <Processors/IProcessor.h>
 #include <Common/SharedMutex.h>
-#include <Common/AllocatorWithMemoryTracking.h>
 #include <atomic>
 #include <list>
 #include <mutex>
@@ -16,7 +16,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include <boost/container/devector.hpp>
 
 namespace DB
 {
@@ -119,10 +118,9 @@ class ExecutingGraph
 
 
 public:
-    /// This queue can grow a lot and lead to OOM. That is why we use non-default
-    /// allocator for container which throws exceptions in operator new
-    using DequeWithMemoryTracker = boost::container::devector<IProcessor *, AllocatorWithMemoryTracking<IProcessor *>>;
-    using Queue = std::queue<IProcessor *, DequeWithMemoryTracker>; // STYLE_CHECK_ALLOW_STD_CONTAINERS -- already tracked: the container is a `boost::container::devector` with `AllocatorWithMemoryTracking`
+    /// This queue can grow a lot and lead to OOM, so it is allocated through a tracking
+    /// allocator that throws instead of overcommitting.
+    using Queue = DevectorQueueWithMemoryTracking<IProcessor *>;
 
     explicit ExecutingGraph(std::shared_ptr<Processors> processors_, bool profile_processors_);
 
@@ -178,8 +176,8 @@ private:
 
     /// Update graph after processor `node` returned UpdatePipeline status.
     /// All new nodes and nodes with updated ports are pushed into stack.
-    UpdateNodeStatus updatePipeline(boost::container::devector<Node *> & stack, Node & node);
-    UpdateNodeStatus updatePipelineImpl(boost::container::devector<Node *> & stack, Node & node, IProcessor::PipelineUpdate & update);
+    UpdateNodeStatus updatePipeline(DevectorWithMemoryTracking<Node *> & stack, Node & node);
+    UpdateNodeStatus updatePipelineImpl(DevectorWithMemoryTracking<Node *> & stack, Node & node, IProcessor::PipelineUpdate & update);
 
     /// Shared with QueryPipeline.
     std::shared_ptr<Processors> processors;

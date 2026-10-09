@@ -6,7 +6,6 @@
 #include <Processors/Executors/Runtime/V1/PollingQueue.h>
 #include <Processors/Executors/Runtime/V1/ThreadsQueue.h>
 #include <Processors/Executors/Runtime/V1/TasksQueue.h>
-#include <Common/AllocatorWithMemoryTracking.h>
 #include <Common/ISlotControl.h>
 #include <Common/Logger.h>
 
@@ -16,7 +15,6 @@
 #include <queue>
 #include <vector>
 
-#include <boost/container/devector.hpp>
 
 namespace DB
 {
@@ -77,10 +75,9 @@ class ExecutorTasks
     const static size_t TOO_MANY_IDLE_THRESHOLD = 4;
 
 public:
-    /// This queue can grow a lot and lead to OOM. That is why we use non-default
-    /// allocator for container which throws exceptions in operator new
-    using DequeWithMemoryTracker = boost::container::devector<IProcessor *, AllocatorWithMemoryTracking<IProcessor *>>;
-    using Queue = std::queue<IProcessor *, DequeWithMemoryTracker>; // STYLE_CHECK_ALLOW_STD_CONTAINERS -- already tracked: the container is a `boost::container::devector` with `AllocatorWithMemoryTracking`
+    /// This queue can grow a lot and lead to OOM, so it is allocated through a tracking
+    /// allocator that throws instead of overcommitting.
+    using Queue = DevectorQueueWithMemoryTracking<IProcessor *>;
 
     void finish();
     bool isFinished() const { return finished; }

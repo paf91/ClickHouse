@@ -1,9 +1,8 @@
 #pragma once
 
-#include <Common/DequeWithMemoryTracking.h>
-#include <Common/DevectorWithMemoryTracking.h>
+#include <Common/AllocatorWithMemoryTracking.h>
 
-#include <queue>
+#include <boost/container/devector.hpp>
 
 namespace DB
 {
@@ -20,11 +19,6 @@ namespace DB
 /// `AllocatorWithMemoryTracking`, which tracks memory using throwing methods of the `MemoryTracker`.
 
 template <typename T>
-using QueueWithMemoryTracking = std::queue<T, DequeWithMemoryTracking<T>>;
-
-/// A queue that keeps its elements in a `devector`: a double-ended vector, so the elements stay
-/// contiguous and the queue is a smaller object than one backed by a `deque`.
-template <typename T>
-using DevectorQueueWithMemoryTracking = std::queue<T, DevectorWithMemoryTracking<T>>;
+using DevectorWithMemoryTracking = boost::container::devector<T, AllocatorWithMemoryTracking<T>>;
 
 }
