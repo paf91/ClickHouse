@@ -1,4 +1,4 @@
--- Pending patches disable the direct read from a text index only in the patched parts.
+-- Pending patches of columns that the text index does not depend on disable the direct read only in the patched parts.
 
 SET enable_lightweight_update = 1;
 SET query_plan_direct_read_from_text_index = 1;
