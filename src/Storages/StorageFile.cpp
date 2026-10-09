@@ -2738,7 +2738,7 @@ void ReadFromFile::createIterator(const ActionsDAG::Node * predicate)
         storage->archive_info && storage->archive_info->isSingleFileRead() ? storage->archive_info->path_in_archive : String{});
 }
 
-StorageFileSource::TopKQueryConditionCacheKeyPtr ReadFromFile::makeTopKQueryConditionCacheKey(const FormatFilterInfo & format_filter_info) const
+StorageFileSource::TopKQueryConditionCacheKeyPtr ReadFromFile::makeTopKQueryConditionCacheKey() const
 {
     const auto & settings = getContext()->getSettingsRef();
     if (!top_k_filter || !settings[Setting::use_query_condition_cache] || !settings[Setting::use_query_condition_cache_for_top_k])
@@ -2831,7 +2831,7 @@ void ReadFromFile::initializePipeline(QueryPipelineBuilder & pipeline, const Bui
     auto format_filter_info = std::make_shared<FormatFilterInfo>(
         info.getFormatFilter(filter_actions_dag), ctx, nullptr, query_info.row_level_filter, query_info.prewhere_info);
     format_filter_info->top_k_filter = top_k_filter;
-    auto top_k_query_condition_cache_key = makeTopKQueryConditionCacheKey(*format_filter_info);
+    auto top_k_query_condition_cache_key = makeTopKQueryConditionCacheKey();
     if (top_k_query_condition_cache_key)
     {
         /// The verdicts written under the key also cover row groups whose rows were all returned
