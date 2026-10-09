@@ -282,8 +282,9 @@ void removeExpressionsThatDoNotDependOnTableIdentifiers(
 Field getFieldFromColumnForASTLiteral(const ColumnPtr & column, size_t row, const DataTypePtr & data_type, bool date_time_as_numbers);
 
 /// True if a value of this type needs the exact serialization provided by `columnConstantToExactLiteralAST`:
-/// it may contain a decimal-backed leaf (`Decimal`/`Time64`, or a `Dynamic` that can hold one), or a
-/// `Variant`, whose literal does not keep the active member type.
+/// it may contain a decimal-backed leaf (`Decimal`/`Time64`, or a `Dynamic` that can hold one), a
+/// `Variant`, whose literal does not keep the active member type, or a `QBit`, whose `Field` is its
+/// internal tuple of bit planes.
 bool typeNeedsExactLiteralSerialization(const IDataType & type);
 
 /// Build a literal AST for a constant column value, serializing decimal-backed leaves (Decimal,
