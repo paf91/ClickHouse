@@ -1,3 +1,4 @@
+#include <Common/StackWithMemoryTracking.h>
 #include <Common/DevectorWithMemoryTracking.h>
 #include <Common/VectorWithMemoryTracking.h>
 #include <Common/UnorderedSetWithMemoryTracking.h>
@@ -336,7 +337,7 @@ void ExecutingGraph::accountFinishedProcessorInGroup(const ProcessorPtr & proces
 
 void ExecutingGraph::initializeExecution(Queue & queue, Queue & async_queue)
 {
-    std::stack<Node *> stack;
+    StackWithMemoryTracking<Node *> stack;
 
     /// Add childless processors to stack.
     for (auto & node : nodes)
