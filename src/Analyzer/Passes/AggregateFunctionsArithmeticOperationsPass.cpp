@@ -144,12 +144,13 @@ public:
                 && !(is_min_or_max && (which.isInterval() || which.isDateOrDate32OrTimeOrTime64OrDateTimeOrDateTime64())))
                 return;
 
-            has_date_time_argument |= which.isDateTimeOrDateTime64();
+            has_date_time_argument |= which.isDateTimeOrDateTime64() || which.isTime64();
             if (const auto * interval_type = typeid_cast<const DataTypeInterval *>(argument_type.get()))
                 has_day_or_longer_interval |= interval_type->getKind() >= IntervalKind(IntervalKind::Kind::Day);
         }
 
-        /// A day or longer is added to a `DateTime` in its time zone, which is not monotone across a DST change.
+        /// A day or longer is added to a `DateTime` or a `Time64` in the calendar of its time zone, which is not monotone
+        /// across a DST change or a month end: a month before both `12-30 23:55` and `12-31 00:00` is on `11-30`.
         if (has_date_time_argument && has_day_or_longer_interval)
             return;
 
