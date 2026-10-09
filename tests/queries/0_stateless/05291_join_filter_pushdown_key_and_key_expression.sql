@@ -47,5 +47,11 @@ SELECT count() FROM t1 JOIN t2 ON t1.k = t2.k AND CAST(t1.k AS Decimal(38, 6)) =
     AND CAST(t2.k AS Decimal(38, 6)) >= CAST(t1.k AS Decimal(38, 6))
 SETTINGS enable_join_runtime_filters = 1;
 
+-- Keys on a column and on two nested expressions of it
+SELECT count() FROM t1 JOIN t2 ON t1.k = t2.k AND intDiv(t1.k, 2) = intDiv(t2.k, 2)
+    AND intDiv(intDiv(t1.k, 2), 2) = intDiv(intDiv(t2.k, 2), 2)
+WHERE intDiv(intDiv(t2.k, 2), 2) >= 50
+SETTINGS enable_join_runtime_filters = 0, query_plan_filter_push_down = 1;
+
 DROP TABLE t1;
 DROP TABLE t2;
