@@ -1,5 +1,10 @@
 #pragma once
 
+#include <Common/VectorWithMemoryTracking.h>
+#include <Common/UnorderedSetWithMemoryTracking.h>
+#include <Common/UnorderedMapWithMemoryTracking.h>
+#include <Common/QueueWithMemoryTracking.h>
+#include <Common/ListWithMemoryTracking.h>
 #include <Processors/Port.h>
 #include <Processors/IProcessor.h>
 #include <Common/SharedMutex.h>
@@ -30,7 +35,7 @@ class ExecutingGraph
     {
         Edge(Node * to_, bool backward_,
              InputPort * input_port_, OutputPort * output_port_,
-             std::vector<void *> * update_list)
+             VectorWithMemoryTracking<void *> * update_list)
             : to(to_), backward(backward_)
             , input_port(input_port_), output_port(output_port_)
         {
@@ -53,7 +58,7 @@ class ExecutingGraph
     };
 
     /// Use std::list because new ports can be added to processor during execution.
-    using Edges = std::list<Edge>;
+    using Edges = ListWithMemoryTracking<Edge>;
 
     /// Status for processor.
     /// Can be owning or not. Owning means that executor who set this status can change node's data and nobody else can.
@@ -66,7 +71,7 @@ class ExecutingGraph
     };
 
     /// Forward decl so Node can hold an iterator into the owning Nodes list.
-    using Nodes = std::list<struct Node>;
+    using Nodes = ListWithMemoryTracking<struct Node>;
 
     /// Graph node. Represents single Processor.
     struct Node
@@ -117,7 +122,7 @@ public:
     /// This queue can grow a lot and lead to OOM. That is why we use non-default
     /// allocator for container which throws exceptions in operator new
     using DequeWithMemoryTracker = boost::container::devector<IProcessor *, AllocatorWithMemoryTracking<IProcessor *>>;
-    using Queue = std::queue<IProcessor *, DequeWithMemoryTracker>;
+    using Queue = std::queue<IProcessor *, DequeWithMemoryTracker>; // STYLE_CHECK_ALLOW_STD_CONTAINERS -- already tracked: the container is a `boost::container::devector` with `AllocatorWithMemoryTracking`
 
     explicit ExecutingGraph(std::shared_ptr<Processors> processors_, bool profile_processors_);
 
@@ -148,7 +153,7 @@ private:
     Nodes nodes;
 
     /// Each processor is directly tied to pipeline graph node.
-    using ProcessorsMap = std::unordered_map<const IProcessor *, Node *>;
+    using ProcessorsMap = UnorderedMapWithMemoryTracking<const IProcessor *, Node *>;
     ProcessorsMap processors_map;
 
     /// Append a processor to the graph's processors list, create its Node, assign a stable id,
@@ -164,12 +169,12 @@ private:
     /// Edges newly appended for a node by a call to addEdges.
     struct NewEdges
     {
-        std::vector<Edge *> back;    // back edges added (inputs side of this node)
-        std::vector<Edge *> direct;  // direct edges added (outputs side of this node)
+        VectorWithMemoryTracking<Edge *> back;    // back edges added (inputs side of this node)
+        VectorWithMemoryTracking<Edge *> direct;  // direct edges added (outputs side of this node)
         bool empty() const { return back.empty() && direct.empty(); }
     };
     NewEdges addEdges(Node & node);
-    void removeAffectedEdges(Node & node, const std::unordered_set<Node *> & removed_nodes);
+    void removeAffectedEdges(Node & node, const UnorderedSetWithMemoryTracking<Node *> & removed_nodes);
 
     /// Update graph after processor `node` returned UpdatePipeline status.
     /// All new nodes and nodes with updated ports are pushed into stack.
@@ -185,7 +190,7 @@ private:
         Processors processors;
         std::atomic<size_t> not_finished = 0;
     };
-    std::unordered_map<ProcessorPtr, std::shared_ptr<PendingRemovalGroup>> removed_processors;
+    UnorderedMapWithMemoryTracking<ProcessorPtr, std::shared_ptr<PendingRemovalGroup>> removed_processors;
 
     void removePendingGroup(PendingRemovalGroup & group, Processors & delayed_destruction);
     void removeReadyGroups(Processors & delayed_destruction);

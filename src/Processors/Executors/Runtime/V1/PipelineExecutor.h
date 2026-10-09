@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Common/QueueWithMemoryTracking.h>
 #include <Processors/Executors/Runtime/IExecutor.h>
 #include <Processors/Executors/Runtime/V1/ExecutorTasks.h>
 #include <Common/Logger.h>
@@ -96,7 +97,7 @@ private:
     /// This queue can grow a lot and lead to OOM. That is why we use non-default
     /// allocator for container which throws exceptions in operator new
     using DequeWithMemoryTracker = boost::container::devector<IProcessor *, AllocatorWithMemoryTracking<IProcessor *>>;
-    using Queue = std::queue<IProcessor *, DequeWithMemoryTracker>;
+    using Queue = std::queue<IProcessor *, DequeWithMemoryTracker>; // STYLE_CHECK_ALLOW_STD_CONTAINERS -- already tracked: the container is a `boost::container::devector` with `AllocatorWithMemoryTracking`
 
     void initializeExecution(size_t num_threads, bool concurrency_control); /// Initialize executor contexts and task_queue.
     void finalizeExecution(); /// Check all processors are finished.
