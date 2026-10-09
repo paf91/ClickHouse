@@ -2751,19 +2751,24 @@ StorageFileSource::TopKQueryConditionCacheKeyPtr ReadFromFile::makeTopKQueryCond
         return {};
 
     /// The rows the reader drops besides those of the TopN filter must be dropped by a condition the
-    /// key covers. `condition_hash` covers the pushed-down filter and a PREWHERE collected with it.
-    /// Without any of them the reader drops nothing else. A row policy is covered by neither.
+    /// key covers, and so must the rows the filter drops after the format, which do not make the threshold.
+    /// So the key covers the whole filter of the step and a PREWHERE collected with it, not only the part
+    /// pushed into the format (without the conjuncts on virtual and hive partition columns).
+    /// Without any of them nothing else drops rows. A row policy is covered by neither.
     if (query_info.row_level_filter)
         return {};
 
     auto key = std::make_shared<StorageFileSource::TopKQueryConditionCacheKey>();
     size_t condition_hash = 0;
-    if (format_filter_info.condition_hash)
+    if (filter_actions_dag)
     {
-        condition_hash = *format_filter_info.condition_hash;
-        key->condition = format_filter_info.filter_actions_dag->dumpNames() + ", ";
+        auto filter_condition_hash = FormatFilterInfo::computeConditionHash(*filter_actions_dag, query_info.prewhere_info, getContext());
+        if (!filter_condition_hash)
+            return {};
+        condition_hash = *filter_condition_hash;
+        key->condition = filter_actions_dag->dumpNames() + ", ";
     }
-    else if (!filter_actions_dag && !query_info.prewhere_info)
+    else if (!query_info.prewhere_info)
         condition_hash = queryConditionCacheHash(0, queryConditionCacheSettingsSalt(settings));
     else
         return {};
