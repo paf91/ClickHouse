@@ -50,7 +50,7 @@ public:
     static bool isSupportedAlterMutation(MutationCommand::Type type);
     static bool isSupportedMetadataMutation(MutationCommand::Type type);
 
-    /// Adds the columns whose values are changed on the fly by the command to `updated_columns`.
+    /// Adds the columns changed on the fly by the command.
     static void addUpdatedColumns(const MutationCommand & command, NameSet & updated_columns);
 
     const NameSet & getAllUpdatedColumns() const { return all_updated_columns; }

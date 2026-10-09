@@ -189,22 +189,15 @@ String optimizationInfoToString(const IndexReadColumns & added_columns, const Na
     return result;
 }
 
-/// Returns the columns whose values are changed on the fly for the query by pending patch parts, mutations
-/// and masking policies. The text index is built on the values stored in the parts, so it is not used for
-/// the predicates on such columns at all: the on-fly mutation steps are built from the columns of the query,
-/// which do not contain the indexed columns replaced by the virtual columns of the index, and whether the
-/// preprocessor of the index is applied to the search functions must not depend on the part.
-///
-/// The columns updated by patch parts and data mutations are collected over the whole snapshot rather than
-/// over the given parts, because the parts are not filtered by the index analysis yet, and the lookup of patches
-/// for a part is linear in the number of patch parts. A part with pending patches of other columns does not read
-/// the index either (see `canReadTextIndexInPart`), but the other parts do.
+/// Columns changed on the fly by patches, mutations and masking policies. The index is not used for them in the
+/// whole query: the preprocessor rewrite and the on-fly mutation steps do not depend on the part. Patches and data
+/// mutations are taken from the whole snapshot to avoid looking up the patches of each part.
 NameSet getColumnsUpdatedOnFly(const ReadFromMergeTree & read_from_merge_tree_step, const std::unordered_set<DataPartPtr> & parts)
 {
     const auto & mutations_snapshot = read_from_merge_tree_step.getMutationsSnapshot();
     NameSet updated_columns = mutations_snapshot->getAllUpdatedColumns();
 
-    /// The columns whose types are changed by alter mutations (MODIFY COLUMN) are known only per part.
+    /// Alter mutations (MODIFY COLUMN) are known only per part.
     if (mutations_snapshot->hasAlterMutations())
     {
         for (const auto & part : parts)
@@ -215,7 +208,7 @@ NameSet getColumnsUpdatedOnFly(const ReadFromMergeTree & read_from_merge_tree_st
     }
 
 #if CLICKHOUSE_CLOUD
-    /// Masking policies are applied in the same way as mutations, and the same for all parts.
+    /// Masking policies are the same for all parts.
     const auto & context = read_from_merge_tree_step.getContext();
     const auto & storage_id = read_from_merge_tree_step.getMergeTreeData().getStorageID();
 
@@ -232,7 +225,7 @@ void collectTextIndexReadInfos(const ReadFromMergeTree * read_from_merge_tree_st
 {
     auto component_guard = Coordination::setCurrentComponent("optimizeDirectReadFromTextIndex");
 
-    /// Everything below is needed only for text indexes, and it is not free for tables with many parts.
+    /// Everything below is needed only for text indexes.
     const auto & indexes = read_from_merge_tree_step->getIndexes();
     if (!indexes || std::ranges::none_of(indexes->skip_indexes.useful_indices, [](const auto & index) { return index.index->isTextIndex(); }))
         return;
@@ -685,7 +678,6 @@ private:
 
             /// Use direct read only when enabled and the entry is direct-read-eligible (has `index`). Otherwise
             /// just inject the tokenizer/preprocessor/postprocessor (no virtual column), same as None mode.
-            /// Parts with pending patches are handled by the reader, see `canReadTextIndexInPart`.
             if (!direct_read_from_text_index || !info.index || drops_nullable
                 || search_query->getDirectReadMode() == TextIndexDirectReadMode::None)
             {

@@ -1,6 +1,4 @@
--- A pending patch part used to turn the direct read from a text index off for the whole query.
--- Now only the parts with pending patches evaluate the search predicate on the column, the other
--- parts read the index, and the results are the same as without the direct read.
+-- Pending patches disable the direct read from a text index only in the patched parts.
 
 SET enable_lightweight_update = 1;
 SET query_plan_direct_read_from_text_index = 1;
@@ -26,7 +24,7 @@ SYSTEM STOP MERGES tab;
 INSERT INTO tab SELECT number, 0, concat('tok', toString(number % 10), ' ', repeat('x', 100)) FROM numbers(0, 1000);
 INSERT INTO tab SELECT number, 0, concat('tok', toString(number % 10), ' ', repeat('x', 100)) FROM numbers(1000, 1000);
 
--- A pending patch of a column that is not indexed, in the first part only.
+-- A patch of a not indexed column in the first part only.
 UPDATE tab SET c = 1 WHERE id < 10;
 
 SELECT '-- patch of not indexed column';
@@ -41,7 +39,7 @@ SELECT count(), sum(c) FROM tab WHERE hasToken(s, 'tok1') SETTINGS query_plan_di
 SELECT count(), sum(c) FROM tab WHERE hasToken(s, 'tok1') SETTINGS use_skip_indexes = 0;
 SELECT id, c FROM tab WHERE hasToken(s, 'tok1') AND id < 25 ORDER BY id;
 
--- The part without patches reads the index instead of the column.
+-- The part without patches reads the index, not the column.
 SELECT count(), sum(c) FROM tab WHERE hasToken(s, 'tok1') FORMAT Null SETTINGS log_comment = '05345_direct_read';
 SELECT count(), sum(c) FROM tab WHERE hasToken(s, 'tok1') FORMAT Null SETTINGS log_comment = '05345_no_direct_read', query_plan_direct_read_from_text_index = 0;
 

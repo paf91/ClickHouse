@@ -18,9 +18,8 @@ NameSet injectRequiredColumns(
     bool with_subcolumns,
     Names & columns);
 
-/// Returns true if the virtual columns of a materialized text index (direct read from text index)
-/// can be read from the index in a part with the given alter conversions. Otherwise they are computed
-/// by their default expressions, i.e. by the original search predicates, as in parts without the index.
+/// Whether the virtual columns of a text index can be read from the index in a part (direct read).
+/// Otherwise they are computed by their default expressions.
 bool canReadTextIndexInPart(const AlterConversionsPtr & alter_conversions);
 
 PrewhereExprStepPtr createLightweightDeleteStep(bool remove_filter_column);

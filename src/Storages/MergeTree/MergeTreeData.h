@@ -1464,7 +1464,7 @@ public:
         );
 
 #if CLICKHOUSE_CLOUD
-    /// Returns the commands that apply the enabled masking policies to the data of the table on the fly.
+    /// Commands that apply the enabled masking policies on the fly.
     static MutationCommands getMaskingPolicyCommands(const StorageID & storage_id, const EnabledMaskingPoliciesPtr & enabled_masking_policies);
 #endif
 

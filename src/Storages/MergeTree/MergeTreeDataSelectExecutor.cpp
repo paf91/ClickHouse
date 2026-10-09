@@ -1239,8 +1239,7 @@ RangesInDataParts MergeTreeDataSelectExecutor::filterPartsByPrimaryKeyAndSkipInd
                 ranges.ranges_snapshot_after_pk_analysis = ranges.ranges;
             }
 
-            /// Skip indexes cannot filter anything in a part dropped by the primary key. Do not build the alter
-            /// conversions for it: the lookup of patches for a part is linear in the number of patch parts.
+            /// Do not build alter conversions (linear in the number of patches) for a part dropped by the primary key.
             if (!skip_indexes.empty() && !ranges.ranges.empty())
             {
                 CurrentMetrics::Increment metric(CurrentMetrics::FilteringMarksWithSecondaryKeys);

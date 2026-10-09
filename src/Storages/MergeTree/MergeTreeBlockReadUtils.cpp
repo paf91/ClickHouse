@@ -175,9 +175,7 @@ bool injectRequiredColumnsRecursively(
 
 bool canReadTextIndexInPart(const AlterConversionsPtr & alter_conversions)
 {
-    /// Pending patches are applied by the keys read in the first read step together with the other
-    /// columns of that step, which the reader of the text index cannot read. The default expressions
-    /// of the virtual columns are evaluated after the patches are applied to the indexed columns.
+    /// Patches are joined by the keys read in the first step, which the text index reader cannot read.
     return !alter_conversions || !alter_conversions->hasPatches();
 }
 

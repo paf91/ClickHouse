@@ -1,13 +1,11 @@
 <test>
-    <!-- Planning of a query with a skip index used to look up the pending patch parts of every part of the
-         table, which is linear in the number of parts times the number of patch parts, even when only one
-         part is read and the query does not use a text index. -->
+    <!-- Planning of a query with a skip index looked up the patch parts of every part. -->
     <settings>
         <enable_lightweight_update>1</enable_lightweight_update>
         <use_query_condition_cache>0</use_query_condition_cache>
     </settings>
 
-    <!-- `refresh_statistics_interval = 1`: the cached statistics are up to date after the fill. -->
+    <!-- Refresh the statistics cache right after the fill. -->
     <create_query>
         CREATE TABLE test_patch_parts_planning
         (
