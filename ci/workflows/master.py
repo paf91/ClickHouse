@@ -60,6 +60,7 @@ workflow = Workflow.Config(
         *JobConfigs.functional_tests_jobs_azure,
         *JobConfigs.integration_test_jobs_required,
         *JobConfigs.integration_test_jobs_non_required,
+        *JobConfigs.integration_test_arm_binary_coverage_replacement_pr_jobs,
         *JobConfigs.stress_test_jobs,
         *JobConfigs.stress_test_azure_jobs,
         *JobConfigs.ast_fuzzer_jobs,
