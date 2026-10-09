@@ -785,7 +785,7 @@ void decodeVariantColumn(
         {
             decodeValueIntoDynamic(value_blob, 0, context, 0, *output_dynamic);
             if (output_null_map)
-                output_null_map->push_back(0);
+                output_null_map->push_back(false);
             continue;
         }
 
@@ -809,7 +809,7 @@ void decodeVariantColumn(
         checkDepth(context, 0);
         decodeObjectIntoJSON(value_blob, 1, header >> 2, context, 0, *output_object, &*filter);
         if (output_null_map)
-            output_null_map->push_back(0);
+            output_null_map->push_back(false);
     }
 }
 
