@@ -70,6 +70,7 @@ def cleanup_after_test():
         instance.query("DROP DATABASE IF EXISTS test2", settings=drop_settings)
         instance.query("DROP DATABASE IF EXISTS test3", settings=drop_settings)
         instance.query("DROP DATABASE IF EXISTS restored", settings=drop_settings)
+        instance.query("DROP TABLE IF EXISTS default.mv_1")
         instance.query("DROP USER IF EXISTS u1, u2")
         instance.query("DROP ROLE IF EXISTS r1, r2")
         instance.query("DROP SETTINGS PROFILE IF EXISTS prof1")
