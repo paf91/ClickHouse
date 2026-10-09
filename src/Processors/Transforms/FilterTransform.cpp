@@ -21,7 +21,6 @@
 #include <Processors/Merges/Algorithms/MergeTreeReadInfo.h>
 #include <Interpreters/ActionsDAG.h>
 #include <Functions/IFunction.h>
-#include <Common/FailPoint.h>
 #include <Common/assert_cast.h>
 
 namespace ProfileEvents
@@ -32,14 +31,6 @@ namespace ProfileEvents
 
 namespace DB
 {
-
-namespace FailPoints
-{
-    extern const char filter_transform_before_expression_pause[];
-    extern const char filter_transform_pause[];
-    extern const char query_condition_cache_part_switch_pause[];
-    extern const char query_condition_cache_final_flush_pause[];
-}
 
 namespace ErrorCodes
 {
@@ -317,8 +308,6 @@ void FilterTransform::doTransform(Chunk & chunk)
         Block block = getInputPort().getHeader().cloneWithColumns(columns);
         columns.clear();
 
-        FailPointInjection::pauseFailPoint(FailPoints::filter_transform_before_expression_pause);
-
         if (isCancelled())
         {
             stopReading();
@@ -327,8 +316,6 @@ void FilterTransform::doTransform(Chunk & chunk)
 
         if (expression)
             expression->execute(block, num_rows_before_filtration, false, false, &getCancellationFlag());
-
-        FailPointInjection::pauseFailPoint(FailPoints::filter_transform_pause);
 
         if (isCancelled())
         {
@@ -487,11 +474,6 @@ void FilterTransform::writeIntoQueryConditionCache(const MarkRangesInfoPtr & mar
         if (!buffered_mark_ranges_info)
             return;
 
-        FailPointInjection::pauseFailPoint(FailPoints::query_condition_cache_final_flush_pause);
-
-        if (isCancelled())
-            return;
-
         query_condition_cache->write(
             buffered_mark_ranges_info->table_uuid,
             buffered_mark_ranges_info->part_name,
@@ -517,11 +499,6 @@ void FilterTransform::writeIntoQueryConditionCache(const MarkRangesInfoPtr & mar
 
         if (buffered_mark_ranges_info->table_uuid != mark_ranges_info->table_uuid || buffered_mark_ranges_info->part_name != mark_ranges_info->part_name)
         {
-            FailPointInjection::pauseFailPoint(FailPoints::query_condition_cache_part_switch_pause);
-
-            if (isCancelled())
-                return;
-
             query_condition_cache->write(
                 buffered_mark_ranges_info->table_uuid,
                 buffered_mark_ranges_info->part_name,

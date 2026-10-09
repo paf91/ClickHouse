@@ -11,7 +11,6 @@
 #include <DataTypes/DataTypeNullable.h>
 #include <Functions/FunctionDateOrDateTimeAddInterval.h>
 #include <Functions/IFunction.h>
-#include <Common/FailPoint.h>
 #include <Common/FieldVisitorScale.h>
 #include <Common/FieldVisitorSum.h>
 #include <Common/FieldVisitorToString.h>
@@ -22,11 +21,6 @@
 
 namespace DB
 {
-
-namespace FailPoints
-{
-    extern const char filling_transform_before_interpolate_pause[];
-}
 
 constexpr static bool debug_logging_enabled = false;
 
@@ -462,8 +456,6 @@ void FillingTransform::interpolate(const MutableColumns & result_columns, Block 
     if (interpolate_description)
     {
         interpolate_block.clear();
-
-        FailPointInjection::pauseFailPoint(FailPoints::filling_transform_before_interpolate_pause);
 
         /// The query is being cancelled and the result is discarded anyway, so do not start evaluating
         /// the `INTERPOLATE` expressions: the cancellation flag passed to `execute` is checked only after

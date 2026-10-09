@@ -2,16 +2,9 @@
 
 #include <Columns/IColumn.h>
 #include <Interpreters/ExpressionActions.h>
-#include <Common/FailPoint.h>
 
 namespace DB
 {
-
-namespace FailPoints
-{
-    extern const char filter_sorted_stream_by_range_pause[];
-    extern const char filter_sorted_stream_by_range_fallback_pause[];
-}
 
 namespace
 {
@@ -67,18 +60,10 @@ void FilterSortedStreamByRange::transform(Chunk & chunk)
 {
     /// A task that was already dispatched by the executor when the cancellation landed still runs,
     /// so a chunk buffered in the input port can still arrive here after `KILL QUERY`. Do not enter
-    /// the filter expression while cancelled: drop the chunk and stop reading.
-    if (stopIfCancelled(chunk))
-        return;
-
-    /// Pauses every entry that passed the cancellation guard above. Tests arm it after `KILL QUERY`,
-    /// so a transform re-entered after the cancellation blocks here and the test times out.
-    FailPointInjection::pauseFailPoint(FailPoints::filter_sorted_stream_by_range_pause);
-
-    /// The cancellation can land after the guard above, so check it again right before delegating to
-    /// the inner transform: the inner `FilterTransform` observes the cancellation only once it is
-    /// already inside `ExpressionActions::execute`, so without this the killed query would evaluate
-    /// at least one action of the filter expression for this chunk.
+    /// the filter expression while cancelled: drop the chunk and stop reading. The inner
+    /// `FilterTransform` observes the cancellation only once it is already inside
+    /// `ExpressionActions::execute`, so without this the killed query would evaluate at least
+    /// one action of the filter expression for this chunk.
     if (stopIfCancelled(chunk))
         return;
 
@@ -120,11 +105,9 @@ void FilterSortedStreamByRange::transform(Chunk & chunk)
     // Not all rows satisfy conditions.
     if (!all_rows_will_pass_filter)
     {
-        FailPointInjection::pauseFailPoint(FailPoints::filter_sorted_stream_by_range_fallback_pause);
-
         /// Same as before the probe: the cancellation can land while the range predicate of the
-        /// probe is being evaluated (or while this thread is paused above), and the fallback call
-        /// re-evaluates the predicate for the whole chunk — do not start it when cancelled.
+        /// probe is being evaluated, and the fallback call re-evaluates the predicate for the whole
+        /// chunk — do not start it when cancelled.
         if (stopIfCancelled(chunk))
             return;
 

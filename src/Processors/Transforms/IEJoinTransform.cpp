@@ -15,18 +15,12 @@
 #include <DataTypes/DataTypeNullable.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Common/assert_cast.h>
-#include <Common/FailPoint.h>
 #include <Processors/Transforms/IEJoinTransform.h>
 #include <Common/NaNUtils.h>
 #include <Common/iota.h>
 
 namespace DB
 {
-
-namespace FailPoints
-{
-    extern const char iejoin_residual_before_expression_pause[];
-}
 
 namespace ErrorCodes
 {
@@ -1161,7 +1155,6 @@ IColumn::Filter IEJoinAlgorithm::evaluateResidualMask(const ColumnUInt64 & left_
     /// The query may be cancelled before the residual is evaluated or while it is evaluated. Do not
     /// start (or use) the evaluation then: the returned mask is meaningless, and `merge` sees the
     /// cancellation and finishes the join without emitting anything of the current batch.
-    FailPointInjection::pauseFailPoint(FailPoints::iejoin_residual_before_expression_pause);
     if (isCancelled())
         return IColumn::Filter(num_pairs, 0);
     Columns results = residual->actions->executeOnColumns(

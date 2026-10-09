@@ -17,13 +17,8 @@ namespace DB
 {
 namespace FailPoints
 {
-    extern const char totals_having_transform_before_expression_pause[];
-    extern const char totals_having_transform_after_expression_pause[];
     extern const char totals_having_transform_pause[];
     extern const char totals_having_transform_drop_cancelled_chunk[];
-    extern const char totals_having_transform_totals_pause[];
-    extern const char totals_having_transform_totals_start_pause[];
-    extern const char totals_having_transform_totals_before_expression_pause[];
 }
 
 namespace ErrorCodes
@@ -244,8 +239,6 @@ void TotalsHavingTransform::transform(Chunk & chunk)
                 throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Having clause cannot contain arrayJoin");
         }
 
-        FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_before_expression_pause);
-
         if (isCancelled())
         {
             stopReading();
@@ -254,8 +247,6 @@ void TotalsHavingTransform::transform(Chunk & chunk)
         }
 
         expression->execute(finalized_block, num_rows, false, false, &getCancellationFlag());
-
-        FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_after_expression_pause);
 
         if (isCancelled())
         {
@@ -402,8 +393,6 @@ void TotalsHavingTransform::addToTotals(const Chunk & chunk, const IColumn::Filt
 
 void TotalsHavingTransform::prepareTotals()
 {
-    FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_totals_start_pause);
-
     if (isCancelled())
     {
         /// The main stream was already cancelled and the result is discarded anyway, so none of the
@@ -447,21 +436,7 @@ void TotalsHavingTransform::prepareTotals()
         size_t num_rows = totals.getNumRows();
         auto block = finalized_header.cloneWithColumns(totals.detachColumns());
 
-        FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_totals_before_expression_pause);
-
-        if (isCancelled())
-        {
-            /// The query was cancelled after the preceding guard and before evaluating the
-            /// totals-row `HAVING` expression. Do not start a new expression action; its
-            /// cancellation callback is checked only after each action completes.
-            totals = Chunk(getTotalsPort().getHeader().cloneEmptyColumns(), 0);
-            total_prepared = true;
-            return;
-        }
-
         expression->execute(block, num_rows, false, false, &getCancellationFlag());
-
-        FailPointInjection::pauseFailPoint(FailPoints::totals_having_transform_totals_pause);
 
         if (isCancelled())
         {

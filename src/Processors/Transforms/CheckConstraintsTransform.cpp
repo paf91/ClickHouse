@@ -13,7 +13,6 @@
 #include <Storages/ConstraintsDescription.h>
 #include <Functions/IFunction.h>
 #include <Interpreters/ExpressionActions.h>
-#include <Common/FailPoint.h>
 
 
 namespace DB
@@ -24,14 +23,6 @@ namespace ErrorCodes
     extern const int VIOLATED_CONSTRAINT;
     extern const int UNSUPPORTED_METHOD;
 }
-
-namespace FailPoints
-{
-    extern const char check_constraints_transform_before_expression_pause[];
-    extern const char check_constraints_transform_pause[];
-    extern const char check_constraints_transform_between_constraints_pause[];
-}
-
 
 CheckConstraintsTransform::CheckConstraintsTransform(
     const StorageID & table_id_,
@@ -64,8 +55,6 @@ void CheckConstraintsTransform::onConsume(Chunk chunk)
 {
     if (chunk.getNumRows() > 0)
     {
-        FailPointInjection::pauseFailPoint(FailPoints::check_constraints_transform_before_expression_pause);
-
         /// The task could have been dispatched before the cancellation and picked up after it.
         /// There is nothing to check for a query that is not going to write anything.
         if (isCancelled())
@@ -93,8 +82,6 @@ void CheckConstraintsTransform::onConsume(Chunk chunk)
 
             auto constraint_expr = expressions[i];
             constraint_expr->execute(block_to_calculate, false, false, &getCancellationFlag());
-
-            FailPointInjection::pauseFailPoint(FailPoints::check_constraints_transform_pause);
 
             /// `execute` stops between actions when cancelled, so the result column of the
             /// constraint is not necessarily there any more.
@@ -211,11 +198,6 @@ void CheckConstraintsTransform::onConsume(Chunk chunk)
                     constraint_ptr->expr->formatForErrorMessage(),
                     column_values_msg);
             }
-
-            /// The window between two constraints of the same table: a `KILL QUERY` landing here
-            /// must not let the next constraint expression start.
-            if (i + 1 < expressions.size())
-                FailPointInjection::pauseFailPoint(FailPoints::check_constraints_transform_between_constraints_pause);
         }
     }
 

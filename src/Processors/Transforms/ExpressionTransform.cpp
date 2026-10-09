@@ -1,5 +1,4 @@
 #include <Processors/Transforms/ExpressionTransform.h>
-#include <Common/FailPoint.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Core/Block.h>
 #include <Functions/IFunction.h>
@@ -10,14 +9,6 @@
 
 namespace DB
 {
-
-namespace FailPoints
-{
-    extern const char expression_transform_before_expression_pause[];
-    extern const char expression_transform_pause[];
-    extern const char converting_transform_before_expression_pause[];
-    extern const char converting_transform_pause[];
-}
 
 Block ExpressionTransform::transformHeader(const Block & header, const ActionsDAG & expression)
 {
@@ -49,8 +40,6 @@ void ExpressionTransform::transform(Chunk & chunk)
 {
     size_t num_rows = chunk.getNumRows();
 
-    FailPointInjection::pauseFailPoint(FailPoints::expression_transform_before_expression_pause);
-
     if (isCancelled())
     {
         chunk.setColumns(getOutputPort().getHeader().cloneEmptyColumns(), 0);
@@ -62,7 +51,6 @@ void ExpressionTransform::transform(Chunk & chunk)
     {
         auto block = getInputPort().getHeader().cloneWithColumns(chunk.detachColumns());
         expression->execute(block, num_rows, false, false, &getCancellationFlag());
-        FailPointInjection::pauseFailPoint(FailPoints::expression_transform_pause);
         if (isCancelled())
         {
             block = getOutputPort().getHeader().cloneWithColumns(getOutputPort().getHeader().cloneEmptyColumns());
@@ -76,8 +64,6 @@ void ExpressionTransform::transform(Chunk & chunk)
     /// Fast path: run positionally against the fixed input header, avoiding per-chunk Block name-index work.
     auto columns = expression->executeOnColumns(
         chunk.detachColumns(), getInputPort().getHeader(), input_positions, num_rows, false, &getCancellationFlag());
-
-    FailPointInjection::pauseFailPoint(FailPoints::expression_transform_pause);
 
     if (isCancelled())
     {
@@ -119,8 +105,6 @@ void ConvertingTransform::onConsume(Chunk chunk)
 {
     size_t num_rows = chunk.getNumRows();
 
-    FailPointInjection::pauseFailPoint(FailPoints::converting_transform_before_expression_pause);
-
     if (isCancelled())
     {
         chunk.setColumns(getOutputPort().getHeader().cloneEmptyColumns(), 0);
@@ -131,8 +115,6 @@ void ConvertingTransform::onConsume(Chunk chunk)
     auto block = getInputPort().getHeader().cloneWithColumns(chunk.detachColumns());
 
     expression->execute(block, num_rows, false, false, &getCancellationFlag());
-
-    FailPointInjection::pauseFailPoint(FailPoints::converting_transform_pause);
 
     if (isCancelled())
     {

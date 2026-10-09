@@ -7,7 +7,6 @@
 #include <Interpreters/RequiredSourceColumnsVisitor.h>
 #include <Processors/Formats/IInputFormat.h>
 #include <Processors/Transforms/AddingDefaultsTransform.h>
-#include <Common/FailPoint.h>
 
 #include <Columns/ColumnsNumber.h>
 #include <Columns/ColumnsCommon.h>
@@ -34,13 +33,6 @@
 
 namespace DB
 {
-
-namespace FailPoints
-{
-    extern const char adding_defaults_transform_before_expression_pause[];
-    extern const char adding_defaults_transform_pause[];
-    extern const char adding_defaults_transform_before_execute_pause[];
-}
 
 namespace ErrorCodes
 {
@@ -312,33 +304,19 @@ void AddingDefaultsTransform::transform(Chunk & chunk)
                 current_actions = actions;
             }
 
-            FailPointInjection::pauseFailPoint(FailPoints::adding_defaults_transform_before_expression_pause);
-
             /// The task can be dispatched before the query is cancelled and start running after it:
-            /// skip the whole default evaluation instead of running one action of it.
-            auto skip_if_cancelled = [&]
+            /// skip the whole default evaluation instead of running one action of it. A cancellation
+            /// landing after this check reaches the running function through the published actions,
+            /// if it supports interruption.
+            if (isCancelled())
             {
-                if (!isCancelled())
-                    return false;
                 {
                     std::lock_guard lock(current_actions_mutex);
                     current_actions.reset();
                 }
                 chunk.setColumns(getOutputPort().getHeader().cloneEmptyColumns(), 0);
-                return true;
-            };
-
-            if (skip_if_cancelled())
                 return;
-
-            FailPointInjection::pauseFailPoint(FailPoints::adding_defaults_transform_before_execute_pause);
-
-            /// Check again immediately before the evaluation: `cancelExecution` is a no-op for most
-            /// functions, so the published actions alone do not stop a built-in function that
-            /// would start after the cancellation. A cancellation landing after this check reaches
-            /// the running function through the published actions, if it supports interruption.
-            if (skip_if_cancelled())
-                return;
+            }
 
             actions->execute(evaluate_block, false, false, &getCancellationFlag());
 
@@ -346,8 +324,6 @@ void AddingDefaultsTransform::transform(Chunk & chunk)
                 std::lock_guard lock(current_actions_mutex);
                 current_actions.reset();
             }
-
-            FailPointInjection::pauseFailPoint(FailPoints::adding_defaults_transform_pause);
 
             if (isCancelled())
             {
