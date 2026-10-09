@@ -2211,7 +2211,7 @@ bool QueryOracleChecker::checkTLPAggregate(const ASTSelectQuery & select, const 
             /// `dynamic_cast`, not `as<...>`: `ASTWithAlias` is a base class and
             /// `IAST::as` is an exact-typeid cast, so `as<ASTWithAlias>()` is false
             /// for every concrete node — it silently disabled this oracle for ALL
-            /// grouped queries (caught by 04658_ast_fuzzer_oracle_tlp_aggregate_counter).
+            /// grouped queries.
             if (!dynamic_cast<const ASTWithAlias *>(group_expr.get()))
                 return false;
             String g_alias = fmt::format("_g_{}", g_idx++);
