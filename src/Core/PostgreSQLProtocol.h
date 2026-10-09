@@ -2709,10 +2709,8 @@ private:
             }
         }
 
-        /// Only the whole array may be empty.
-        if (depth > 0 && result.nested.empty())
-            throwMalformedArrayLiteral(value);
-
+        /// An empty sub-array, as in `{{},{}}`, counts as a dimension of values of length 0, so the
+        /// shape checks below reject it next to a non-empty sub-array or a deeper one.
         if (!holds_arrays.value_or(false))
         {
             if (shape.dimensions.has_value() && *shape.dimensions != depth + 1)

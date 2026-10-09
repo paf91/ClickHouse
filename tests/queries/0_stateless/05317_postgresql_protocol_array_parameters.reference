@@ -9,7 +9,10 @@ Array(Nullable(String))	4	b,c	1	NULL
 --- several dimensions
 {"1","2","3","4"}	Array(Array(Int64))
 x"y	c	Array(Array(String))
+2	0	0	Array(Array(Int32))
 --- not an array of the element type
+error: not a PostgreSQL array literal
+error: not a PostgreSQL array literal
 error: not a PostgreSQL array literal
 error: not a PostgreSQL array literal
 error: not a PostgreSQL array literal
