@@ -1933,6 +1933,24 @@ def test_compatibility_skips_settings_of_a_disabled_tier(start_cluster):
         assert instance.query(query, user=users[0]) == "true\t0\n"
 
 
+def test_compatibility_sets_beta_kusto_dialect_setting(start_cluster):
+    # `allow_experimental_kusto_dialect` is a BETA setting that `compatibility` older than 25.1 sets to 1:
+    # tiers 1 and 2 still apply it, while tier 3 skips it.
+    assert "0" == get_current_tier_value(instance)
+    query = (
+        "SELECT getSetting('allow_experimental_kusto_dialect') "
+        "SETTINGS compatibility = '23.6'"
+    )
+    assert instance.query(query) == "true\n"
+
+    for tier in ["1", "2"]:
+        with feature_tier(instance, tier):
+            assert instance.query(query) == "true\n"
+
+    with feature_tier(instance, "3"):
+        assert instance.query(query) == "false\n"
+
+
 def test_compatibility_skips_merge_tree_settings_refused_by_default_profile(start_cluster):
     # `compatibility` 24.10 in the default profile gives both settings their old defaults, except where a
     # constraint of the default profile refuses the old value: that setting keeps its current default.
