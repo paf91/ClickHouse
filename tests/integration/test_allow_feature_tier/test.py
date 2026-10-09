@@ -117,7 +117,7 @@ MERGE_TREE_FORBIDDEN_DEFAULT_MIN = 16384
 
 # `compatibility` older than 25.1 sets this EXPERIMENTAL setting to 1, and one older than 23.7 sets this
 # PRODUCTION setting to 0.
-COMPATIBILITY_EXPERIMENTAL_SETTING = "allow_experimental_kusto_dialect"
+COMPATIBILITY_EXPERIMENTAL_SETTING = "allow_experimental_prql_dialect"
 COMPATIBILITY_PRODUCTION_SETTING = "function_sleep_max_microseconds_per_block"
 
 EXPERIMENTAL_BLOCKED = "Changes to EXPERIMENTAL settings are disabled"
