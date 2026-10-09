@@ -3681,6 +3681,11 @@ try
 {
     auto component_guard = Coordination::setCurrentComponent("MergeTreeData::refreshStatistics");
     DataPartsVector data_parts = getDataPartsVectorForInternalUsage();
+
+    /// Queries never read patch parts directly, so with them in the snapshot
+    /// the cached statistics would never match the parts read by a query.
+    std::erase_if(data_parts, [](const auto & part) { return part->info.isPatch(); });
+
     if (cached_estimator)
     {
         if (!cached_estimator->isStale(data_parts))
