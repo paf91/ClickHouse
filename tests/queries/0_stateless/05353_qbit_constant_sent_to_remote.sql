@@ -5,17 +5,20 @@ DROP TABLE IF EXISTS t_qbit_dist;
 DROP TABLE IF EXISTS t_qbit;
 CREATE TABLE t_qbit (id UInt32, q QBit(Float32, 2)) ENGINE = MergeTree ORDER BY id;
 INSERT INTO t_qbit VALUES (1, [1, 2]), (2, [3, 4]), (3, [-0., inf]), (4, [0., inf]), (6, [nan, 1]);
-INSERT INTO t_qbit SELECT 5, CAST([0/0, 1], 'QBit(Float32, 2)');  -- 0/0 is a NaN with the sign bit set (0xFFC00000), unlike the literal `nan`
+-- NaNs that differ from the literal `nan` (0x7FC00000) only in the sign bit (5: 0xFFC00000) or only in the payload (7: 0x7FC00001).
+INSERT INTO t_qbit SELECT 5, CAST([reinterpretAsFloat32(toUInt32(4290772992)), 1], 'QBit(Float32, 2)');
+INSERT INTO t_qbit SELECT 7, CAST([reinterpretAsFloat32(toUInt32(2143289345)), 1], 'QBit(Float32, 2)');
 CREATE TABLE t_qbit_dist AS t_qbit ENGINE = Distributed(test_shard_localhost, currentDatabase(), t_qbit);
 
 SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q = CAST([1, 2], 'QBit(Float32, 2)');
 SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q = CAST([-0., inf], 'QBit(Float32, 2)');
-SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q = CAST([0/0, 1], 'QBit(Float32, 2)');
+SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q = CAST([reinterpretAsFloat32(toUInt32(4290772992)), 1], 'QBit(Float32, 2)');
+SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q = CAST([reinterpretAsFloat32(toUInt32(2143289345)), 1], 'QBit(Float32, 2)');
 SELECT id FROM t_qbit_dist WHERE q = CAST([3, 4], 'QBit(Float32, 2)');
 SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q IN (CAST([1, 2], 'QBit(Float32, 2)'), CAST([3, 4], 'QBit(Float32, 2)')) ORDER BY id;
 SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q = CAST([1, 2], 'QBit(Float32, 2)') OR q = CAST([3, 4], 'QBit(Float32, 2)') OR q = CAST([5, 6], 'QBit(Float32, 2)') ORDER BY id;
 SELECT id FROM (SELECT id, q FROM remote('127.0.0.2', currentDatabase(), t_qbit)) WHERE q = CAST([3, 4], 'QBit(Float32, 2)');
-SELECT id FROM t_qbit WHERE q = CAST([1, 2], 'QBit(Float32, 2)') SETTINGS enable_parallel_replicas = 1, max_parallel_replicas = 3,
+SELECT id FROM t_qbit WHERE q = CAST([1, 2], 'QBit(Float32, 2)') SETTINGS enable_parallel_replicas = 1, automatic_parallel_replicas_mode = 0, max_parallel_replicas = 3,
     cluster_for_parallel_replicas = 'test_cluster_one_shard_three_replicas_localhost', parallel_replicas_for_non_replicated_merge_tree = 1, parallel_replicas_local_plan = 0;
 
 -- optimize_const_name_size = -1 keeps the larger constants in the query text instead of sending them as scalars.
