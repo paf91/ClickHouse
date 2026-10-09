@@ -134,6 +134,9 @@ String pgFormatType(Int64 oid, Int64 typmod)
 /// Provided so that ClickHouse's PostgreSQL wire protocol can answer the catalog-introspection
 /// queries issued by libpq/pqxx clients - in particular by ClickHouse itself when the `postgresql`
 /// table function or engine points at another ClickHouse instance.
+/// As in PostgreSQL, the function is not strict: a `NULL` type modifier means that no specific modifier
+/// is known (the same as `-1`), so `format_type(t.oid, NULL)` renders the base type name, and only a
+/// `NULL` type OID gives `NULL`.
 class FunctionFormatType final : public IFunction
 {
 public:
@@ -144,37 +147,82 @@ public:
     size_t getNumberOfArguments() const override { return 2; }
     bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo &) const override { return false; }
     bool useDefaultImplementationForConstants() const override { return true; }
+    bool useDefaultImplementationForNulls() const override { return false; }
 
     DataTypePtr getReturnTypeImpl(const DataTypes & arguments) const override
     {
-        if (!isInteger(removeNullable(arguments[0])))
+        const auto is_integer_or_null = [](const DataTypePtr & type)
+        {
+            const auto nested = removeNullable(type);
+            return isInteger(nested) || isNothing(nested);
+        };
+
+        if (!is_integer_or_null(arguments[0]))
             throw Exception(
                 ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT,
                 "First argument of function {} must be an integer type OID, got {}",
                 getName(), arguments[0]->getName());
 
-        if (!isInteger(removeNullable(arguments[1])))
+        if (!is_integer_or_null(arguments[1]))
             throw Exception(
                 ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT,
                 "Second argument of function {} must be an integer type modifier, got {}",
                 getName(), arguments[1]->getName());
 
+        if (arguments[0]->isNullable() || isNothing(arguments[0]))
+            return makeNullable(std::make_shared<DataTypeString>());
         return std::make_shared<DataTypeString>();
     }
 
-    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr &, size_t input_rows_count) const override
+    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type, size_t input_rows_count) const override
     {
-        const IColumn & oid_column = *arguments[0].column;
-        const IColumn & typmod_column = *arguments[1].column;
+        /// The values of an argument and its null map; no values at all for an argument that is always `NULL`.
+        struct Argument
+        {
+            ColumnPtr full_column;
+            const IColumn * values = nullptr;
+            const NullMap * null_map = nullptr;
+
+            bool isNull(size_t row) const { return !values || (null_map && (*null_map)[row]); }
+        };
+
+        const auto unwrap = [](const ColumnWithTypeAndName & argument)
+        {
+            Argument result;
+            result.full_column = argument.column->convertToFullColumnIfConst();
+            if (isNothing(removeNullable(argument.type)))
+                return result;
+            result.values = result.full_column.get();
+            if (const auto * nullable = checkAndGetColumn<ColumnNullable>(result.values))
+            {
+                result.values = &nullable->getNestedColumn();
+                result.null_map = &nullable->getNullMapData();
+            }
+            return result;
+        };
+
+        const Argument oid = unwrap(arguments[0]);
+        const Argument typmod = unwrap(arguments[1]);
 
         auto result = ColumnString::create();
         result->reserve(input_rows_count);
+        auto null_map = ColumnUInt8::create(input_rows_count, static_cast<UInt8>(0));
         for (size_t i = 0; i < input_rows_count; ++i)
         {
-            const String type_name = pgFormatType(oid_column.getInt(i), typmod_column.getInt(i));
+            if (oid.isNull(i))
+            {
+                result->insertDefault();
+                null_map->getData()[i] = 1;
+                continue;
+            }
+
+            const Int64 type_modifier = typmod.isNull(i) ? -1 : typmod.values->getInt(i);
+            const String type_name = pgFormatType(oid.values->getInt(i), type_modifier);
             result->insertData(type_name.data(), type_name.size());
         }
 
+        if (result_type->isNullable())
+            return ColumnNullable::create(std::move(result), std::move(null_map));
         return result;
     }
 };
@@ -405,9 +453,10 @@ REGISTER_FUNCTION(PostgresCatalog)
     factory.registerFunction<FunctionFormatType>(FunctionDocumentation{
         .description = "PostgreSQL compatibility function. Returns the SQL name of a type given its OID. "
                        "For `numeric` the type modifier is decoded into the precision and scale "
-                       "(`numeric(p, s)`); for every other type the modifier is ignored.",
+                       "(`numeric(p, s)`); for every other type the modifier is ignored. "
+                       "A `NULL` type modifier means that no modifier is known, as `-1` does, and a `NULL` type OID gives `NULL`.",
         .syntax = "format_type(type_oid, typemod)",
-        .arguments = {{"type_oid", "The type OID.", {"(U)Int*"}}, {"typemod", "The type modifier.", {"(U)Int*"}}},
+        .arguments = {{"type_oid", "The type OID.", {"(U)Int*"}}, {"typemod", "The type modifier, or `NULL`.", {"(U)Int*", "NULL"}}},
         .returned_value = {"The SQL name of the type.", {"String"}},
         .examples = {{"Example", "SELECT format_type(23, -1)", "integer"}},
         .introduced_in = {26, 8},
