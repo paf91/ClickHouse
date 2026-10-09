@@ -190,22 +190,11 @@ String optimizationInfoToString(const IndexReadColumns & added_columns, const Na
 }
 
 /// Columns changed on the fly by patches, mutations and masking policies. The index is not used for them in the
-/// whole query: the preprocessor rewrite and the on-fly mutation steps do not depend on the part. Patches and data
-/// mutations are taken from the whole snapshot to avoid looking up the patches of each part.
-NameSet getColumnsUpdatedOnFly(const ReadFromMergeTree & read_from_merge_tree_step, const std::unordered_set<DataPartPtr> & parts)
+/// whole query: the preprocessor rewrite and the on-fly mutation steps do not depend on the part. They are taken
+/// from the whole snapshot to avoid looking up the patches of each part.
+NameSet getColumnsUpdatedOnFly(const ReadFromMergeTree & read_from_merge_tree_step)
 {
-    const auto & mutations_snapshot = read_from_merge_tree_step.getMutationsSnapshot();
-    NameSet updated_columns = mutations_snapshot->getAllUpdatedColumns();
-
-    /// Alter mutations (MODIFY COLUMN) are known only per part.
-    if (mutations_snapshot->hasAlterMutations())
-    {
-        for (const auto & part : parts)
-        {
-            for (const auto & command : mutations_snapshot->getOnFlyMutationCommandsForPart(part))
-                AlterConversions::addUpdatedColumns(command, updated_columns);
-        }
-    }
+    NameSet updated_columns = read_from_merge_tree_step.getMutationsSnapshot()->getColumnsChangedOnFly();
 
 #if CLICKHOUSE_CLOUD
     /// Masking policies are the same for all parts.
@@ -241,7 +230,7 @@ void collectTextIndexReadInfos(const ReadFromMergeTree * read_from_merge_tree_st
     for (const auto & part : parts_with_ranges)
         unique_parts.insert(part.data_part);
 
-    auto updated_columns = getColumnsUpdatedOnFly(*read_from_merge_tree_step, unique_parts);
+    auto updated_columns = getColumnsUpdatedOnFly(*read_from_merge_tree_step);
 
     for (const auto & index : indexes->skip_indexes.useful_indices)
     {
