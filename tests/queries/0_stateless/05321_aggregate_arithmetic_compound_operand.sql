@@ -19,11 +19,11 @@ DROP TABLE IF EXISTS t_aggregate_arithmetic_decimal_array;
 CREATE TABLE t_aggregate_arithmetic_decimal_array (arr Array(Decimal(9, 0))) ENGINE = MergeTree ORDER BY tuple();
 INSERT INTO t_aggregate_arithmetic_decimal_array VALUES ([1, 5]), ([0, 9]);
 
--- `Decimal` elements: division truncates each element, and the constant is cast into the native width of the element.
+-- `Decimal` elements: division truncates each element, and with `decimal_check_overflow = 0` the constant wraps into the native width of the element.
 SELECT min(arr / 2), max(arr / 2), min((arr[1], arr[2]) / 2), max((arr[1], arr[2]) / 2) FROM t_aggregate_arithmetic_decimal_array;
 SELECT min(arr / 2), max(arr / 2), min((arr[1], arr[2]) / 2), max((arr[1], arr[2]) / 2) FROM t_aggregate_arithmetic_decimal_array SETTINGS optimize_arithmetic_operations_in_aggregate_functions = 0;
-SELECT min(arr * 9223372036854775807), max(arr * 9223372036854775807), min(tuple(arr[1]) * 9223372036854775807) FROM t_aggregate_arithmetic_decimal_array;
-SELECT min(arr * 9223372036854775807), max(arr * 9223372036854775807), min(tuple(arr[1]) * 9223372036854775807) FROM t_aggregate_arithmetic_decimal_array SETTINGS optimize_arithmetic_operations_in_aggregate_functions = 0;
+SELECT min(arr * 9223372036854775807), max(arr * 9223372036854775807), min(tuple(arr[1]) * 9223372036854775807) FROM t_aggregate_arithmetic_decimal_array SETTINGS decimal_check_overflow = 0;
+SELECT min(arr * 9223372036854775807), max(arr * 9223372036854775807), min(tuple(arr[1]) * 9223372036854775807) FROM t_aggregate_arithmetic_decimal_array SETTINGS optimize_arithmetic_operations_in_aggregate_functions = 0, decimal_check_overflow = 0;
 
 -- A `Variant` operand: `min` and `max` accept the result of the operation, not the `Variant` itself.
 SELECT min(v * -1), max(v * -1) FROM (SELECT CAST(toInt64(number + 1), 'Variant(Int64, String)') AS v FROM numbers(2));
