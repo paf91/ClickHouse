@@ -62,11 +62,11 @@ def _log_tail(path: Path, max_lines: int = 50, max_bytes: int = 65536) -> str:
 # line), so match either form -- both are server-origin because of the prefix.
 SERVER_MLE_SIGNATURE = r"Received from.*(?:MEMORY_LIMIT_EXCEEDED|memory limit exceeded)"
 
-# The client returns its exception code and the OS keeps the low byte. BuzzHouse findings
-# throw `BUZZHOUSE_ORACLE` (1025 -> 1; 1024 would exit with 0); fuzzer errors are generic
-# client failures.
-BUZZHOUSE_ORACLE_ERROR_CODE = 1025
-BUZZHOUSE_ORACLE_EXIT_CODE = BUZZHOUSE_ORACLE_ERROR_CODE & 0xFF
+# The client returns its exception code and the OS keeps the low byte, except that a code with a
+# zero low byte returns -1 (`Client::main`). BuzzHouse findings throw `BUZZHOUSE_ORACLE`
+# (1024 -> 255); fuzzer errors are generic client failures.
+BUZZHOUSE_ORACLE_ERROR_CODE = 1024
+BUZZHOUSE_ORACLE_EXIT_CODE = 255
 
 # On an AST fuzzer oracle mismatch (server-side oracle or peer server comparison) the client prints
 # the `AST FUZZER ORACLE MISMATCH` block and exits with `AST_FUZZER_ORACLE_MISMATCH` (906 -> 138)
