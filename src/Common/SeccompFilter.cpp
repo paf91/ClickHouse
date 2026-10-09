@@ -265,6 +265,20 @@ constexpr int rseq_syscall_number = 293;
 /// `clone3` the same way in their own policies, for the same reason.
 constexpr int clone3_syscall_number = 435;
 
+/// Added in Linux 6.13, which is newer than the kernel headers in the build sysroot.
+#ifndef __NR_setxattrat
+#define __NR_setxattrat 463
+#endif
+#ifndef __NR_getxattrat
+#define __NR_getxattrat 464
+#endif
+#ifndef __NR_listxattrat
+#define __NR_listxattrat 465
+#endif
+#ifndef __NR_removexattrat
+#define __NR_removexattrat 466
+#endif
+
 /// The calls that are refused with `ENOSYS` rather than with the configured action, whatever the
 /// mode: the answer a kernel without them would give, which is the one their callers know how to
 /// fall back from - where `SIGSYS` would take the server down and `EPERM` is an error nobody
@@ -272,15 +286,14 @@ constexpr int clone3_syscall_number = 435;
 /// nothing in ClickHouse uses them, but the NSS modules of the host are loaded into the process by
 /// every name lookup, and `nss-resolve` of `systemd` tags its socket to `systemd-resolved` with an
 /// attribute after probing whether the kernel lets it, treating `ENOSYS` as "it does not" and
-/// carrying on without the tag. The four `*xattrat` calls are newer than the kernel headers in the
-/// build sysroot, so they go by number.
+/// carrying on without the tag.
 constexpr int refused_with_enosys[] = {
     clone3_syscall_number,
     __NR_setxattr, __NR_lsetxattr, __NR_fsetxattr,
     __NR_getxattr, __NR_lgetxattr, __NR_fgetxattr,
     __NR_listxattr, __NR_llistxattr, __NR_flistxattr,
     __NR_removexattr, __NR_lremovexattr, __NR_fremovexattr,
-    463, 464, 465, 466,
+    __NR_setxattrat, __NR_getxattrat, __NR_listxattrat, __NR_removexattrat,
 };
 
 constexpr int allowed_syscalls[] =
