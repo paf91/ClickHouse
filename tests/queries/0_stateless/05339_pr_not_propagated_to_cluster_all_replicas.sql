@@ -17,9 +17,9 @@ SETTINGS log_comment = '05339_cluster_all_replicas';
 
 SYSTEM FLUSH LOGS query_log;
 
--- The setting is recorded only when it differs from its default, so a sub-query that ran without parallel
--- replicas has no entry for it.
-SELECT count(), countIf(Settings['allow_experimental_parallel_reading_from_replicas'] != '')
+-- The setting is recorded only when it differs from the default, so a sub-query that ran without parallel
+-- replicas has either no entry for it or `0`, when a profile enables them.
+SELECT count(), countIf(Settings['allow_experimental_parallel_reading_from_replicas'] NOT IN ('', '0'))
 FROM system.query_log
 WHERE type = 'QueryFinish' AND NOT is_initial_query AND event_date >= yesterday()
     AND initial_query_id IN (
