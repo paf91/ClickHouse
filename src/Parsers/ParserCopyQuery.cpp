@@ -119,10 +119,8 @@ bool ParserCopyQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
             return false;
         }
 
-        /// The terminating `;` is not accepted here: `STDOUT` or `STDIN` is still to come.
-        if (pos->isEnd())
-            return true;
-
+        /// `STDOUT` or `STDIN` is still to come, so neither the end of the query nor the terminating `;`
+        /// is accepted here: `parseOptions` requires the endpoint.
         return parseOptions(pos, copy_element, expected);
     }
 
@@ -132,6 +130,11 @@ bool ParserCopyQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     {
         return false;
     }
+
+    /// PostgreSQL has no alias in this form, and the alias of a subquery would be dropped below, so
+    /// `COPY (SELECT 1) AS junk TO STDOUT` would silently run as `COPY (SELECT 1) TO STDOUT`.
+    if (!name_or_expr->tryGetAlias().empty())
+        return false;
 
     /// `COPY (query) TO STDOUT` - remember the inner query so that it can be executed as-is. Unwrap the
     /// subquery node so that the stored text is a runnable top-level query rather than `(SELECT ...)`.
@@ -149,9 +152,6 @@ bool ParserCopyQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     {
         return false;
     }
-
-    if (pos->isEnd())
-        return true;
 
     return parseOptions(pos, copy_element, expected);
 }
@@ -430,6 +430,12 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
     /// grammar has a bare `HEADER` that takes no value and may be followed directly by another option
     /// (`CSV HEADER DELIMITER ';'`).
     size_t paren_depth = 0;
+    /// Punctuation or a keyword in a position where the option grammar does not allow it, e.g. an unmatched
+    /// parenthesis, a boolean with no `HEADER` before it or an `AS` with no option before it. The command is
+    /// rejected rather than run with whatever options were understood.
+    bool malformed = false;
+    /// `WITH` may only introduce the option list.
+    bool is_first_token = true;
 
     while (!isEndOfStatement(pos))
     {
@@ -489,9 +495,16 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
                 /// so `DELIMITER E'\t'` binds the same way `DELIMITER '\t'` does.
                 pending_value_is_escape_string = true;
             }
-            else if (lower == "with" || lower == "as")
+            else if (lower == "with")
             {
-                /// Filler keywords: keep whatever option is pending so `DELIMITER AS '...'` still binds.
+                if (!is_first_token)
+                    malformed = true;
+            }
+            else if (lower == "as")
+            {
+                /// A filler keyword: keep the pending option so `DELIMITER AS '...'` still binds.
+                if (pending != PendingOption::Delimiter && pending != PendingOption::Null && pending != PendingOption::Quote)
+                    malformed = true;
             }
             else if (lower == "delimiter")
                 pending = PendingOption::Delimiter;
@@ -504,16 +517,13 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
                 header_requested = true;
                 pending = PendingOption::Header;
             }
-            else if (lower == "true" || lower == "on")
+            else if (lower == "true" || lower == "on" || lower == "false" || lower == "off")
             {
+                /// The only boolean option is `HEADER`.
                 if (pending == PendingOption::Header)
-                    header_requested = true;
-                pending = PendingOption::None;
-            }
-            else if (lower == "false" || lower == "off")
-            {
-                if (pending == PendingOption::Header)
-                    header_requested = false;
+                    header_requested = lower == "true" || lower == "on";
+                else
+                    malformed = true;
                 pending = PendingOption::None;
             }
             else
@@ -555,14 +565,20 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
         }
         else
         {
-            /// Parentheses, commas and other punctuation carry no option value.
+            /// Parentheses and commas carry no option value. The parentheses have to balance.
             if (pos->type == TokenType::OpeningRoundBracket)
                 ++paren_depth;
             else if (pos->type == TokenType::ClosingRoundBracket && paren_depth > 0)
                 --paren_depth;
+            else if (pos->type != TokenType::Comma)
+                malformed = true;
             ++pos;
         }
+        is_first_token = false;
     }
+
+    if (paren_depth != 0)
+        malformed = true;
 
     /// `setCopyFormat` (or the `FORMAT` handling above) may already have recorded an unsupported format; keep
     /// that reason rather than overwriting it with a data-formatting-option reason - either is enough to
@@ -572,6 +588,8 @@ bool ParserCopyQuery::parseOptions(Pos & pos, boost::intrusive_ptr<ASTCopyQuery>
     }
     else if (!unknown_option.empty())
         node->unsupported_option = fmt::format("the \"{}\" option", unknown_option);
+    else if (malformed)
+        node->unsupported_option = "malformed option syntax";
     else if (pending == PendingOption::Delimiter || pending == PendingOption::Null || pending == PendingOption::Quote
         || pending_value_is_escape_string || stray_literal)
         node->unsupported_option = "an option with a missing or unexpected value";
