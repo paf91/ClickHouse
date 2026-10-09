@@ -265,19 +265,12 @@ constexpr int rseq_syscall_number = 293;
 /// `clone3` the same way in their own policies, for the same reason.
 constexpr int clone3_syscall_number = 435;
 
-/// Added in Linux 6.13, which is newer than the kernel headers in the build sysroot.
-#ifndef __NR_setxattrat
-#define __NR_setxattrat 463
-#endif
-#ifndef __NR_getxattrat
-#define __NR_getxattrat 464
-#endif
-#ifndef __NR_listxattrat
-#define __NR_listxattrat 465
-#endif
-#ifndef __NR_removexattrat
-#define __NR_removexattrat 466
-#endif
+/// Added in Linux 6.13, which is newer than the kernel headers in the build sysroot. The numbers
+/// are the same on every architecture.
+constexpr int setxattrat_syscall_number = 463;
+constexpr int getxattrat_syscall_number = 464;
+constexpr int listxattrat_syscall_number = 465;
+constexpr int removexattrat_syscall_number = 466;
 
 /// The calls that are refused with `ENOSYS` rather than with the configured action, whatever the
 /// mode: the answer a kernel without them would give, which is the one their callers know how to
@@ -293,7 +286,7 @@ constexpr int refused_with_enosys[] = {
     __NR_getxattr, __NR_lgetxattr, __NR_fgetxattr,
     __NR_listxattr, __NR_llistxattr, __NR_flistxattr,
     __NR_removexattr, __NR_lremovexattr, __NR_fremovexattr,
-    __NR_setxattrat, __NR_getxattrat, __NR_listxattrat, __NR_removexattrat,
+    setxattrat_syscall_number, getxattrat_syscall_number, listxattrat_syscall_number, removexattrat_syscall_number,
 };
 
 constexpr int allowed_syscalls[] =
