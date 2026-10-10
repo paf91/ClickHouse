@@ -2057,10 +2057,13 @@ PostgreSQLHandler::CopyQueryResult PostgreSQLHandler::processCopyQuery(const Str
             /// is sent whole, so the stream is at a message boundary; libpq surfaces the error to the
             /// client once the run loop follows with `ReadyForQuery` (closing the connection instead
             /// would make libpq report a lost connection and swallow the error text).
+            /// An external cancel (`CancelRequest` / `KILL QUERY`) is reported as `57014 query_canceled`,
+            /// which clients distinguish from an ordinary execution error.
             tryLogCurrentException(log, "Failed to stream the result of COPY TO STDOUT");
+            const bool cancelled = getCurrentExceptionCode() == ErrorCodes::QUERY_WAS_CANCELLED;
             message_transport->send(
                 PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse(
-                    PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse::ERROR, "2F000",
+                    PostgreSQLProtocol::Messaging::ErrorOrNoticeResponse::ERROR, cancelled ? "57014" : "2F000",
                     "Query execution failed.\n" + getCurrentExceptionMessage(/* with_stacktrace = */ false)),
                 true);
             return CopyQueryResult::ErrorHandled;
@@ -3299,7 +3302,8 @@ void PostgreSQLHandler::prepareSystemTables(ContextMutablePtr query_context, con
     /// statement that may actually read the emulated catalog (every catalog object's name starts with
     /// `pg_`). Unquoted PostgreSQL identifiers are case-insensitive, so the check is too - `PG_CLASS` reads
     /// the same catalog. Plain data statements skip the `system.tables` scan. The check may fire spuriously
-    /// (e.g. a user table named `pg_something`), which merely costs a refresh.
+    /// (e.g. a user table named `pg_something`), which merely costs a refresh: the refresh does not inherit
+    /// the scan limits of the session, so it cannot make such a statement fail.
     if (Poco::toLower(query).contains("pg_"))
         refreshCatalogOids(query_context);
 }
@@ -3325,6 +3329,16 @@ void PostgreSQLHandler::refreshCatalogOids(ContextMutablePtr query_context)
     internal_context->setCurrentQueryId(fmt::format("postgres-oids:{:d}:{:d}", connection_id, generateRandomUInt32()));
     internal_context->setSessionContext(query_context->getSessionContext());
     internal_context->setSetting("readonly", Field(0u));
+    /// The refresh runs before an arbitrary statement of the client, which may not read the catalog at all
+    /// (the trigger in `prepareSystemTables` is a substring check), so the scan and complexity limits of the
+    /// session must not make that statement fail. The scan is bounded by the objects the user can see.
+    internal_context->resetSettingsToDefaultValue({
+        "max_rows_to_read", "max_bytes_to_read", "max_rows_to_read_leaf", "max_bytes_to_read_leaf",
+        "max_execution_time", "max_execution_time_leaf", "max_estimated_execution_time",
+        "min_execution_speed", "min_execution_speed_bytes",
+        "max_result_rows", "max_result_bytes", "max_rows_in_set", "max_bytes_in_set",
+        "max_rows_to_transfer", "max_bytes_to_transfer", "max_rows_to_sort", "max_bytes_to_sort",
+        "max_rows_to_group_by", "max_columns_to_read", "max_temporary_columns", "max_temporary_non_const_columns"});
 
     String out_str;
     auto out_buffer = WriteBufferFromString(out_str);

@@ -2471,12 +2471,14 @@ private:
         }
         UInt32 scale = static_cast<UInt32>(point_from_right);
 
+        /// Check the precision before padding: the zeros added below are display-only, so a value like
+        /// `0.0...01` with 76 fractional digits still fits `Decimal256(76)`.
+        if (scale > DECIMAL256_MAX_PRECISION || digits.size() > DECIMAL256_MAX_PRECISION)
+            return std::nullopt;
+
         /// Add a leading zero when the scale covers all digits.
         if (scale >= digits.size())
             digits.insert(0, String(scale - digits.size() + 1, '0'));
-
-        if (scale > DECIMAL256_MAX_PRECISION || digits.size() > DECIMAL256_MAX_PRECISION)
-            return std::nullopt;
 
         String plain;
         if (negative)
