@@ -135,13 +135,13 @@ Which dialect will be used to parse query.
 
 Supported values:
 - `clickhouse` (default) — standard ClickHouse SQL.
-- `kusto` — Kusto Query Language. Requires the experimental setting `allow_experimental_kusto_dialect`.
+- `kusto` — Kusto Query Language. Requires the beta setting `allow_experimental_kusto_dialect`.
 - `prql` — PRQL. Requires the experimental setting `allow_experimental_prql_dialect`.
 - `polyglot` — transpiles SQL from other dialects (MySQL, PostgreSQL, etc.) into ClickHouse SQL. Requires the experimental setting `allow_experimental_polyglot_dialect`.
 - `promql` — PromQL (Prometheus Query Language) evaluated over a TimeSeries table, configured by the `promql_database`, `promql_table`, and `promql_evaluation_time` settings.
 - `clickhouse_json` — instead of SQL text, the query is interpreted as a JSON AST (the output of `parseQueryToJSON`). The `SET` query is still recognized in plain form so that the dialect can be switched back. Requires the experimental setting `enable_json_ast_dialect`.
 - `logsql` — LogsQL, the log query language of VictoriaLogs, translated into `SELECT` queries over the logs table configured by the `logsql_database` and `logsql_table` settings. Requires the experimental setting `enable_logsql_dialect`.
-- `trino` — Trino SQL: translates Trino syntax (`ARRAY[...]`, `TRY_CAST`, `UNNEST`, ...) and maps Trino function names to their ClickHouse equivalents. Requires the experimental setting `enable_trino_dialect`.
+- `trino` — Trino SQL: translates Trino syntax (`ARRAY[...]`, `TRY_CAST`, `UNNEST`, ...) and maps Trino function names to their ClickHouse equivalents. Requires the beta setting `enable_trino_dialect`.
 )", 0)\
     DECLARE(UInt64, min_compress_block_size, 65536, R"(
 For [MergeTree](/reference/engines/table-engines/mergetree-family/mergetree) tables. In order to reduce latency when processing queries, a block is compressed when writing the next mark if its size is at least `min_compress_block_size`. By default, 65,536.
@@ -10563,7 +10563,8 @@ Allow experimental database engine DataLakeCatalog with catalog_type = 'hms'
         {"25.5", false, false, "Allow experimental database engine DataLakeCatalog with catalog_type = 'hive'"}) \
     DECLARE(Bool, allow_experimental_kusto_dialect, false, R"(
 Enable the Kusto Query Language (KQL) dialect - an alternative to SQL.
-)", EXPERIMENTAL, \
+)", BETA, \
+        {"26.10", false, false, "The Kusto Query Language (KQL) dialect was moved to Beta."}, \
         {"25.1", true, false, "A new setting"}) \
     DECLARE(Bool, allow_experimental_prql_dialect, false, R"(
 Enable PRQL - an alternative to SQL.
@@ -10648,7 +10649,8 @@ dialect can be switched back.
 The dialect also aligns the query semantics with Trino: `join_use_nulls` is turned
 on, `use_variant_as_common_type` is turned off, and the query analyzer is turned on.
 An explicit `SETTINGS` clause in the query still takes precedence.
-)", EXPERIMENTAL, \
+)", BETA, \
+        {"26.10", false, false, "The `trino` dialect was moved to Beta."}, \
         {"26.9", false, false, "New setting to enable the `trino` value of the `dialect` setting, which translates Trino SQL syntax and maps Trino function names to ClickHouse equivalents."}) \
     DECLARE(Bool, enable_adaptive_memory_spill_scheduler, false, R"(
 Trigger processor to spill data into external storage adaptively. Hash joins that can spill are supported at present, both
