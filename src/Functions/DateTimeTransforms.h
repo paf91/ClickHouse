@@ -2279,6 +2279,54 @@ public:
     using FactorTransform = ZeroTransform;
 };
 
+/// Within one UTC offset of one local day the clock only moves forward, and the hour 23 that DateLUT repeats moves
+/// `t - since_start`, so equal factors mean the clock did not go back between two points.
+template <Int64 period>
+struct ToClockPeriodStartFactorImpl
+{
+    static constexpr auto name = "toClockPeriodStartFactor";
+
+    static std::tuple<Int64, Int64, Int64> execute(Int64 t, const DateLUTImpl & time_zone)
+    {
+        /// Outside the lookup table no two points share a factor.
+        if (!DateLUTImpl::isTimeInLUTRange(t))
+            return {std::numeric_limits<Int64>::min(), t, 0};
+        const auto time = time_zone.toDateTimeComponents(t).time;
+        const Int64 since_start = static_cast<Int64>(time.hour * 3600 + time.minute * 60 + time.second) % period;
+        return {time_zone.toDayNum(t).toUnderType(), time_zone.timezoneOffset(t), t - since_start};
+    }
+    static std::tuple<Int64, Int64, Int64> execute(UInt32 t, const DateLUTImpl & time_zone)
+    {
+        return execute(static_cast<Int64>(t), time_zone);
+    }
+    /// `toHour` and `toMinute` reject `Date` and `Date32`.
+    static std::tuple<Int64, Int64, Int64> execute(Int32 d, const DateLUTImpl &) { return {d, 0, 0}; }
+    static std::tuple<Int64, Int64, Int64> execute(UInt16 d, const DateLUTImpl &) { return {d, 0, 0}; }
+
+    using FactorTransform = ZeroTransform;
+};
+
+/// `toYYYYMMDDhhmmss` does not restart at midnight, so only a jump of the clock breaks its order.
+struct ToYYYYMMDDhhmmssFactorImpl
+{
+    static constexpr auto name = "toYYYYMMDDhhmmssFactor";
+
+    static std::tuple<Int64, Int64, Int64> execute(Int64 t, const DateLUTImpl & time_zone)
+    {
+        if (time_zone.hasFixedOffset() && DateLUTImpl::isTimeInLUTRange(t))
+            return {};
+        return ToClockPeriodStartFactorImpl<86400>::execute(t, time_zone);
+    }
+    static std::tuple<Int64, Int64, Int64> execute(UInt32 t, const DateLUTImpl & time_zone)
+    {
+        return execute(static_cast<Int64>(t), time_zone);
+    }
+    static std::tuple<Int64, Int64, Int64> execute(Int32, const DateLUTImpl &) { return {}; }
+    static std::tuple<Int64, Int64, Int64> execute(UInt16, const DateLUTImpl &) { return {}; }
+
+    using FactorTransform = ZeroTransform;
+};
+
 struct ToHourImpl
 {
     static constexpr auto name = "toHour";
@@ -2304,7 +2352,7 @@ struct ToHourImpl
     }
     static constexpr bool hasPreimage() { return false; }
 
-    using FactorTransform = ToDateImpl<>;
+    using FactorTransform = ToClockPeriodStartFactorImpl<86400>;
 };
 
 struct TimezoneOffsetImpl
@@ -2363,7 +2411,7 @@ struct ToMinuteImpl
     }
     static constexpr bool hasPreimage() { return false; }
 
-    using FactorTransform = ToStartOfHourImpl;
+    using FactorTransform = ToClockPeriodStartFactorImpl<3600>;
 };
 
 struct ToSecondImpl
@@ -3127,7 +3175,7 @@ struct ToYYYYMMDDhhmmssImpl
     }
     static constexpr bool hasPreimage() { return false; }
 
-    using FactorTransform = ZeroTransform;
+    using FactorTransform = ToYYYYMMDDhhmmssFactorImpl;
 };
 
 struct DateTimeComponentsWithFractionalPart : public DateLUTImpl::DateTimeComponents
