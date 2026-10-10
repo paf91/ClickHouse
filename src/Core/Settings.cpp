@@ -6164,6 +6164,7 @@ Apply TTL for old data, after ALTER MODIFY TTL query
 )", 0) \
     DECLARE(Bool, data_type_default_nullable, false, R"(
 Allows data types without explicit modifiers [NULL or NOT NULL](/reference/statements/create/table#null-or-not-null-modifiers) in column definition will be [Nullable](/reference/data-types/nullable).
+It applies to `CREATE TABLE`, `ALTER TABLE ... ADD COLUMN` and `ALTER TABLE ... MODIFY COLUMN`.
 
 Possible values:
 
