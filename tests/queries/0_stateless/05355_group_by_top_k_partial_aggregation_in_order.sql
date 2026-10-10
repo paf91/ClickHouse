@@ -32,7 +32,7 @@ SELECT
 FROM system.query_log
 WHERE type = 'QueryFinish'
     AND event_date >= yesterday()
-    AND initial_query_id IN
+    AND initial_query_id =
     (
         SELECT query_id FROM system.query_log
         WHERE current_database = currentDatabase()
@@ -40,6 +40,8 @@ WHERE type = 'QueryFinish'
             AND is_initial_query
             AND type = 'QueryFinish'
             AND event_date >= yesterday()
+        ORDER BY event_time_microseconds DESC
+        LIMIT 1
     );
 
 SELECT
@@ -48,7 +50,7 @@ SELECT
 FROM system.query_log
 WHERE type = 'QueryFinish'
     AND event_date >= yesterday()
-    AND initial_query_id IN
+    AND initial_query_id =
     (
         SELECT query_id FROM system.query_log
         WHERE current_database = currentDatabase()
@@ -56,6 +58,8 @@ WHERE type = 'QueryFinish'
             AND is_initial_query
             AND type = 'QueryFinish'
             AND event_date >= yesterday()
+        ORDER BY event_time_microseconds DESC
+        LIMIT 1
     );
 
 DROP TABLE t_top_k_in_order;
