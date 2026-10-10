@@ -182,6 +182,7 @@ namespace ErrorCodes
     extern const int FAULT_INJECTED;
     extern const int INVALID_TRANSACTION;
     extern const int FILE_DOESNT_EXIST;
+    extern const int UNFINISHED;
 }
 
 namespace ActionLocks
@@ -1413,6 +1414,11 @@ void StorageMergeTree::waitForMutation(Int64 version, const String & mutation_id
 
     auto mutation_status = getIncompleteMutationsStatus(version, &mutation_ids, wait_for_another_mutation);
     checkMutationStatus(mutation_status, mutation_ids);
+
+    if (shutdown_called && !mutation_status->is_done)
+        throw Exception(ErrorCodes::UNFINISHED,
+                        "Mutation {} is not finished because the table was shut down. "
+                        "It continues when the table is attached again, unless the table was dropped.", mutation_id);
 
     LOG_INFO(log, "Mutation {} done", mutation_id);
 }
