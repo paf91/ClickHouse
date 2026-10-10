@@ -26,6 +26,9 @@ SELECT CAST([1, -2], 'QBit(Int8, 2)'), CAST([1.5, 2], 'QBit(BFloat16, 2)'), CAST
 SELECT [CAST([1, 2], 'QBit(Float32, 2)')], (CAST([1, 2], 'QBit(Float32, 2)'), 1), map('a', CAST([1, 2], 'QBit(Float32, 2)')),
     CAST([1, 2], 'Nullable(QBit(Float32, 2))'), CAST(NULL, 'Nullable(QBit(Float32, 2))') FROM remote('127.0.0.2', system.one);
 SELECT CAST(CAST([1, 2], 'QBit(Float32, 2)'), 'Variant(QBit(Float32, 2), String)'), CAST(CAST([1, 2], 'QBit(Float32, 2)'), 'Dynamic') FROM remote('127.0.0.2', system.one);
+-- `materialize` makes the other server report the member type of the value it received.
+SELECT variantType(materialize(CAST(CAST([1, 2], 'QBit(Float32, 2)'), 'Variant(QBit(Float32, 2), String)'))), dynamicType(materialize(CAST(CAST([1, 2], 'QBit(Float32, 2)'), 'Dynamic'))),
+    dynamicType(materialize(CAST(CAST([1, 2], 'QBit(Float32, 2)'), 'Dynamic(max_types = 0)'))) FROM remote('127.0.0.2', system.one);
 
 DROP TABLE t_qbit_dist;
 DROP TABLE t_qbit;
