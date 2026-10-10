@@ -183,10 +183,20 @@ $CLICKHOUSE_CLIENT -q "
     -- Initial state has no last-known dep refreshes to compare against, so the cycle won't start by itself; kick it.
     system refresh view current_batch_v;"
 
-# Wait until at least 3 waves have accumulated in batch_log (one append per wave).
-for _ in $(seq 1 120); do
+# Wait until at least 3 waves have accumulated in batch_log (one append per wave). A wave writes a part to
+# each of the three targets, which on object storage under load can take tens of seconds, so poll by wall
+# clock until 20s before the harness kills the test (CLICKHOUSE_TEST_TIMEOUT), leaving time to report.
+while :
+do
     n=$($CLICKHOUSE_CLIENT -q "select count() from batch_log")
     if [ "$n" -ge 3 ]; then break; fi
+    if ((SECONDS >= ${CLICKHOUSE_TEST_TIMEOUT:-600} - 20))
+    then
+        echo "Only $n of 3 waves in batch_log after ${SECONDS}s"
+        timeout -k 2 6 $CLICKHOUSE_CLIENT -q "select * from refreshes format Vertical" \
+            || echo "view_refreshes dump failed or timed out"
+        exit 1
+    fi
     sleep 0.5
 done
 $CLICKHOUSE_CLIENT -q "
