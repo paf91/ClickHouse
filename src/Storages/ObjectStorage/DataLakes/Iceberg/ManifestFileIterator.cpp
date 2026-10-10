@@ -414,7 +414,9 @@ ManifestFileIterator::ManifestFileIterator(
             return;
 
         const auto parsed_entry = manifest_file_deserializer->getParsedManifestFileEntry(row_index);
-        if (parsed_entry->content_type != FileContentType::DATA || parsed_entry->status != ManifestEntryStatus::ADDED
+        /// Every live data file with a null first_row_id inherits one, EXISTING ones included. A DELETED entry
+        /// takes no ids: writers reserve only the added and existing rows of a manifest.
+        if (parsed_entry->content_type != FileContentType::DATA || parsed_entry->status == ManifestEntryStatus::DELETED
             || parsed_entry->parsed_first_row_id.has_value())
             continue;
 
