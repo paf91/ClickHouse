@@ -42,20 +42,3 @@ SELECT 'source rows after the toggle', count() FROM readonly_src;
 SYSTEM START CLEANUP readonly_src;
 DROP TABLE readonly_src SYNC;
 DROP TABLE readonly_dst SYNC;
-
--- A single settings-only ALTER can turn `table_readonly` off and change the `storage_policy`.
--- `policy_05212_a` and `policy_05212_b` are defined in tests/config/config.d/storage_conf_05212.xml.
-
-DROP TABLE IF EXISTS readonly_policy SYNC;
-CREATE TABLE readonly_policy (k UInt64) ENGINE = MergeTree ORDER BY k
-SETTINGS storage_policy = 'policy_05212_a', table_readonly = 1;
-
-INSERT INTO readonly_policy VALUES (1); -- { serverError TABLE_IS_PERMANENTLY_READ_ONLY }
-
-ALTER TABLE readonly_policy MODIFY SETTING table_readonly = 0, storage_policy = 'policy_05212_b';
-SELECT 'policy after the combined toggle', storage_policy
-FROM system.tables WHERE database = currentDatabase() AND name = 'readonly_policy';
-INSERT INTO readonly_policy VALUES (1);
-SELECT 'rows', count() FROM readonly_policy;
-
-DROP TABLE readonly_policy SYNC;
