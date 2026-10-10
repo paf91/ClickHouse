@@ -18,7 +18,7 @@ SELECT id FROM t_qbit_dist WHERE q = CAST([3, 4], 'QBit(Float32, 2)');
 SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q IN (CAST([1, 2], 'QBit(Float32, 2)'), CAST([3, 4], 'QBit(Float32, 2)')) ORDER BY id;
 SELECT id FROM remote('127.0.0.2', currentDatabase(), t_qbit) WHERE q = CAST([1, 2], 'QBit(Float32, 2)') OR q = CAST([3, 4], 'QBit(Float32, 2)') OR q = CAST([5, 6], 'QBit(Float32, 2)') ORDER BY id;
 SELECT id FROM (SELECT id, q FROM remote('127.0.0.2', currentDatabase(), t_qbit)) WHERE q = CAST([3, 4], 'QBit(Float32, 2)');
-SELECT id FROM t_qbit WHERE q = CAST([1, 2], 'QBit(Float32, 2)') SETTINGS enable_parallel_replicas = 1, automatic_parallel_replicas_mode = 0, max_parallel_replicas = 3,
+SELECT id FROM t_qbit WHERE q = CAST([1, 2], 'QBit(Float32, 2)') SETTINGS enable_parallel_replicas = 2, automatic_parallel_replicas_mode = 0, max_parallel_replicas = 3,
     cluster_for_parallel_replicas = 'test_cluster_one_shard_three_replicas_localhost', parallel_replicas_for_non_replicated_merge_tree = 1, parallel_replicas_local_plan = 0;
 
 -- optimize_const_name_size = -1 keeps the larger constants in the query text instead of sending them as scalars.
