@@ -415,6 +415,11 @@ constexpr std::string_view initiator_only_setting_names[] = {
     "database",
 };
 
+std::span<const std::string_view> getInitiatorOnlySettingNames()
+{
+    return initiator_only_setting_names;
+}
+
 bool isInitiatorOnlySettingName(std::string_view name)
 {
     for (std::string_view candidate : initiator_only_setting_names)

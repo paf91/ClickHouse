@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -107,6 +108,10 @@ void resolveAutomaticUncompressedCacheOptOutInQuery(IAST & query, const Settings
 /// optimized `parallel_distributed_insert_select` paths in `StorageDistributed` send a formatted query
 /// string, not just a settings packet).
 bool isInitiatorOnlySettingName(std::string_view name);
+
+/// Exactly the settings reset by `stripInitiatorOnlySettings`, for the carriers that strip them from a
+/// `SettingsChanges` themselves (e.g. `DDLLogEntry::setSettingsIfRequired`).
+std::span<const std::string_view> getInitiatorOnlySettingNames();
 
 /// Strip the initiator-only settings (the `isInitiatorOnlySettingName` names, in both the `name = value`
 /// and `name = DEFAULT` forms) from a query's own query-level `SETTINGS` clauses, so they are not carried
