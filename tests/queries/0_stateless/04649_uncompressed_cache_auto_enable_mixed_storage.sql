@@ -17,6 +17,10 @@ SET optimize_read_in_order = 1;
 SET parallel_replicas_local_plan = 1;
 SET query_plan_optimize_lazy_materialization = 1;
 SET query_plan_max_limit_for_lazy_materialization = 10000;
+-- The query condition cache remembers which granules the `ORDER BY score LIMIT` filter dropped, so a
+-- repeated run would skip the remote partition entirely and read local parts only - a read that is
+-- eligible for the automatic mode. Keep every run scanning both partitions.
+SET use_query_condition_cache = 0;
 
 DROP TABLE IF EXISTS uc_cache_mixed_storage;
 
